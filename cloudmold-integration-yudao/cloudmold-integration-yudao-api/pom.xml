@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>cn.iocoder.cloud</groupId>
+        <artifactId>cloudmold-integration-yudao</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>cloudmold-integration-yudao-api</artifactId>
+    <name>${project.artifactId}</name>
+    <description>CloudMold Yudao projection planning contract</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>yudao-common</artifactId>
+        </dependency>
+    </dependencies>
+</project>

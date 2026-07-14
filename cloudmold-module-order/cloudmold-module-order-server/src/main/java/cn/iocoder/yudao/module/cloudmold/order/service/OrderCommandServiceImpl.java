@@ -1,0 +1,479 @@
+package cn.iocoder.yudao.module.cloudmold.order.service;
+
+import cn.hutool.crypto.digest.DigestUtil;
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
+import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
+import cn.iocoder.yudao.module.cloudmold.catalog.api.CatalogSkuValidationApi;
+import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventCommand;
+import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
+import cn.iocoder.yudao.module.cloudmold.fulfillment.api.FulfillmentCancellationQueryApi;
+import cn.iocoder.yudao.module.cloudmold.fulfillment.api.FulfillmentShipmentValidationApi;
+import cn.iocoder.yudao.module.cloudmold.listing.api.*;
+import cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryReservationQueryApi;
+import cn.iocoder.yudao.module.cloudmold.order.api.*;
+import cn.iocoder.yudao.module.cloudmold.order.dal.dataobject.*;
+import cn.iocoder.yudao.module.cloudmold.order.dal.mysql.*;
+import cn.iocoder.yudao.module.cloudmold.payment.api.PaymentCancellationQueryApi;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.*;
+
+@Service
+@RequiredArgsConstructor
+public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
+
+    static final int OPERATION_SUCCEEDED = 10;
+    private static final String CURRENCY_CNY = "CNY";
+
+    private final OrderOperationMapper operationMapper;
+    private final OrderHeaderMapper orderMapper;
+    private final OrderItemMapper itemMapper;
+    private final OrderStatusHistoryMapper historyMapper;
+    private final CatalogSkuValidationApi catalogSkuValidationApi;
+    private final FulfillmentShipmentValidationApi fulfillmentValidationApi;
+    private final ListingQueryApi listingQueryApi;
+    private final InventoryReservationQueryApi inventoryReservationQueryApi;
+    private final PaymentCancellationQueryApi paymentCancellationQueryApi;
+    private final FulfillmentCancellationQueryApi fulfillmentCancellationQueryApi;
+    private final OutboxAppender outboxAppender;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OrderCommandResult execute(OrderCommand command) {
+        validateCommon(command);
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        if (isPlace(command.getOperation())) {
+            validatePlace(command);
+            command.getItems().forEach(item -> catalogSkuValidationApi.requireActiveSku(item.getCanonicalSkuId()));
+        } else {
+            requireText(command.getOrderId(), "orderId", 36);
+            require(command.getExpectedVersion() != null && command.getExpectedVersion() > 0,
+                    "expectedVersion must be positive");
+        }
+
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        String requestHash = fingerprint(tenantId, command);
+        String attemptToken = UUID.randomUUID().toString();
+        operationMapper.insertOrResolve(tenantId, command.getIdempotencyKey(), command.getOperation().name(),
+                requestHash, attemptToken, now);
+        Long operationId = operationMapper.selectLastInsertId();
+        require(operationId != null && operationId > 0, "failed to resolve order operation");
+        OrderOperationDO operation = operationMapper.selectForUpdate(operationId, tenantId);
+        require(operation != null, "order operation disappeared");
+        if (!attemptToken.equals(operation.getAttemptToken())) {
+            require(Objects.equals(operation.getRequestHash(), requestHash),
+                    "idempotency key conflicts with different order payload");
+            require(operation.getStatus() == OPERATION_SUCCEEDED && operation.getResultJson() != null,
+                    "existing order operation is not complete");
+            OrderCommandResult replay = JsonUtils.parseObject(operation.getResultJson(), OrderCommandResult.class);
+            replay.setDuplicate(true);
+            return replay;
+        }
+
+        OrderCommandResult result = isPlace(command.getOperation())
+                ? place(tenantId, operationId, command, now)
+                : transition(tenantId, operationId, command, now);
+        require(operationMapper.markSucceeded(operationId, tenantId, result.getOrderId(),
+                JsonUtils.toJsonString(result), now) == 1, "order operation completion conflict");
+        return result;
+    }
+
+    @Override
+    public OrderPaymentView requirePayableOrder(String orderId, Long amountMinor, String currencyCode) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        requireText(orderId, "orderId", 36);
+        require(amountMinor != null && amountMinor >= 0, "amountMinor must be nonnegative");
+        require(CURRENCY_CNY.equals(currencyCode), "first slice supports CNY only");
+        OrderHeaderDO order = orderMapper.selectForUpdate(tenantId, orderId);
+        require(order != null, "canonical order does not exist");
+        require("INVENTORY_RESERVED".equals(order.getStatus()), "canonical order is not payable");
+        require(Objects.equals(order.getPayableAmountMinor(), amountMinor), "payment amount does not match order");
+        require(Objects.equals(order.getCurrencyCode(), currencyCode), "payment currency does not match order");
+        return OrderPaymentView.builder().orderId(order.getOrderId()).orderNo(order.getOrderNo())
+                .buyerId(order.getBuyerId()).status(order.getStatus()).payableAmountMinor(order.getPayableAmountMinor())
+                .currencyCode(order.getCurrencyCode()).aggregateVersion(order.getVersion()).build();
+    }
+
+    @Override
+    public OrderFulfillmentView requireFulfillableOrder(String orderId) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        requireText(orderId, "orderId", 36);
+        OrderHeaderDO order = orderMapper.selectForUpdate(tenantId, orderId);
+        require(order != null, "canonical order does not exist");
+        require("PAYMENT_CONFIRMED".equals(order.getStatus()), "canonical order is not fulfillable");
+        List<OrderItemDO> items = itemMapper.selectByOrder(tenantId, orderId);
+        require(!items.isEmpty(), "canonical order has no items");
+        require(items.stream().allMatch(item -> item.getReservationId() != null),
+                "canonical order items are not fully reserved");
+        return OrderFulfillmentView.builder().orderId(order.getOrderId()).orderNo(order.getOrderNo())
+                .status(order.getStatus()).aggregateVersion(order.getVersion())
+                .items(items.stream().map(OrderCommandServiceImpl::lineView).toList()).build();
+    }
+
+    private OrderCommandResult place(Long tenantId, Long operationId, OrderCommand command, LocalDateTime now) {
+        String orderId = UUID.randomUUID().toString();
+        String orderNo = "CMO" + orderId.replace("-", "").substring(0, 20).toUpperCase(Locale.ROOT);
+        List<OrderItemDO> items = new ArrayList<>();
+        long productAmount = 0;
+        BigDecimal totalQuantity = BigDecimal.ZERO;
+        for (OrderLineCommand line : command.getItems()) {
+            PublishedListingOfferView offer = null;
+            if (command.getOperation() == OrderOperation.PLACE_FROM_LISTING) {
+                offer = listingQueryApi.requirePublishedOffer(PublishedOfferValidationCommand.builder()
+                        .listingId(line.getListingId()).listingOfferId(line.getListingOfferId())
+                        .canonicalSkuId(line.getCanonicalSkuId()).expectedPriceMinor(line.getUnitPriceMinor())
+                        .currencyCode(command.getCurrencyCode()).build());
+            }
+            long lineAmount = Math.multiplyExact(line.getUnitPriceMinor(), line.getQuantity().longValueExact());
+            productAmount = Math.addExact(productAmount, lineAmount);
+            totalQuantity = totalQuantity.add(line.getQuantity());
+            items.add(new OrderItemDO().setOrderItemId(UUID.randomUUID().toString()).setTenantId(tenantId)
+                    .setOrderId(orderId).setCanonicalSkuId(line.getCanonicalSkuId()).setQuantity(line.getQuantity())
+                    .setUnitPriceMinor(line.getUnitPriceMinor()).setLineAmountMinor(lineAmount)
+                    .setListingId(offer == null ? null : offer.getListingId())
+                    .setListingOfferId(offer == null ? null : offer.getListingOfferId())
+                    .setListingRevision(offer == null ? null : offer.getListingRevision())
+                    .setListingVersion(offer == null ? null : offer.getListingVersion())
+                    .setChannelCode(offer == null ? null : offer.getChannelCode())
+                    .setShopId(offer == null ? null : offer.getShopId())
+                    .setCreatedAt(now).setUpdatedAt(now));
+        }
+        long payable = Math.subtractExact(Math.addExact(productAmount, command.getShippingAmountMinor()),
+                command.getDiscountAmountMinor());
+        require(payable >= 0, "payable amount cannot be negative");
+        OrderHeaderDO order = new OrderHeaderDO().setOrderId(orderId).setTenantId(tenantId).setOrderNo(orderNo)
+                .setRunId(command.getRunId()).setBuyerId(command.getBuyerId()).setStatus("PLACED")
+                .setTotalQuantity(totalQuantity).setProductAmountMinor(productAmount)
+                .setShippingAmountMinor(command.getShippingAmountMinor())
+                .setDiscountAmountMinor(command.getDiscountAmountMinor()).setPayableAmountMinor(payable)
+                .setCurrencyCode(command.getCurrencyCode()).setVersion(1L).setCreatedAt(now).setUpdatedAt(now);
+        orderMapper.insert(order);
+        items.forEach(itemMapper::insert);
+        appendHistory(tenantId, operationId, orderId, 1L, null, "PLACED", command, now);
+        appendEvent(tenantId, order, items, null, "PLACED", command, 1L);
+        return result(operationId, order, items, null, false);
+    }
+
+    private OrderCommandResult transition(Long tenantId, Long operationId, OrderCommand command, LocalDateTime now) {
+        OrderHeaderDO order = orderMapper.selectForUpdate(tenantId, command.getOrderId());
+        require(order != null, "canonical order does not exist");
+        require(Objects.equals(order.getVersion(), command.getExpectedVersion()), "canonical order version conflict");
+        Transition transition = transition(command.getOperation(), order.getStatus());
+        List<OrderItemDO> items = itemMapper.selectByOrder(tenantId, order.getOrderId());
+        require(!items.isEmpty(), "canonical order has no items");
+        if (command.getOperation() == OrderOperation.CONFIRM_INVENTORY) {
+            bindReservations(tenantId, order.getOrderId(), items, command.getReservationReferences(), now);
+            items = itemMapper.selectByOrder(tenantId, order.getOrderId());
+        }
+        if (command.getOperation() == OrderOperation.CONFIRM_PAYMENT) {
+            requireText(command.getPaymentId(), "paymentId", 36);
+        }
+        if (command.getOperation() == OrderOperation.CONFIRM_REFUND) {
+            requireText(command.getRefundId(), "refundId", 128);
+        }
+        boolean listingBackedOrder = items.stream().anyMatch(item -> item.getListingId() != null);
+        if (command.getOperation() == OrderOperation.SHIP) {
+            require(!listingBackedOrder, "listing-backed order requires SHIP_WITH_FULFILLMENT");
+        }
+        if (command.getOperation() == OrderOperation.SHIP_WITH_FULFILLMENT) {
+            require(listingBackedOrder, "SHIP_WITH_FULFILLMENT requires listing-backed order");
+            requireText(command.getFulfillmentId(), "fulfillmentId", 36);
+            requireText(command.getShipmentId(), "shipmentId", 36);
+            fulfillmentValidationApi.requireShipped(order.getOrderId(), command.getFulfillmentId(),
+                    command.getShipmentId());
+        }
+        if (command.getOperation() == OrderOperation.COMPLETE) {
+            require(!listingBackedOrder, "listing-backed order requires COMPLETE_AFTER_DELIVERY");
+        }
+        if (command.getOperation() == OrderOperation.COMPLETE_AFTER_DELIVERY) {
+            require(listingBackedOrder, "COMPLETE_AFTER_DELIVERY requires listing-backed order");
+            requireText(order.getFulfillmentId(), "fulfillmentId", 36);
+            fulfillmentValidationApi.requireDelivered(order.getOrderId(), order.getFulfillmentId());
+        }
+        if (command.getOperation() == OrderOperation.CANCEL) {
+            requireText(command.getReason(), "reason", 256);
+            if ("INVENTORY_RESERVED".equals(order.getStatus())) {
+                for (OrderItemDO item : items) {
+                    requireText(item.getReservationId(), "reservationId", 36);
+                    inventoryReservationQueryApi.requireReleased(item.getReservationId(), "TRADE_ORDER",
+                            order.getOrderId(), item.getOrderItemId());
+                }
+            }
+        }
+        String preCancellationStatus = null;
+        if (command.getOperation() == OrderOperation.REQUEST_CANCELLATION) {
+            requireText(command.getCancellationSagaId(), "cancellationSagaId", 36);
+            requireText(command.getReason(), "reason", 256);
+            String mode = Objects.requireNonNullElse(command.getCancellationMode(), "UNPAID_RESERVED");
+            if ("PAID_UNSHIPPED".equals(mode)) {
+                require("PAYMENT_CONFIRMED".equals(order.getStatus()),
+                        "paid cancellation requires PAYMENT_CONFIRMED");
+                requireText(order.getPaymentId(), "paymentId", 36);
+                requireText(command.getFulfillmentId(), "fulfillmentId", 36);
+                require(order.getShipmentId() == null, "shipped order cannot enter paid cancellation");
+                paymentCancellationQueryApi.requireCaptured(order.getOrderId(), order.getPaymentId());
+            } else {
+                require("UNPAID_RESERVED".equals(mode), "unsupported cancellationMode");
+                require(order.getPaymentId() == null && order.getFulfillmentId() == null
+                                && order.getShipmentId() == null,
+                        "pre-payment cancellation Saga cannot own a paid or fulfilled order");
+            }
+            preCancellationStatus = order.getStatus();
+        }
+        if (command.getOperation() == OrderOperation.FINALIZE_CANCELLATION) {
+            requireText(command.getCancellationSagaId(), "cancellationSagaId", 36);
+            require(Objects.equals(order.getCancellationSagaId(), command.getCancellationSagaId()),
+                    "cancellation Saga does not own canonical order fence");
+            String mode = Objects.requireNonNullElse(command.getCancellationMode(), "UNPAID_RESERVED");
+            require(("UNPAID_RESERVED".equals(mode) && "INVENTORY_RESERVED".equals(order.getPreCancellationStatus()))
+                            || ("PAID_UNSHIPPED".equals(mode)
+                            && "PAYMENT_CONFIRMED".equals(order.getPreCancellationStatus())),
+                    "canonical order cancellation source status is invalid");
+            if ("PAID_UNSHIPPED".equals(mode)) {
+                requireText(order.getPaymentId(), "paymentId", 36);
+                requireText(order.getFulfillmentId(), "fulfillmentId", 36);
+                requireText(command.getRefundId(), "refundId", 128);
+                paymentCancellationQueryApi.requireRefunded(order.getOrderId(), order.getPaymentId());
+                fulfillmentCancellationQueryApi.requireCancelled(order.getOrderId(), order.getFulfillmentId(),
+                        command.getCancellationSagaId());
+            } else {
+                require(order.getPaymentId() == null && order.getFulfillmentId() == null
+                                && order.getShipmentId() == null,
+                        "pre-payment cancellation cannot finalize a paid or fulfilled order");
+            }
+            if ("INVENTORY_RESERVED".equals(order.getPreCancellationStatus())) {
+                for (OrderItemDO item : items) {
+                    requireText(item.getReservationId(), "reservationId", 36);
+                    inventoryReservationQueryApi.requireReleased(item.getReservationId(), "TRADE_ORDER",
+                            order.getOrderId(), item.getOrderItemId());
+                }
+            }
+        }
+        require(orderMapper.transition(tenantId, order.getOrderId(), order.getVersion(), transition.expectedStatus(),
+                transition.nextStatus(), command.getPaymentId(), command.getFulfillmentId(), command.getShipmentId(),
+                command.getRefundId(), command.getCancellationSagaId(), preCancellationStatus, now) == 1,
+                "canonical order transition conflict");
+        String previous = order.getStatus();
+        order.setStatus(transition.nextStatus()).setVersion(order.getVersion() + 1).setUpdatedAt(now);
+        if (command.getPaymentId() != null) order.setPaymentId(command.getPaymentId());
+        if (command.getFulfillmentId() != null) order.setFulfillmentId(command.getFulfillmentId());
+        if (command.getShipmentId() != null) order.setShipmentId(command.getShipmentId());
+        if (command.getRefundId() != null) order.setRefundId(command.getRefundId());
+        if (command.getCancellationSagaId() != null) order.setCancellationSagaId(command.getCancellationSagaId());
+        if (preCancellationStatus != null) order.setPreCancellationStatus(preCancellationStatus);
+        appendHistory(tenantId, operationId, order.getOrderId(), order.getVersion(), previous,
+                transition.nextStatus(), command, now);
+        appendEvent(tenantId, order, items, previous, transition.nextStatus(), command, order.getVersion());
+        return result(operationId, order, items, previous, false);
+    }
+
+    private void bindReservations(Long tenantId, String orderId, List<OrderItemDO> items,
+                                  List<OrderLineReference> references, LocalDateTime now) {
+        require(references != null && references.size() == items.size(),
+                "every order item requires one reservation reference");
+        Map<String, String> byItem = new HashMap<>();
+        for (OrderLineReference reference : references) {
+            require(reference != null, "reservation reference is required");
+            requireText(reference.getOrderItemId(), "orderItemId", 36);
+            requireText(reference.getReservationId(), "reservationId", 36);
+            require(byItem.put(reference.getOrderItemId(), reference.getReservationId()) == null,
+                    "duplicate order item reservation reference");
+        }
+        for (OrderItemDO item : items) {
+            String reservationId = byItem.get(item.getOrderItemId());
+            require(reservationId != null, "reservation reference does not match order items");
+            require(itemMapper.bindReservation(tenantId, orderId, item.getOrderItemId(), reservationId, now) == 1,
+                    "order item reservation binding conflict");
+        }
+    }
+
+    private void appendHistory(Long tenantId, Long operationId, String orderId, Long version,
+                               String previous, String current, OrderCommand command, LocalDateTime now) {
+        historyMapper.insert(new OrderStatusHistoryDO().setTenantId(tenantId).setOrderId(orderId)
+                .setAggregateVersion(version).setPreviousStatus(previous).setCurrentStatus(current)
+                .setOperationId(operationId).setReason(command.getReason())
+                .setOccurredAt(LocalDateTime.ofInstant(command.getOccurredAt(), ZoneOffset.UTC)).setCreatedAt(now));
+    }
+
+    private void appendEvent(Long tenantId, OrderHeaderDO order, List<OrderItemDO> items,
+                             String previous, String current, OrderCommand command, Long version) {
+        List<Map<String, Object>> eventItems = items.stream().map(item -> {
+            Map<String, Object> value = new LinkedHashMap<>();
+            value.put("order_item_id", item.getOrderItemId());
+            value.put("canonical_sku_id", item.getCanonicalSkuId());
+            value.put("quantity", item.getQuantity().toPlainString());
+            value.put("unit_price_minor", item.getUnitPriceMinor());
+            value.put("line_amount_minor", item.getLineAmountMinor());
+            value.put("reservation_id", item.getReservationId());
+            value.put("listing_id", item.getListingId());
+            value.put("listing_offer_id", item.getListingOfferId());
+            value.put("listing_revision", item.getListingRevision());
+            value.put("listing_version", item.getListingVersion());
+            value.put("channel_code", item.getChannelCode());
+            value.put("shop_id", item.getShopId());
+            return value;
+        }).toList();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("run_id", command.getRunId());
+        payload.put("order_id", order.getOrderId());
+        payload.put("order_no", order.getOrderNo());
+        payload.put("buyer_id", order.getBuyerId());
+        payload.put("previous_status", previous);
+        payload.put("current_status", current);
+        payload.put("product_amount_minor", order.getProductAmountMinor());
+        payload.put("shipping_amount_minor", order.getShippingAmountMinor());
+        payload.put("discount_amount_minor", order.getDiscountAmountMinor());
+        payload.put("payable_amount_minor", order.getPayableAmountMinor());
+        payload.put("currency_code", order.getCurrencyCode());
+        payload.put("payment_id", order.getPaymentId());
+        payload.put("fulfillment_id", order.getFulfillmentId());
+        payload.put("shipment_id", order.getShipmentId());
+        payload.put("refund_id", order.getRefundId());
+        payload.put("cancellation_saga_id", order.getCancellationSagaId());
+        payload.put("pre_cancellation_status", order.getPreCancellationStatus());
+        payload.put("cancellation_mode", command.getCancellationMode());
+        payload.put("step_ordinal", command.getCancellationStepOrdinal());
+        payload.put("reason", command.getReason());
+        payload.put("items", eventItems);
+        outboxAppender.append(AppendDomainEventCommand.builder().eventType("order.status.changed")
+                .schemaVersion("PAID_UNSHIPPED".equals(command.getCancellationMode()) ? 3
+                        : items.stream().allMatch(item -> item.getListingId() != null) ? 2 : 1)
+                .sourceSystem("cloudmold-order").tenantId(tenantId)
+                .aggregateType("order").aggregateId(order.getOrderId()).aggregateVersion(version)
+                .eventSequence((short) 1).occurredAt(command.getOccurredAt()).correlationId(command.getCorrelationId())
+                .causationId(command.getCausationId()).idempotencyKey(command.getIdempotencyKey())
+                .payload(payload).headers(Map.of("operation", command.getOperation().name()))
+                .destination("lakehouse").build());
+    }
+
+    private static OrderCommandResult result(Long operationId, OrderHeaderDO order, List<OrderItemDO> items,
+                                             String previous, boolean duplicate) {
+        return OrderCommandResult.builder().operationId(operationId).orderId(order.getOrderId())
+                .orderNo(order.getOrderNo()).previousStatus(previous).currentStatus(order.getStatus())
+                .aggregateVersion(order.getVersion()).productAmountMinor(order.getProductAmountMinor())
+                .shippingAmountMinor(order.getShippingAmountMinor()).discountAmountMinor(order.getDiscountAmountMinor())
+                .payableAmountMinor(order.getPayableAmountMinor()).currencyCode(order.getCurrencyCode())
+                .paymentId(order.getPaymentId()).refundId(order.getRefundId())
+                .fulfillmentId(order.getFulfillmentId()).shipmentId(order.getShipmentId())
+                .cancellationSagaId(order.getCancellationSagaId())
+                .preCancellationStatus(order.getPreCancellationStatus())
+                .items(items.stream().map(OrderCommandServiceImpl::lineView).toList()).duplicate(duplicate).build();
+    }
+
+    private static OrderLineView lineView(OrderItemDO item) {
+        return OrderLineView.builder().orderItemId(item.getOrderItemId()).canonicalSkuId(item.getCanonicalSkuId())
+                .quantity(item.getQuantity()).unitPriceMinor(item.getUnitPriceMinor())
+                .lineAmountMinor(item.getLineAmountMinor()).reservationId(item.getReservationId())
+                .listingId(item.getListingId()).listingOfferId(item.getListingOfferId())
+                .listingRevision(item.getListingRevision()).listingVersion(item.getListingVersion())
+                .channelCode(item.getChannelCode()).shopId(item.getShopId()).build();
+    }
+
+    private static Transition transition(OrderOperation operation, String status) {
+        return switch (operation) {
+            case CONFIRM_INVENTORY -> requireTransition(status, "PLACED", "INVENTORY_RESERVED");
+            case CONFIRM_PAYMENT -> requireTransition(status, "INVENTORY_RESERVED", "PAYMENT_CONFIRMED");
+            case SHIP, SHIP_WITH_FULFILLMENT -> requireTransition(status, "PAYMENT_CONFIRMED", "SHIPPED");
+            case COMPLETE, COMPLETE_AFTER_DELIVERY -> requireTransition(status, "SHIPPED", "COMPLETED");
+            case CONFIRM_REFUND -> requireTransition(status, "COMPLETED", "REFUNDED");
+            case RETURN -> requireTransition(status, "REFUNDED", "RETURNED");
+            case CANCEL -> {
+                require("PLACED".equals(status) || "INVENTORY_RESERVED".equals(status),
+                        "CANCEL requires PLACED or INVENTORY_RESERVED");
+                yield new Transition(status, "CANCELLED");
+            }
+            case REQUEST_CANCELLATION -> {
+                require("INVENTORY_RESERVED".equals(status) || "PAYMENT_CONFIRMED".equals(status),
+                        "REQUEST_CANCELLATION requires INVENTORY_RESERVED or PAYMENT_CONFIRMED");
+                yield new Transition(status, "CANCELLATION_PENDING");
+            }
+            case FINALIZE_CANCELLATION -> requireTransition(status, "CANCELLATION_PENDING", "CANCELLED");
+            case PLACE, PLACE_FROM_LISTING -> throw new IllegalArgumentException("PLACE is not a transition");
+        };
+    }
+
+    private static Transition requireTransition(String actual, String expected, String next) {
+        require(expected.equals(actual), next + " requires " + expected);
+        return new Transition(expected, next);
+    }
+
+    private static void validateCommon(OrderCommand command) {
+        require(command != null && command.getOperation() != null, "order operation is required");
+        requireText(command.getIdempotencyKey(), "idempotencyKey", 128);
+        require(command.getIdempotencyKey().length() >= 8, "idempotencyKey is too short");
+        requireText(command.getRunId(), "runId", 64);
+        require(command.getOccurredAt() != null, "occurredAt is required");
+        requireUuid(command.getCorrelationId(), "correlationId");
+        if (command.getCausationId() != null) requireUuid(command.getCausationId(), "causationId");
+    }
+
+    private static void validatePlace(OrderCommand command) {
+        require(command.getOrderId() == null, "PLACE does not accept orderId");
+        requireText(command.getBuyerId(), "buyerId", 128);
+        require(command.getItems() != null && !command.getItems().isEmpty() && command.getItems().size() <= 100,
+                "PLACE requires 1 to 100 items");
+        require(CURRENCY_CNY.equals(command.getCurrencyCode()), "first slice supports CNY only");
+        require(command.getShippingAmountMinor() != null && command.getShippingAmountMinor() >= 0,
+                "shippingAmountMinor must be nonnegative");
+        require(command.getDiscountAmountMinor() != null && command.getDiscountAmountMinor() >= 0,
+                "discountAmountMinor must be nonnegative");
+        Set<String> skuIds = new HashSet<>();
+        for (OrderLineCommand item : command.getItems()) {
+            require(item != null, "order item is required");
+            requireText(item.getCanonicalSkuId(), "canonicalSkuId", 128);
+            require(skuIds.add(item.getCanonicalSkuId()), "duplicate canonical SKU in one order");
+            require(item.getQuantity() != null && item.getQuantity().scale() <= 6
+                    && item.getQuantity().stripTrailingZeros().scale() <= 0 && item.getQuantity().signum() > 0,
+                    "first slice requires positive whole-piece quantity");
+            require(item.getUnitPriceMinor() != null && item.getUnitPriceMinor() >= 0,
+                    "unitPriceMinor must be nonnegative");
+            if (command.getOperation() == OrderOperation.PLACE_FROM_LISTING) {
+                requireText(item.getListingId(), "listingId", 36);
+                requireText(item.getListingOfferId(), "listingOfferId", 36);
+            }
+        }
+    }
+
+    private static boolean isPlace(OrderOperation operation) {
+        return operation == OrderOperation.PLACE || operation == OrderOperation.PLACE_FROM_LISTING;
+    }
+
+    private static String fingerprint(Long tenantId, OrderCommand command) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("tenant_id", tenantId); value.put("operation", command.getOperation());
+        value.put("run_id", command.getRunId()); value.put("order_id", command.getOrderId());
+        value.put("expected_version", command.getExpectedVersion()); value.put("buyer_id", command.getBuyerId());
+        value.put("items", command.getItems()); value.put("shipping", command.getShippingAmountMinor());
+        value.put("discount", command.getDiscountAmountMinor()); value.put("currency", command.getCurrencyCode());
+        value.put("reservations", command.getReservationReferences()); value.put("payment_id", command.getPaymentId());
+        value.put("fulfillment_id", command.getFulfillmentId()); value.put("shipment_id", command.getShipmentId());
+        value.put("refund_id", command.getRefundId()); value.put("reason", command.getReason());
+        value.put("cancellation_saga_id", command.getCancellationSagaId());
+        value.put("cancellation_mode", command.getCancellationMode());
+        value.put("cancellation_step_ordinal", command.getCancellationStepOrdinal());
+        value.put("occurred_at", command.getOccurredAt());
+        return DigestUtil.sha256Hex(JsonUtils.toJsonString(value));
+    }
+
+    private static void requireUuid(String value, String field) {
+        requireText(value, field, 36);
+        try { UUID.fromString(value); } catch (IllegalArgumentException error) {
+            throw new IllegalArgumentException(field + " must be a UUID", error);
+        }
+    }
+
+    private static void requireText(String value, String field, int maxLength) {
+        require(value != null && !value.isBlank() && value.length() <= maxLength, field + " is required");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new IllegalArgumentException(message);
+    }
+
+    private record Transition(String expectedStatus, String nextStatus) {}
+}

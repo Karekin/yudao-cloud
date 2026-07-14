@@ -1,0 +1,22 @@
+package cn.iocoder.yudao.module.cloudmold.payment.api;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class PaymentCancellationView {
+    private String paymentId;
+    private String orderId;
+    private String status;
+    private Long aggregateVersion;
+    private Long capturedAmountMinor;
+    private Long refundedAmountMinor;
+    private String currencyCode;
+    private String providerCode;
+    private Boolean testMode;
+}

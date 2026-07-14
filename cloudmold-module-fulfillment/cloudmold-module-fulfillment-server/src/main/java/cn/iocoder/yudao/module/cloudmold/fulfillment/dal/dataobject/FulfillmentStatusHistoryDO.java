@@ -1,0 +1,24 @@
+package cn.iocoder.yudao.module.cloudmold.fulfillment.dal.dataobject;
+
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Data;
+
+import java.time.LocalDateTime;
+
+@Data
+@TableName("cloudmold_fulfillment_status_history")
+public class FulfillmentStatusHistoryDO {
+    @TableId(type = IdType.AUTO)
+    private Long historyId;
+    private Long tenantId;
+    private String fulfillmentId;
+    private Long aggregateVersion;
+    private String previousStatus;
+    private String currentStatus;
+    private Long operationId;
+    private String reason;
+    private LocalDateTime occurredAt;
+    private LocalDateTime createdAt;
+}

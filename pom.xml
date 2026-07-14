@@ -29,6 +29,16 @@
         <module>yudao-module-wms</module>
         <module>yudao-module-im</module>
         <module>yudao-module-ai</module>
+        <!-- CloudMold red-zone modules: isolated from upstream business modules -->
+        <module>cloudmold-module-data-contract</module>
+        <module>cloudmold-module-catalog</module>
+        <module>cloudmold-module-inventory</module>
+        <module>cloudmold-module-listing</module>
+        <module>cloudmold-module-order</module>
+        <module>cloudmold-module-payment</module>
+        <module>cloudmold-module-fulfillment</module>
+        <module>cloudmold-module-aftersales</module>
+        <module>cloudmold-integration-yudao</module>
     </modules>
 
     <name>${project.artifactId}</name>

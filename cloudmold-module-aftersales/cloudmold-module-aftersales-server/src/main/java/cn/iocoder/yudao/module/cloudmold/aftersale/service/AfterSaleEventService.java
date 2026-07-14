@@ -1,0 +1,169 @@
+package cn.iocoder.yudao.module.cloudmold.aftersale.service;
+
+import cn.iocoder.yudao.module.cloudmold.aftersale.dal.dataobject.*;
+import cn.iocoder.yudao.module.cloudmold.aftersale.dal.mysql.*;
+import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventCommand;
+import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.time.*;
+import java.util.*;
+
+@Service
+@RequiredArgsConstructor
+public class AfterSaleEventService {
+    private final AfterSaleHistoryMapper historyMapper;
+    private final AfterSaleRefundHistoryMapper refundHistoryMapper;
+    private final AfterSaleResolutionSagaHistoryMapper sagaHistoryMapper;
+    private final OutboxAppender outboxAppender;
+
+    public void appendCase(Long operationId, AfterSaleCaseDO sale, AfterSaleItemDO item,
+                           String previous, Instant occurredAt, LocalDateTime now) {
+        historyMapper.insert(new AfterSaleHistoryDO().setTenantId(sale.getTenantId())
+                .setAfterSaleId(sale.getAfterSaleId()).setAggregateVersion(sale.getVersion())
+                .setPreviousStatus(previous).setCurrentStatus(sale.getStatus()).setOperationId(operationId)
+                .setOccurredAt(LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC)).setCreatedAt(now));
+        Map<String, Object> payload = casePayload(sale, item);
+        payload.put("previous_status", previous);
+        payload.put("current_status", sale.getStatus());
+        outboxAppender.append(AppendDomainEventCommand.builder().eventType("after_sale.status.changed")
+                .schemaVersion(1).sourceSystem("cloudmold-aftersales").tenantId(sale.getTenantId())
+                .aggregateType("after_sale").aggregateId(sale.getAfterSaleId())
+                .aggregateVersion(sale.getVersion()).eventSequence((short) 1).occurredAt(occurredAt)
+                .correlationId(sale.getCorrelationId()).causationId(sale.getCausationId())
+                .idempotencyKey("after-sale:" + sale.getAfterSaleId() + ":event:" + sale.getVersion())
+                .payload(payload).headers(Map.of("status", sale.getStatus())).destination("lakehouse").build());
+    }
+
+    public void appendRefund(AfterSaleCaseDO sale, AfterSaleItemDO item, String previous, String current,
+                             long version, Long transactionId, Instant occurredAt, LocalDateTime now) {
+        refundHistoryMapper.insert(new AfterSaleRefundHistoryDO().setTenantId(sale.getTenantId())
+                .setAfterSaleId(sale.getAfterSaleId()).setAggregateVersion(version)
+                .setPreviousStatus(previous).setCurrentStatus(current).setAmountMinor(sale.getApprovedAmountMinor())
+                .setCurrencyCode(sale.getCurrencyCode()).setPaymentRefundTransactionId(transactionId)
+                .setOccurredAt(LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC)).setCreatedAt(now));
+        Map<String, Object> payload = casePayload(sale, item);
+        payload.put("previous_status", previous);
+        payload.put("current_status", current);
+        payload.put("payment_refund_transaction_id", transactionId);
+        payload.put("refund_id", sale.getAfterSaleId());
+        payload.put("refunded_amount_minor", "SUCCEEDED".equals(current) ? sale.getApprovedAmountMinor() : 0L);
+        payload.put("provider_code", "INTERNAL_TEST");
+        payload.put("resolution_saga_id", sale.getResolutionSagaId());
+        payload.put("step_ordinal", "SUCCEEDED".equals(current) ? 2 : 0);
+        payload.put("reason", sale.getReason());
+        outboxAppender.append(AppendDomainEventCommand.builder().eventType("after_sale.refund.status.changed")
+                .schemaVersion(1).sourceSystem("cloudmold-aftersales").tenantId(sale.getTenantId())
+                .aggregateType("after_sale_refund").aggregateId(sale.getAfterSaleId())
+                .aggregateVersion(version).eventSequence((short) 1).occurredAt(occurredAt)
+                .correlationId(sale.getCorrelationId()).causationId(sale.getCausationId())
+                .idempotencyKey("after-sale-refund:" + sale.getAfterSaleId() + ":event:" + version)
+                .payload(payload).headers(Map.of("status", current)).destination("lakehouse").build());
+    }
+
+    public void appendSaga(AfterSaleResolutionSagaDO saga, String previous, LocalDateTime now) {
+        sagaHistoryMapper.insert(new AfterSaleResolutionSagaHistoryDO().setTenantId(saga.getTenantId())
+                .setSagaId(saga.getSagaId()).setAggregateVersion(saga.getVersion())
+                .setPreviousStatus(previous).setCurrentStatus(saga.getStatus()).setActiveStep(saga.getActiveStep())
+                .setAttemptCount(saga.getAttemptCount()).setErrorCode(saga.getLastErrorCode())
+                .setErrorMessage(saga.getLastErrorMessage()).setNextRetryAt(saga.getNextRetryAt())
+                .setOccurredAt(now).setCreatedAt(now));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("run_id", saga.getRunId());
+        payload.put("saga_id", saga.getSagaId());
+        payload.put("after_sale_id", saga.getAfterSaleId());
+        payload.put("after_sale_item_id", saga.getAfterSaleItemId());
+        payload.put("order_id", saga.getOrderId());
+        payload.put("order_item_id", saga.getOrderItemId());
+        payload.put("payment_id", saga.getPaymentId());
+        payload.put("return_fulfillment_id", saga.getReturnFulfillmentId());
+        payload.put("return_shipment_id", saga.getReturnShipmentId());
+        payload.put("inspection_id", saga.getInspectionId());
+        payload.put("canonical_sku_id", saga.getCanonicalSkuId());
+        payload.put("quantity", saga.getQuantity().toPlainString());
+        payload.put("accepted_quantity", saga.getQuantity().toPlainString());
+        payload.put("returned_quantity", saga.getInventoryLedgerTransactionId() == null
+                ? "0" : saga.getQuantity().toPlainString());
+        payload.put("uom_code", saga.getUomCode());
+        payload.put("approved_amount_minor", saga.getApprovedAmountMinor());
+        payload.put("refunded_amount_minor", saga.getPaymentRefundTransactionId() == null
+                ? 0L : saga.getApprovedAmountMinor());
+        payload.put("currency_code", saga.getCurrencyCode());
+        payload.put("previous_status", previous);
+        payload.put("current_status", saga.getStatus());
+        payload.put("active_step", saga.getActiveStep());
+        payload.put("step_ordinal", stepOrdinal(saga));
+        payload.put("attempt", saga.getAttemptCount());
+        payload.put("inventory_operation_id", saga.getInventoryOperationId());
+        payload.put("inventory_ledger_transaction_id", saga.getInventoryLedgerTransactionId());
+        payload.put("payment_refund_transaction_id", saga.getPaymentRefundTransactionId());
+        payload.put("order_refund_operation_id", saga.getOrderRefundOperationId());
+        payload.put("order_return_operation_id", saga.getOrderReturnOperationId());
+        payload.put("order_version", saga.getOrderVersion());
+        Map<String, Object> checkpoints = new LinkedHashMap<>();
+        checkpoints.put("inventory_returned", saga.getInventoryLedgerTransactionId() != null);
+        checkpoints.put("payment_refunded", saga.getPaymentRefundTransactionId() != null);
+        checkpoints.put("order_refund_confirmed", saga.getOrderRefundOperationId() != null);
+        checkpoints.put("order_returned", saga.getOrderReturnOperationId() != null);
+        payload.put("checkpoints", checkpoints);
+        payload.put("error_code", saga.getLastErrorCode());
+        payload.put("error_message", saga.getLastErrorMessage());
+        payload.put("next_retry_at", instant(saga.getNextRetryAt()));
+        outboxAppender.append(AppendDomainEventCommand.builder()
+                .eventType("after_sale.resolution_saga.status.changed").schemaVersion(1)
+                .sourceSystem("cloudmold-aftersales").tenantId(saga.getTenantId())
+                .aggregateType("after_sale_resolution_saga").aggregateId(saga.getSagaId())
+                .aggregateVersion(saga.getVersion()).eventSequence((short) 1)
+                .occurredAt(now.toInstant(ZoneOffset.UTC)).correlationId(saga.getCorrelationId())
+                .causationId(saga.getCausationId())
+                .idempotencyKey("after-sale-saga:" + saga.getSagaId() + ":event:" + saga.getVersion())
+                .payload(payload).headers(Map.of("active_step", saga.getActiveStep()))
+                .destination("lakehouse").build());
+    }
+
+    private static Map<String, Object> casePayload(AfterSaleCaseDO sale, AfterSaleItemDO item) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("run_id", sale.getRunId());
+        payload.put("after_sale_id", sale.getAfterSaleId());
+        payload.put("after_sale_no", sale.getAfterSaleNo());
+        payload.put("after_sale_item_id", item.getAfterSaleItemId());
+        payload.put("after_sale_type", sale.getAfterSaleType());
+        payload.put("reason_code", sale.getReasonCode());
+        payload.put("responsibility", sale.getResponsibility());
+        payload.put("reason", sale.getReason());
+        payload.put("order_id", sale.getOrderId());
+        payload.put("order_item_id", item.getOrderItemId());
+        payload.put("canonical_sku_id", item.getCanonicalSkuId());
+        payload.put("quantity", item.getQuantity().toPlainString());
+        payload.put("listing_id", item.getListingId());
+        payload.put("listing_offer_id", item.getListingOfferId());
+        payload.put("buyer_id", sale.getBuyerId());
+        payload.put("approved_amount_minor", sale.getApprovedAmountMinor());
+        payload.put("currency_code", sale.getCurrencyCode());
+        payload.put("payment_id", sale.getPaymentId());
+        payload.put("forward_fulfillment_id", sale.getForwardFulfillmentId());
+        payload.put("forward_shipment_id", sale.getForwardShipmentId());
+        payload.put("return_fulfillment_id", sale.getReturnFulfillmentId());
+        payload.put("return_shipment_id", sale.getReturnShipmentId());
+        payload.put("inspection_id", sale.getInspectionId());
+        payload.put("resolution_saga_id", sale.getResolutionSagaId());
+        payload.put("refund_status", sale.getRefundStatus());
+        return payload;
+    }
+
+    private static int stepOrdinal(AfterSaleResolutionSagaDO saga) {
+        if ("COMPLETED".equals(saga.getStatus())) return 5;
+        return switch (saga.getActiveStep()) {
+            case "RETURN_INVENTORY" -> 1;
+            case "REFUND_PAYMENT" -> 2;
+            case "CONFIRM_ORDER_REFUND" -> 3;
+            case "RETURN_ORDER" -> 4;
+            default -> 0;
+        };
+    }
+
+    private static String instant(LocalDateTime value) {
+        return value == null ? null : value.toInstant(ZoneOffset.UTC).toString();
+    }
+}

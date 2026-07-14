@@ -21,6 +21,52 @@
     <url>https://github.com/YunaiV/ruoyi-vue-pro</url>
 
     <dependencies>
+        <!-- CloudMold 领域事件契约与事务 Outbox（红区模块） -->
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-data-contract-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-catalog-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-inventory-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-listing-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-order-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-payment-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-fulfillment-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-aftersales-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-integration-yudao-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
             <artifactId>yudao-module-system-server</artifactId>
@@ -33,11 +79,11 @@
         </dependency>
 
         <!-- 会员中心。默认注释，保证编译速度 -->
-<!--        <dependency>-->
-<!--            <groupId>cn.iocoder.cloud</groupId>-->
-<!--            <artifactId>yudao-module-member-server</artifactId>-->
-<!--            <version>${revision}</version>-->
-<!--        </dependency>-->
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>yudao-module-member-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
 
         <!-- 数据报表。默认注释，保证编译速度 -->
 <!--        <dependency>-->
@@ -52,11 +98,11 @@
 <!--            <version>${revision}</version>-->
 <!--        </dependency>-->
         <!-- 支付服务。默认注释，保证编译速度 -->
-<!--        <dependency>-->
-<!--            <groupId>cn.iocoder.cloud</groupId>-->
-<!--            <artifactId>yudao-module-pay-server</artifactId>-->
-<!--            <version>${revision}</version>-->
-<!--        </dependency>-->
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>yudao-module-pay-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
 
         <!-- 微信公众号模块。默认注释，保证编译速度 -->
 <!--        <dependency>-->
@@ -66,26 +112,26 @@
 <!--        </dependency>-->
 
         <!-- 商城相关模块。默认注释，保证编译速度-->
-<!--        <dependency>-->
-<!--            <groupId>cn.iocoder.cloud</groupId>-->
-<!--            <artifactId>yudao-module-product-server</artifactId>-->
-<!--            <version>${revision}</version>-->
-<!--        </dependency>-->
-<!--        <dependency>-->
-<!--            <groupId>cn.iocoder.cloud</groupId>-->
-<!--            <artifactId>yudao-module-promotion-server</artifactId>-->
-<!--            <version>${revision}</version>-->
-<!--        </dependency>-->
-<!--        <dependency>-->
-<!--            <groupId>cn.iocoder.cloud</groupId>-->
-<!--            <artifactId>yudao-module-trade-server</artifactId>-->
-<!--            <version>${revision}</version>-->
-<!--        </dependency>-->
-<!--        <dependency>-->
-<!--            <groupId>cn.iocoder.cloud</groupId>-->
-<!--            <artifactId>yudao-module-statistics-server</artifactId>-->
-<!--            <version>${revision}</version>-->
-<!--        </dependency>-->
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>yudao-module-product-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>yudao-module-promotion-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>yudao-module-trade-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>yudao-module-statistics-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
 
         <!-- CRM 相关模块。默认注释，保证编译速度 -->
 <!--        <dependency>-->
@@ -95,11 +141,11 @@
 <!--        </dependency>-->
 
         <!-- ERP 相关模块。默认注释，保证编译速度 -->
-<!--        <dependency>-->
-<!--            <groupId>cn.iocoder.cloud</groupId>-->
-<!--            <artifactId>yudao-module-erp-server</artifactId>-->
-<!--            <version>${revision}</version>-->
-<!--        </dependency>-->
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>yudao-module-erp-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
 
         <!-- AI 大模型相关模块。默认注释，保证编译速度 -->
 <!--        <dependency>-->
@@ -123,11 +169,11 @@
 <!--        </dependency>-->
 
         <!-- WMS 仓库管理模块 -->
-<!--        <dependency>-->
-<!--            <groupId>cn.iocoder.cloud</groupId>-->
-<!--            <artifactId>yudao-module-wms-server</artifactId>-->
-<!--            <version>${revision}</version>-->
-<!--        </dependency>-->
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>yudao-module-wms-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
 
         <!-- IM 即时通讯模块 -->
 <!--        <dependency>-->
