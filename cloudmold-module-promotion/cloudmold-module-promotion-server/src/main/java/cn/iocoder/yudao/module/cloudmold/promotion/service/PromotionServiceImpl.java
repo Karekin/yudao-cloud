@@ -1,0 +1,622 @@
+package cn.iocoder.yudao.module.cloudmold.promotion.service;
+
+import cn.hutool.crypto.digest.DigestUtil;
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
+import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
+import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventCommand;
+import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
+import cn.iocoder.yudao.module.cloudmold.promotion.api.*;
+import cn.iocoder.yudao.module.cloudmold.promotion.dal.dataobject.*;
+import cn.iocoder.yudao.module.cloudmold.promotion.dal.mysql.*;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.*;
+import java.util.*;
+
+@Service
+@RequiredArgsConstructor
+public class PromotionServiceImpl implements PromotionCommandApi, PromotionQueryApi {
+
+    static final int OPERATION_SUCCEEDED = 10;
+
+    private final PromotionOperationMapper operationMapper;
+    private final PromotionCampaignMapper campaignMapper;
+    private final CouponTemplateMapper templateMapper;
+    private final CouponEntitlementMapper entitlementMapper;
+    private final CouponEntitlementLedgerMapper ledgerMapper;
+    private final AdvertisingPlacementMapper placementMapper;
+    private final AdvertisingInteractionMapper interactionMapper;
+    private final OutboxAppender outboxAppender;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public PromotionCommandResult execute(PromotionCommand command) {
+        validateEnvelope(command);
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        String hash = fingerprint(tenantId, command);
+        String attemptToken = UUID.randomUUID().toString();
+        operationMapper.insertOrResolve(tenantId, command.getIdempotencyKey(), command.getOperation().name(),
+                hash, attemptToken, now);
+        Long operationId = operationMapper.selectLastInsertId();
+        require(operationId != null && operationId > 0, "failed to resolve promotion operation");
+        PromotionOperationDO operation = operationMapper.selectForUpdate(operationId, tenantId);
+        require(operation != null, "promotion operation disappeared");
+        if (!attemptToken.equals(operation.getAttemptToken())) {
+            require(Objects.equals(hash, operation.getRequestHash()),
+                    "idempotency key conflicts with different payload");
+            require(operation.getStatus() == OPERATION_SUCCEEDED && operation.getResultJson() != null,
+                    "existing promotion operation is not complete");
+            PromotionCommandResult replay = JsonUtils.parseObject(operation.getResultJson(), PromotionCommandResult.class);
+            replay.setDuplicate(true);
+            return replay;
+        }
+
+        Outcome outcome = switch (command.getOperation()) {
+            case CREATE_CAMPAIGN -> createCampaign(tenantId, command);
+            case ACTIVATE_CAMPAIGN, PAUSE_CAMPAIGN, COMPLETE_CAMPAIGN, CANCEL_CAMPAIGN ->
+                    changeCampaign(tenantId, command, now);
+            case CREATE_COUPON_TEMPLATE -> createTemplate(tenantId, command);
+            case ACTIVATE_COUPON_TEMPLATE, SUSPEND_COUPON_TEMPLATE, RETIRE_COUPON_TEMPLATE ->
+                    changeTemplate(tenantId, command, now);
+            case ISSUE_COUPON_ENTITLEMENT -> issueEntitlement(tenantId, operationId, command);
+            case COLLECT_COUPON_ENTITLEMENT, RESERVE_COUPON_ENTITLEMENT, REDEEM_COUPON_ENTITLEMENT,
+                 RETURN_COUPON_ENTITLEMENT, EXPIRE_COUPON_ENTITLEMENT, VOID_COUPON_ENTITLEMENT ->
+                    changeEntitlement(tenantId, operationId, command, now);
+            case CREATE_ADVERTISING_PLACEMENT -> createPlacement(tenantId, command);
+            case ACTIVATE_ADVERTISING_PLACEMENT, PAUSE_ADVERTISING_PLACEMENT, RETIRE_ADVERTISING_PLACEMENT ->
+                    changePlacement(tenantId, command, now);
+            case RECORD_IMPRESSION, RECORD_CLICK, RECORD_ATTRIBUTION -> recordInteraction(tenantId, command);
+        };
+        appendEvent(tenantId, command, outcome);
+        PromotionCommandResult result = outcome.result();
+        result.setOperationId(operationId);
+        require(operationMapper.markSucceeded(operationId, tenantId, outcome.aggregateType(), outcome.aggregateId(),
+                JsonUtils.toJsonString(result), now) == 1, "promotion operation completion conflict");
+        return result;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PromotionAggregateView get(String aggregateType, String aggregateId) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        requireText(aggregateId, "aggregateId", 64);
+        return switch (normalized(aggregateType)) {
+            case "PROMOTION_CAMPAIGN" -> campaignView(requireNonNull(
+                    campaignMapper.selectOneById(tenantId, aggregateId), "campaign not found"));
+            case "PROMOTION_COUPON_TEMPLATE" -> templateView(requireNonNull(
+                    templateMapper.selectOneById(tenantId, aggregateId), "coupon template not found"));
+            case "PROMOTION_COUPON_ENTITLEMENT" -> entitlementView(requireNonNull(
+                    entitlementMapper.selectOneById(tenantId, aggregateId), "coupon entitlement not found"));
+            case "PROMOTION_ADVERTISING_PLACEMENT" -> placementView(requireNonNull(
+                    placementMapper.selectOneById(tenantId, aggregateId), "advertising placement not found"));
+            case "PROMOTION_ADVERTISING_INTERACTION" -> interactionView(requireNonNull(
+                    interactionMapper.selectById(tenantId, aggregateId), "advertising interaction not found"));
+            default -> throw new IllegalArgumentException("unsupported aggregateType");
+        };
+    }
+
+    private Outcome createCampaign(Long tenantId, PromotionCommand command) {
+        PromotionCommand.CampaignDefinition input = requireNonNull(command.getCampaign(), "campaign is required");
+        requireText(input.getCampaignCode(), "campaignCode", 64);
+        requireText(input.getName(), "campaign name", 128);
+        String kind = normalized(input.getCampaignKind());
+        require(Set.of("ACTIVITY", "COUPON", "ADVERTISING", "GENERAL").contains(kind), "invalid campaignKind");
+        requireInterval(input.getStartsAt(), input.getEndsAt(), "campaign");
+        require(campaignMapper.selectByCode(tenantId, input.getCampaignCode()) == null,
+                "campaignCode already exists");
+        String id = valueOrUuid(input.getCampaignId());
+        LocalDateTime now = at(command.getOccurredAt());
+        PromotionCampaignDO row = new PromotionCampaignDO().setCampaignId(id).setTenantId(tenantId)
+                .setCampaignCode(input.getCampaignCode()).setCampaignKind(kind).setName(input.getName())
+                .setStatus("DRAFT").setStartsAt(at(input.getStartsAt())).setEndsAt(at(input.getEndsAt()))
+                .setVersion(1L).setCreatedAt(now).setUpdatedAt(now);
+        campaignMapper.insert(row);
+        Map<String, Object> payload = campaignPayload(row, null, "DRAFT", command.getOperation());
+        return outcome("promotion.campaign.state_changed", "promotion_campaign", id, 1L, "DRAFT", payload);
+    }
+
+    private Outcome changeCampaign(Long tenantId, PromotionCommand command, LocalDateTime now) {
+        PromotionCommand.CampaignDefinition input = requireNonNull(command.getCampaign(), "campaign is required");
+        requireText(input.getCampaignId(), "campaignId", 64);
+        PromotionCampaignDO row = requireNonNull(campaignMapper.selectForUpdate(tenantId, input.getCampaignId()),
+                "campaign not found");
+        requireVersion(row.getVersion(), input.getExpectedVersion());
+        String next = campaignTransition(row.getStatus(), command.getOperation());
+        require(campaignMapper.updateStatusCas(tenantId, row.getCampaignId(), row.getVersion(), next, now) == 1,
+                "campaign version conflict");
+        return outcome("promotion.campaign.state_changed", "promotion_campaign", row.getCampaignId(),
+                row.getVersion() + 1, next, campaignPayload(row, row.getStatus(), next, command.getOperation()));
+    }
+
+    private Outcome createTemplate(Long tenantId, PromotionCommand command) {
+        PromotionCommand.CouponTemplateDefinition input = requireNonNull(command.getCouponTemplate(),
+                "couponTemplate is required");
+        validateTemplate(input);
+        require(templateMapper.selectByCode(tenantId, input.getTemplateCode()) == null,
+                "templateCode already exists");
+        if (input.getCampaignId() != null) requireCampaign(tenantId, input.getCampaignId());
+        String id = valueOrUuid(input.getTemplateId());
+        LocalDateTime now = at(command.getOccurredAt());
+        CouponTemplateDO row = new CouponTemplateDO().setTemplateId(id).setTenantId(tenantId)
+                .setTemplateCode(input.getTemplateCode()).setCampaignId(input.getCampaignId()).setTitle(input.getTitle())
+                .setBenefitType(normalized(input.getBenefitType())).setFaceAmountMinor(input.getFaceAmountMinor())
+                .setThresholdMinor(input.getThresholdMinor()).setDiscountBasisPoints(input.getDiscountBasisPoints())
+                .setCapAmountMinor(input.getCapAmountMinor()).setCurrencyCode(currency(input.getCurrencyCode()))
+                .setFunderType(normalized(input.getFunderType())).setMerchantId(input.getMerchantId())
+                .setStatus("DRAFT").setValidFrom(at(input.getValidFrom())).setValidTo(at(input.getValidTo()))
+                .setVersion(1L).setCreatedAt(now).setUpdatedAt(now);
+        templateMapper.insert(row);
+        return outcome("promotion.coupon_template.state_changed", "promotion_coupon_template", id, 1L,
+                "DRAFT", templatePayload(row, null, "DRAFT", command.getOperation()));
+    }
+
+    private Outcome changeTemplate(Long tenantId, PromotionCommand command, LocalDateTime now) {
+        PromotionCommand.CouponTemplateDefinition input = requireNonNull(command.getCouponTemplate(),
+                "couponTemplate is required");
+        requireText(input.getTemplateId(), "templateId", 64);
+        CouponTemplateDO row = requireNonNull(templateMapper.selectForUpdate(tenantId, input.getTemplateId()),
+                "coupon template not found");
+        requireVersion(row.getVersion(), input.getExpectedVersion());
+        String next = templateTransition(row.getStatus(), command.getOperation());
+        if ("ACTIVE".equals(next) && row.getCampaignId() != null) {
+            require("ACTIVE".equals(requireCampaign(tenantId, row.getCampaignId()).getStatus()),
+                    "campaign must be ACTIVE");
+        }
+        require(templateMapper.updateStatusCas(tenantId, row.getTemplateId(), row.getVersion(), next, now) == 1,
+                "coupon template version conflict");
+        return outcome("promotion.coupon_template.state_changed", "promotion_coupon_template", row.getTemplateId(),
+                row.getVersion() + 1, next, templatePayload(row, row.getStatus(), next, command.getOperation()));
+    }
+
+    private Outcome issueEntitlement(Long tenantId, Long operationId, PromotionCommand command) {
+        PromotionCommand.CouponEntitlementDefinition input = requireNonNull(command.getCouponEntitlement(),
+                "couponEntitlement is required");
+        requireText(input.getEntitlementCode(), "entitlementCode", 64);
+        requireText(input.getTemplateId(), "templateId", 64);
+        requireText(input.getPrincipalId(), "principalId", 64);
+        require(entitlementMapper.selectByCode(tenantId, input.getEntitlementCode()) == null,
+                "entitlementCode already exists");
+        CouponTemplateDO template = requireNonNull(templateMapper.selectForUpdate(tenantId, input.getTemplateId()),
+                "coupon template not found");
+        require("ACTIVE".equals(template.getStatus()), "coupon template must be ACTIVE");
+        requireWithin(command.getOccurredAt(), template.getValidFrom(), template.getValidTo(), "coupon template");
+        String id = valueOrUuid(input.getEntitlementId());
+        LocalDateTime now = at(command.getOccurredAt());
+        CouponEntitlementDO row = new CouponEntitlementDO().setEntitlementId(id).setTenantId(tenantId)
+                .setEntitlementCode(input.getEntitlementCode()).setTemplateId(template.getTemplateId())
+                .setCampaignId(template.getCampaignId()).setPrincipalId(input.getPrincipalId())
+                .setFaceAmountMinor(template.getFaceAmountMinor()).setThresholdMinor(template.getThresholdMinor())
+                .setCurrencyCode(template.getCurrencyCode()).setStatus("ISSUED").setVersion(1L)
+                .setCreatedAt(now).setUpdatedAt(now);
+        entitlementMapper.insert(row);
+        String ledgerId = appendLedger(tenantId, operationId, command, row, null, "ISSUED", input.getReason());
+        return outcome("promotion.coupon_entitlement.state_changed", "promotion_coupon_entitlement", id, 1L,
+                "ISSUED", entitlementPayload(row, null, "ISSUED", command.getOperation(), ledgerId, input.getReason()));
+    }
+
+    private Outcome changeEntitlement(Long tenantId, Long operationId, PromotionCommand command, LocalDateTime now) {
+        PromotionCommand.CouponEntitlementDefinition input = requireNonNull(command.getCouponEntitlement(),
+                "couponEntitlement is required");
+        requireText(input.getEntitlementId(), "entitlementId", 64);
+        CouponEntitlementDO row = requireNonNull(entitlementMapper.selectForUpdate(tenantId, input.getEntitlementId()),
+                "coupon entitlement not found");
+        requireVersion(row.getVersion(), input.getExpectedVersion());
+        String next = entitlementTransition(row, input, command.getOperation());
+        String orderRef = input.getOrderRef() != null ? input.getOrderRef() : row.getOrderRef();
+        require(entitlementMapper.updateStatusCas(tenantId, row.getEntitlementId(), row.getVersion(), next,
+                orderRef, now) == 1, "coupon entitlement version conflict");
+        row.setOrderRef(orderRef);
+        String ledgerId = appendLedger(tenantId, operationId, command, row, row.getStatus(), next, input.getReason());
+        return outcome("promotion.coupon_entitlement.state_changed", "promotion_coupon_entitlement",
+                row.getEntitlementId(), row.getVersion() + 1, next,
+                entitlementPayload(row, row.getStatus(), next, command.getOperation(), ledgerId, input.getReason()));
+    }
+
+    private Outcome createPlacement(Long tenantId, PromotionCommand command) {
+        PromotionCommand.AdvertisingPlacementDefinition input = requireNonNull(command.getAdvertisingPlacement(),
+                "advertisingPlacement is required");
+        requireText(input.getPlacementCode(), "placementCode", 64);
+        requireText(input.getCampaignId(), "campaignId", 64);
+        requireText(input.getName(), "placement name", 128);
+        requireText(input.getChannelCode(), "channelCode", 32);
+        requireText(input.getPageCode(), "pageCode", 64);
+        requireText(input.getSlotCode(), "slotCode", 64);
+        requireText(input.getCreativeRef(), "creativeRef", 128);
+        requireInterval(input.getValidFrom(), input.getValidTo(), "advertising placement");
+        requireCampaign(tenantId, input.getCampaignId());
+        require(placementMapper.selectByCode(tenantId, input.getPlacementCode()) == null,
+                "placementCode already exists");
+        String id = valueOrUuid(input.getPlacementId());
+        LocalDateTime now = at(command.getOccurredAt());
+        AdvertisingPlacementDO row = new AdvertisingPlacementDO().setPlacementId(id).setTenantId(tenantId)
+                .setPlacementCode(input.getPlacementCode()).setCampaignId(input.getCampaignId()).setName(input.getName())
+                .setChannelCode(input.getChannelCode()).setPageCode(input.getPageCode()).setSlotCode(input.getSlotCode())
+                .setCreativeRef(input.getCreativeRef()).setStatus("DRAFT").setValidFrom(at(input.getValidFrom()))
+                .setValidTo(at(input.getValidTo())).setVersion(1L).setCreatedAt(now).setUpdatedAt(now);
+        placementMapper.insert(row);
+        return outcome("promotion.advertising_placement.state_changed", "promotion_advertising_placement",
+                id, 1L, "DRAFT", placementPayload(row, null, "DRAFT", command.getOperation()));
+    }
+
+    private Outcome changePlacement(Long tenantId, PromotionCommand command, LocalDateTime now) {
+        PromotionCommand.AdvertisingPlacementDefinition input = requireNonNull(command.getAdvertisingPlacement(),
+                "advertisingPlacement is required");
+        requireText(input.getPlacementId(), "placementId", 64);
+        AdvertisingPlacementDO row = requireNonNull(placementMapper.selectForUpdate(tenantId, input.getPlacementId()),
+                "advertising placement not found");
+        requireVersion(row.getVersion(), input.getExpectedVersion());
+        String next = placementTransition(row.getStatus(), command.getOperation());
+        if ("ACTIVE".equals(next)) {
+            require("ACTIVE".equals(requireCampaign(tenantId, row.getCampaignId()).getStatus()),
+                    "campaign must be ACTIVE");
+        }
+        require(placementMapper.updateStatusCas(tenantId, row.getPlacementId(), row.getVersion(), next, now) == 1,
+                "advertising placement version conflict");
+        return outcome("promotion.advertising_placement.state_changed", "promotion_advertising_placement",
+                row.getPlacementId(), row.getVersion() + 1, next,
+                placementPayload(row, row.getStatus(), next, command.getOperation()));
+    }
+
+    private Outcome recordInteraction(Long tenantId, PromotionCommand command) {
+        PromotionCommand.AdvertisingInteractionDefinition input = requireNonNull(command.getAdvertisingInteraction(),
+                "advertisingInteraction is required");
+        requireText(input.getDeduplicationKey(), "deduplicationKey", 128);
+        requireText(input.getPlacementId(), "placementId", 64);
+        require(interactionMapper.selectByDeduplicationKey(tenantId, input.getDeduplicationKey()) == null,
+                "deduplicationKey already exists");
+        AdvertisingPlacementDO placement = requireNonNull(placementMapper.selectForUpdate(tenantId, input.getPlacementId()),
+                "advertising placement not found");
+        require("ACTIVE".equals(placement.getStatus()), "advertising placement must be ACTIVE");
+        requireWithin(command.getOccurredAt(), placement.getValidFrom(), placement.getValidTo(), "advertising placement");
+        PromotionCampaignDO campaign = requireCampaign(tenantId, placement.getCampaignId());
+        require("ACTIVE".equals(campaign.getStatus()), "campaign must be ACTIVE");
+        requireWithin(command.getOccurredAt(), campaign.getStartsAt(), campaign.getEndsAt(), "campaign");
+        String type = interactionType(command.getOperation());
+        validateLineage(tenantId, type, input);
+        if ("ATTRIBUTION".equals(type)) {
+            require(input.getAttributionAmountMinor() != null && input.getAttributionAmountMinor() >= 0,
+                    "attributionAmountMinor must be non-negative");
+            currency(input.getCurrencyCode());
+            requireText(input.getOrderRef(), "orderRef", 128);
+        } else {
+            require(input.getAttributionAmountMinor() == null && input.getCurrencyCode() == null,
+                    "amount and currency are only valid for attribution");
+        }
+        String id = valueOrUuid(input.getInteractionId());
+        AdvertisingInteractionDO row = new AdvertisingInteractionDO().setInteractionId(id).setTenantId(tenantId)
+                .setDeduplicationKey(input.getDeduplicationKey()).setInteractionType(type)
+                .setPlacementId(placement.getPlacementId()).setCampaignId(placement.getCampaignId())
+                .setPrincipalId(input.getPrincipalId()).setSessionId(input.getSessionId())
+                .setSourceInteractionId(input.getSourceInteractionId()).setOrderRef(input.getOrderRef())
+                .setAttributionAmountMinor(input.getAttributionAmountMinor())
+                .setCurrencyCode(input.getCurrencyCode() == null ? null : currency(input.getCurrencyCode()))
+                .setOccurredAt(at(command.getOccurredAt())).setCreatedAt(at(command.getOccurredAt()));
+        interactionMapper.insert(row);
+        Map<String, Object> payload = interactionPayload(row);
+        return outcome("promotion.advertising_interaction.recorded", "promotion_advertising_interaction",
+                id, 1L, "RECORDED", payload);
+    }
+
+    private void validateLineage(Long tenantId, String type,
+                                 PromotionCommand.AdvertisingInteractionDefinition input) {
+        if ("IMPRESSION".equals(type)) {
+            require(input.getSourceInteractionId() == null, "impression must not have sourceInteractionId");
+            return;
+        }
+        requireText(input.getSourceInteractionId(), "sourceInteractionId", 64);
+        AdvertisingInteractionDO source = requireNonNull(
+                interactionMapper.selectById(tenantId, input.getSourceInteractionId()), "source interaction not found");
+        String requiredType = "CLICK".equals(type) ? "IMPRESSION" : "CLICK";
+        require(requiredType.equals(source.getInteractionType()), type + " must reference a " + requiredType);
+        require(Objects.equals(input.getPlacementId(), source.getPlacementId()), "interaction lineage placement mismatch");
+        if (input.getSessionId() != null && source.getSessionId() != null) {
+            require(Objects.equals(input.getSessionId(), source.getSessionId()), "interaction lineage session mismatch");
+        }
+        if (input.getPrincipalId() != null && source.getPrincipalId() != null) {
+            require(Objects.equals(input.getPrincipalId(), source.getPrincipalId()), "interaction lineage principal mismatch");
+        }
+    }
+
+    private String appendLedger(Long tenantId, Long operationId, PromotionCommand command, CouponEntitlementDO row,
+                                String previous, String current, String reason) {
+        String ledgerId = UUID.randomUUID().toString();
+        ledgerMapper.insert(new CouponEntitlementLedgerDO().setLedgerEntryId(ledgerId).setTenantId(tenantId)
+                .setEntitlementId(row.getEntitlementId()).setEntitlementVersion(row.getVersion() + (previous == null ? 0 : 1))
+                .setOperationId(operationId).setOperationType(command.getOperation().name()).setPreviousStatus(previous)
+                .setCurrentStatus(current).setOrderRef(row.getOrderRef()).setReason(reason)
+                .setFaceAmountMinor(row.getFaceAmountMinor()).setThresholdMinor(row.getThresholdMinor())
+                .setCurrencyCode(row.getCurrencyCode()).setOccurredAt(at(command.getOccurredAt()))
+                .setCreatedAt(at(command.getOccurredAt())));
+        return ledgerId;
+    }
+
+    private void appendEvent(Long tenantId, PromotionCommand command, Outcome outcome) {
+        outboxAppender.append(AppendDomainEventCommand.builder().eventType(outcome.eventType()).schemaVersion(1)
+                .sourceSystem("cloudmold-promotion").tenantId(tenantId).aggregateType(outcome.aggregateType())
+                .aggregateId(outcome.aggregateId()).aggregateVersion(outcome.aggregateVersion()).eventSequence((short) 1)
+                .occurredAt(command.getOccurredAt()).correlationId(command.getCorrelationId())
+                .causationId(command.getCausationId()).idempotencyKey(command.getIdempotencyKey() + ":event")
+                .payload(outcome.payload()).headers(Map.of("operation", command.getOperation().name()))
+                .destination("lakehouse").build());
+    }
+
+    static String fingerprint(Long tenantId, PromotionCommand command) {
+        return DigestUtil.sha256Hex(tenantId + "\u001f" + JsonUtils.toJsonString(command));
+    }
+
+    private static void validateEnvelope(PromotionCommand command) {
+        require(command != null && command.getOperation() != null, "operation is required");
+        requireText(command.getIdempotencyKey(), "idempotencyKey", 128);
+        requireUuid(command.getCorrelationId(), "correlationId");
+        if (command.getCausationId() != null) requireUuid(command.getCausationId(), "causationId");
+        require(command.getOccurredAt() != null, "occurredAt is required");
+    }
+
+    private static void validateTemplate(PromotionCommand.CouponTemplateDefinition input) {
+        requireText(input.getTemplateCode(), "templateCode", 64);
+        requireText(input.getTitle(), "template title", 128);
+        requireInterval(input.getValidFrom(), input.getValidTo(), "coupon template");
+        String benefit = normalized(input.getBenefitType());
+        require(Set.of("FIXED_AMOUNT", "PERCENTAGE").contains(benefit), "invalid benefitType");
+        require(input.getThresholdMinor() != null && input.getThresholdMinor() >= 0,
+                "thresholdMinor must be non-negative");
+        currency(input.getCurrencyCode());
+        if ("FIXED_AMOUNT".equals(benefit)) {
+            require(input.getFaceAmountMinor() != null && input.getFaceAmountMinor() > 0,
+                    "faceAmountMinor must be positive");
+            require(input.getDiscountBasisPoints() == null, "discountBasisPoints is not valid for fixed amount");
+        } else {
+            require(input.getDiscountBasisPoints() != null && input.getDiscountBasisPoints() > 0
+                    && input.getDiscountBasisPoints() < 10000, "discountBasisPoints must be between 1 and 9999");
+            require(input.getFaceAmountMinor() == null, "faceAmountMinor is not valid for percentage benefit");
+            require(input.getCapAmountMinor() == null || input.getCapAmountMinor() > 0,
+                    "capAmountMinor must be positive");
+        }
+        String funder = normalized(input.getFunderType());
+        require(Set.of("PLATFORM", "MERCHANT", "SHARED").contains(funder), "invalid funderType");
+        if (!"PLATFORM".equals(funder)) requireText(input.getMerchantId(), "merchantId", 64);
+    }
+
+    private PromotionCampaignDO requireCampaign(Long tenantId, String id) {
+        return requireNonNull(campaignMapper.selectForUpdate(tenantId, id), "campaign not found");
+    }
+
+    private static String campaignTransition(String status, PromotionOperation op) {
+        return switch (op) {
+            case ACTIVATE_CAMPAIGN -> transition(status, Set.of("DRAFT", "PAUSED"), "ACTIVE", "campaign");
+            case PAUSE_CAMPAIGN -> transition(status, Set.of("ACTIVE"), "PAUSED", "campaign");
+            case COMPLETE_CAMPAIGN -> transition(status, Set.of("ACTIVE", "PAUSED"), "COMPLETED", "campaign");
+            case CANCEL_CAMPAIGN -> transition(status, Set.of("DRAFT", "ACTIVE", "PAUSED"), "CANCELLED", "campaign");
+            default -> throw new IllegalArgumentException("invalid campaign operation");
+        };
+    }
+
+    private static String templateTransition(String status, PromotionOperation op) {
+        return switch (op) {
+            case ACTIVATE_COUPON_TEMPLATE -> transition(status, Set.of("DRAFT", "SUSPENDED"), "ACTIVE", "coupon template");
+            case SUSPEND_COUPON_TEMPLATE -> transition(status, Set.of("ACTIVE"), "SUSPENDED", "coupon template");
+            case RETIRE_COUPON_TEMPLATE -> transition(status, Set.of("DRAFT", "ACTIVE", "SUSPENDED"), "RETIRED", "coupon template");
+            default -> throw new IllegalArgumentException("invalid coupon template operation");
+        };
+    }
+
+    private static String entitlementTransition(CouponEntitlementDO row,
+                                                PromotionCommand.CouponEntitlementDefinition input,
+                                                PromotionOperation op) {
+        return switch (op) {
+            case COLLECT_COUPON_ENTITLEMENT -> transition(row.getStatus(), Set.of("ISSUED"), "AVAILABLE", "coupon entitlement");
+            case RESERVE_COUPON_ENTITLEMENT -> {
+                requireText(input.getOrderRef(), "orderRef", 128);
+                yield transition(row.getStatus(), Set.of("AVAILABLE"), "RESERVED", "coupon entitlement");
+            }
+            case REDEEM_COUPON_ENTITLEMENT -> {
+                requireText(input.getOrderRef(), "orderRef", 128);
+                require(Objects.equals(row.getOrderRef(), input.getOrderRef()), "orderRef does not match reservation");
+                yield transition(row.getStatus(), Set.of("RESERVED"), "USED", "coupon entitlement");
+            }
+            case RETURN_COUPON_ENTITLEMENT -> {
+                if (input.getOrderRef() != null) require(Objects.equals(row.getOrderRef(), input.getOrderRef()),
+                        "orderRef does not match entitlement");
+                requireText(input.getReason(), "reason", 256);
+                yield transition(row.getStatus(), Set.of("RESERVED", "USED"), "RETURNED", "coupon entitlement");
+            }
+            case EXPIRE_COUPON_ENTITLEMENT -> transition(row.getStatus(), Set.of("ISSUED", "AVAILABLE"),
+                    "EXPIRED", "coupon entitlement");
+            case VOID_COUPON_ENTITLEMENT -> {
+                requireText(input.getReason(), "reason", 256);
+                yield transition(row.getStatus(), Set.of("ISSUED", "AVAILABLE"), "VOIDED", "coupon entitlement");
+            }
+            default -> throw new IllegalArgumentException("invalid coupon entitlement operation");
+        };
+    }
+
+    private static String placementTransition(String status, PromotionOperation op) {
+        return switch (op) {
+            case ACTIVATE_ADVERTISING_PLACEMENT -> transition(status, Set.of("DRAFT", "PAUSED"), "ACTIVE", "advertising placement");
+            case PAUSE_ADVERTISING_PLACEMENT -> transition(status, Set.of("ACTIVE"), "PAUSED", "advertising placement");
+            case RETIRE_ADVERTISING_PLACEMENT -> transition(status, Set.of("DRAFT", "ACTIVE", "PAUSED"), "RETIRED", "advertising placement");
+            default -> throw new IllegalArgumentException("invalid advertising placement operation");
+        };
+    }
+
+    private static String transition(String current, Set<String> allowed, String next, String aggregate) {
+        require(allowed.contains(current), "illegal " + aggregate + " transition from " + current + " to " + next);
+        return next;
+    }
+
+    private static String interactionType(PromotionOperation operation) {
+        return switch (operation) {
+            case RECORD_IMPRESSION -> "IMPRESSION";
+            case RECORD_CLICK -> "CLICK";
+            case RECORD_ATTRIBUTION -> "ATTRIBUTION";
+            default -> throw new IllegalArgumentException("invalid advertising interaction operation");
+        };
+    }
+
+    private static Map<String, Object> campaignPayload(PromotionCampaignDO row, String previous, String current,
+                                                       PromotionOperation operation) {
+        Map<String, Object> p = payload("campaign_id", row.getCampaignId());
+        put(p, "campaign_code", row.getCampaignCode()); put(p, "campaign_kind", row.getCampaignKind());
+        put(p, "name", row.getName()); p.put("previous_status", previous); put(p, "current_status", current);
+        put(p, "starts_at", instant(row.getStartsAt())); put(p, "ends_at", instant(row.getEndsAt()));
+        put(p, "operation", operation.name()); return p;
+    }
+
+    private static Map<String, Object> templatePayload(CouponTemplateDO row, String previous, String current,
+                                                       PromotionOperation operation) {
+        Map<String, Object> p = payload("template_id", row.getTemplateId());
+        put(p, "template_code", row.getTemplateCode()); put(p, "campaign_id", row.getCampaignId());
+        put(p, "title", row.getTitle()); put(p, "benefit_type", row.getBenefitType());
+        put(p, "face_amount_minor", row.getFaceAmountMinor()); put(p, "threshold_minor", row.getThresholdMinor());
+        put(p, "discount_basis_points", row.getDiscountBasisPoints()); put(p, "cap_amount_minor", row.getCapAmountMinor());
+        put(p, "currency_code", row.getCurrencyCode()); put(p, "funder_type", row.getFunderType());
+        put(p, "merchant_id", row.getMerchantId()); put(p, "valid_from", instant(row.getValidFrom()));
+        put(p, "valid_to", instant(row.getValidTo())); p.put("previous_status", previous);
+        put(p, "current_status", current); put(p, "operation", operation.name()); return p;
+    }
+
+    private static Map<String, Object> entitlementPayload(CouponEntitlementDO row, String previous, String current,
+                                                          PromotionOperation operation, String ledgerId, String reason) {
+        Map<String, Object> p = payload("entitlement_id", row.getEntitlementId());
+        put(p, "entitlement_code", row.getEntitlementCode()); put(p, "template_id", row.getTemplateId());
+        put(p, "campaign_id", row.getCampaignId()); put(p, "principal_id", row.getPrincipalId());
+        put(p, "order_ref", row.getOrderRef()); put(p, "face_amount_minor", row.getFaceAmountMinor());
+        put(p, "threshold_minor", row.getThresholdMinor()); put(p, "currency_code", row.getCurrencyCode());
+        p.put("previous_status", previous); put(p, "current_status", current); put(p, "operation", operation.name());
+        put(p, "ledger_entry_id", ledgerId); put(p, "reason", reason); return p;
+    }
+
+    private static Map<String, Object> placementPayload(AdvertisingPlacementDO row, String previous, String current,
+                                                        PromotionOperation operation) {
+        Map<String, Object> p = payload("placement_id", row.getPlacementId());
+        put(p, "placement_code", row.getPlacementCode()); put(p, "campaign_id", row.getCampaignId());
+        put(p, "name", row.getName()); put(p, "channel_code", row.getChannelCode());
+        put(p, "page_code", row.getPageCode()); put(p, "slot_code", row.getSlotCode());
+        put(p, "creative_ref", row.getCreativeRef()); put(p, "valid_from", instant(row.getValidFrom()));
+        put(p, "valid_to", instant(row.getValidTo())); p.put("previous_status", previous);
+        put(p, "current_status", current); put(p, "operation", operation.name()); return p;
+    }
+
+    private static Map<String, Object> interactionPayload(AdvertisingInteractionDO row) {
+        Map<String, Object> p = payload("interaction_id", row.getInteractionId());
+        put(p, "interaction_type", row.getInteractionType()); put(p, "deduplication_key", row.getDeduplicationKey());
+        put(p, "placement_id", row.getPlacementId()); put(p, "campaign_id", row.getCampaignId());
+        put(p, "principal_id", row.getPrincipalId()); put(p, "session_id", row.getSessionId());
+        put(p, "source_interaction_id", row.getSourceInteractionId()); put(p, "order_ref", row.getOrderRef());
+        put(p, "attribution_amount_minor", row.getAttributionAmountMinor()); put(p, "currency_code", row.getCurrencyCode());
+        put(p, "occurred_at", instant(row.getOccurredAt())); return p;
+    }
+
+    private static PromotionAggregateView campaignView(PromotionCampaignDO row) {
+        Map<String, Object> a = payload("campaign_kind", row.getCampaignKind()); put(a, "name", row.getName());
+        put(a, "starts_at", instant(row.getStartsAt())); put(a, "ends_at", instant(row.getEndsAt()));
+        return view("promotion_campaign", row.getCampaignId(), row.getCampaignCode(), row.getStatus(), row.getVersion(), a);
+    }
+
+    private static PromotionAggregateView templateView(CouponTemplateDO row) {
+        Map<String, Object> a = templatePayload(row, null, row.getStatus(), PromotionOperation.CREATE_COUPON_TEMPLATE);
+        a.remove("template_id"); a.remove("template_code"); a.remove("previous_status"); a.remove("current_status"); a.remove("operation");
+        return view("promotion_coupon_template", row.getTemplateId(), row.getTemplateCode(), row.getStatus(), row.getVersion(), a);
+    }
+
+    private static PromotionAggregateView entitlementView(CouponEntitlementDO row) {
+        Map<String, Object> a = entitlementPayload(row, null, row.getStatus(), PromotionOperation.ISSUE_COUPON_ENTITLEMENT, null, null);
+        a.remove("entitlement_id"); a.remove("entitlement_code"); a.remove("previous_status"); a.remove("current_status"); a.remove("operation");
+        return view("promotion_coupon_entitlement", row.getEntitlementId(), row.getEntitlementCode(), row.getStatus(), row.getVersion(), a);
+    }
+
+    private static PromotionAggregateView placementView(AdvertisingPlacementDO row) {
+        Map<String, Object> a = placementPayload(row, null, row.getStatus(), PromotionOperation.CREATE_ADVERTISING_PLACEMENT);
+        a.remove("placement_id"); a.remove("placement_code"); a.remove("previous_status"); a.remove("current_status"); a.remove("operation");
+        return view("promotion_advertising_placement", row.getPlacementId(), row.getPlacementCode(), row.getStatus(), row.getVersion(), a);
+    }
+
+    private static PromotionAggregateView interactionView(AdvertisingInteractionDO row) {
+        Map<String, Object> a = interactionPayload(row); a.remove("interaction_id");
+        return view("promotion_advertising_interaction", row.getInteractionId(), row.getDeduplicationKey(), "RECORDED", 1L, a);
+    }
+
+    private static PromotionAggregateView view(String type, String id, String code, String status, Long version,
+                                               Map<String, Object> attributes) {
+        return PromotionAggregateView.builder().aggregateType(type).aggregateId(id).businessCode(code)
+                .status(status).version(version).attributes(attributes).build();
+    }
+
+    private static Outcome outcome(String eventType, String aggregateType, String aggregateId, Long version,
+                                   String status, Map<String, Object> payload) {
+        return new Outcome(eventType, aggregateType, aggregateId, version, payload,
+                PromotionCommandResult.builder().aggregateType(aggregateType).aggregateId(aggregateId)
+                        .aggregateVersion(version).status(status).duplicate(false).build());
+    }
+
+    private static void requireVersion(Long actual, Long expected) {
+        require(expected != null, "expectedVersion is required");
+        require(Objects.equals(actual, expected), "aggregate version conflict");
+    }
+
+    private static void requireInterval(Instant from, Instant to, String name) {
+        require(from != null && to != null && from.isBefore(to), name + " validity interval is invalid");
+    }
+
+    private static void requireWithin(Instant occurredAt, LocalDateTime from, LocalDateTime to, String name) {
+        LocalDateTime at = at(occurredAt);
+        require((from == null || !at.isBefore(from)) && (to == null || at.isBefore(to)),
+                name + " is not effective at occurredAt");
+    }
+
+    private static String currency(String value) {
+        require(value != null && value.matches("[A-Za-z]{3}"), "currencyCode must be ISO-4217 alpha-3");
+        return value.toUpperCase(Locale.ROOT);
+    }
+
+    private static String normalized(String value) {
+        return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private static String valueOrUuid(String value) {
+        return value == null || value.isBlank() ? UUID.randomUUID().toString() : value.trim();
+    }
+
+    private static LocalDateTime at(Instant value) {
+        return value == null ? null : LocalDateTime.ofInstant(value, ZoneOffset.UTC);
+    }
+
+    private static Instant instant(LocalDateTime value) {
+        return value == null ? null : value.toInstant(ZoneOffset.UTC);
+    }
+
+    private static Map<String, Object> payload(String key, Object value) {
+        Map<String, Object> result = new LinkedHashMap<>(); put(result, key, value); return result;
+    }
+
+    private static void put(Map<String, Object> target, String key, Object value) {
+        if (value != null) target.put(key, value);
+    }
+
+    private static void requireText(String value, String name, int maxLength) {
+        require(value != null && !value.isBlank(), name + " is required");
+        require(value.trim().length() <= maxLength, name + " is too long");
+    }
+
+    private static void requireUuid(String value, String name) {
+        requireText(value, name, 36);
+        try { UUID.fromString(value); } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException(name + " must be a UUID");
+        }
+    }
+
+    private static <T> T requireNonNull(T value, String message) {
+        require(value != null, message); return value;
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new IllegalArgumentException(message);
+    }
+
+    private record Outcome(String eventType, String aggregateType, String aggregateId, Long aggregateVersion,
+                           Map<String, Object> payload, PromotionCommandResult result) {
+    }
+}

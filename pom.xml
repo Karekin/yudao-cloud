@@ -41,6 +41,9 @@
         <module>cloudmold-module-payment</module>
         <module>cloudmold-module-fulfillment</module>
         <module>cloudmold-module-aftersales</module>
+        <module>cloudmold-module-promotion</module>
+        <module>cloudmold-module-engagement</module>
+        <module>cloudmold-module-customer-service</module>
         <module>cloudmold-integration-yudao</module>
     </modules>
 
