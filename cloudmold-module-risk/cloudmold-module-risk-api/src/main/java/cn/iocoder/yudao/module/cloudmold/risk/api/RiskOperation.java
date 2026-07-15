@@ -1,0 +1,16 @@
+package cn.iocoder.yudao.module.cloudmold.risk.api;
+
+public enum RiskOperation {
+    CREATE_POLICY,
+    PUBLISH_POLICY_VERSION,
+    DETECT_SIGNAL,
+    OBSERVE_RELATIONSHIP,
+    CREATE_CLUSTER,
+    ADD_CLUSTER_MEMBER,
+    CHANGE_CLUSTER_STATUS,
+    OPEN_REVIEW,
+    START_REVIEW,
+    DECIDE_REVIEW,
+    CLOSE_REVIEW,
+    RECORD_FEEDBACK
+}

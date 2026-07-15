@@ -44,6 +44,9 @@
         <module>cloudmold-module-promotion</module>
         <module>cloudmold-module-engagement</module>
         <module>cloudmold-module-customer-service</module>
+        <module>cloudmold-module-ai-operations</module>
+        <module>cloudmold-module-token-platform</module>
+        <module>cloudmold-module-risk</module>
         <module>cloudmold-integration-yudao</module>
     </modules>
 
