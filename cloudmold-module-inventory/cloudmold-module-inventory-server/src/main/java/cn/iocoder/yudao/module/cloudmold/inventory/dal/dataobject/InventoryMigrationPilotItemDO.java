@@ -1,0 +1,73 @@
+package cn.iocoder.yudao.module.cloudmold.inventory.dal.dataobject;
+
+import lombok.Data;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+@Data
+public class InventoryMigrationPilotItemDO {
+    private String itemId;
+    private Long tenantId;
+    private String batchId;
+    private Integer ordinal;
+    private String candidateId;
+    private String legacyBalanceId;
+    private Long sourceVersion;
+    private LocalDateTime sourceUpdatedAt;
+    private String sourceSnapshotHash;
+    private BigDecimal sourceOnHandQuantity;
+    private BigDecimal sourceReservedQuantity;
+    private BigDecimal sourceInTransitQuantity;
+    private Integer activeReservationCount;
+    private BigDecimal activeReservationQuantity;
+    private String ownerType;
+    private String ownerId;
+    private String ownerSourceSystem;
+    private String ownerSourceType;
+    private String ownerSourceId;
+    private String ownerMappingId;
+    private Long ownerMappingVersion;
+    private String ownerMappingEvidenceRef;
+    private String canonicalSkuId;
+    private String skuMappingId;
+    private Long skuMappingVersion;
+    private String skuMappingEvidenceRef;
+    private String sourceUomCode;
+    private String baseUomCode;
+    private BigDecimal uomConversionRatio;
+    private String uomEvidenceRef;
+    private String warehouseSourceSystem;
+    private String warehouseSourceType;
+    private String warehouseSourceId;
+    private String warehouseSourceMappingId;
+    private Long warehouseMappingVersion;
+    private String warehouseMappingEvidenceRef;
+    private String warehouseId;
+    private String locationSourceSystem;
+    private String locationSourceType;
+    private String locationSourceId;
+    private String locationSourceMappingId;
+    private Long locationMappingVersion;
+    private String locationMappingEvidenceRef;
+    private String locationId;
+    private String zoneId;
+    private String lotTrackingPolicy;
+    private String lotId;
+    private String lotMappingId;
+    private Long lotMappingVersion;
+    private String lotEvidenceRef;
+    private String stockStatus;
+    private String qualityStatus;
+    private String authoritativeRecordRef;
+    private String quantityEvidenceRef;
+    private String sourceCdcPosition;
+    private LocalDateTime sourceExtractedAt;
+    private Boolean targetBalanceAbsent;
+    private Boolean bridgeAbsent;
+    private String itemScopeHash;
+    private String status;
+    private Long version;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+}

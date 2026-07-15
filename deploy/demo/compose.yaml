@@ -1,0 +1,62 @@
+name: ${COMPOSE_PROJECT_NAME:-cloudmold-demo}
+
+services:
+  redis:
+    image: redis:7.2.10-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+    volumes:
+      - redis_data:/data
+    mem_limit: 192m
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "3"
+
+  backend:
+    image: ${CLOUDMOLD_BACKEND_IMAGE:?set CLOUDMOLD_BACKEND_IMAGE to a commit-SHA tag}
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_URL: ${CLOUDMOLD_DB_URL:?set CLOUDMOLD_DB_URL to the validated Demo database}
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_USERNAME: ${CLOUDMOLD_DB_USERNAME:?set CLOUDMOLD_DB_USERNAME}
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_PASSWORD: ${CLOUDMOLD_DB_PASSWORD:?set CLOUDMOLD_DB_PASSWORD}
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_SLAVE_URL: ${CLOUDMOLD_DB_URL}
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_SLAVE_USERNAME: ${CLOUDMOLD_DB_USERNAME}
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_SLAVE_PASSWORD: ${CLOUDMOLD_DB_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SPRING_BOOT_ADMIN_CLIENT_ENABLED: "false"
+      FLOWABLE_DATABASE_SCHEMA_UPDATE: "false"
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info
+      JAVA_TOOL_OPTIONS: -Xms256m -Xmx640m -Dfile.encoding=UTF-8
+    ports:
+      - "${DEMO_BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-48080}:48080"
+    mem_limit: 1024m
+    logging: *logging
+
+  frontend:
+    image: ${CLOUDMOLD_FRONTEND_IMAGE:?set CLOUDMOLD_FRONTEND_IMAGE to a commit-SHA tag}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${DEMO_BIND_ADDRESS:-127.0.0.1}:${DEMO_HTTP_PORT:-8080}:8080"
+    mem_limit: 128m
+    logging: *logging
+
+volumes:
+  redis_data:

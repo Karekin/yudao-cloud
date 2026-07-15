@@ -25,6 +25,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
+import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.invalidParamException;
+
 @Service
 @RequiredArgsConstructor
 public class InventoryCommandServiceImpl implements InventoryCommandApi {
@@ -41,6 +43,7 @@ public class InventoryCommandServiceImpl implements InventoryCommandApi {
     private final InventoryReservationMapper reservationMapper;
     private final InventoryLedgerTransactionMapper ledgerTransactionMapper;
     private final InventoryLedgerEntryMapper ledgerEntryMapper;
+    private final InventoryMigrationStoreMapper migrationMapper;
     private final OutboxAppender outboxAppender;
     private final CatalogSkuValidationApi catalogSkuValidationApi;
 
@@ -49,7 +52,6 @@ public class InventoryCommandServiceImpl implements InventoryCommandApi {
     public InventoryCommandResult execute(InventoryCommand rawCommand) {
         NormalizedCommand command = normalize(rawCommand);
         Long tenantId = TenantContextHolder.getRequiredTenantId();
-        catalogSkuValidationApi.requireActiveSku(command.canonicalSkuId());
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         String requestHash = fingerprint(tenantId, command);
         String attemptToken = UUID.randomUUID().toString();
@@ -70,8 +72,14 @@ public class InventoryCommandServiceImpl implements InventoryCommandApi {
             return replay;
         }
 
+        catalogSkuValidationApi.requireActiveSku(command.canonicalSkuId());
+
         LockedAggregate aggregate = lockAggregate(tenantId, command, operationId, now);
         InventoryBalanceDO balance = aggregate.balance();
+        if (migrationMapper.selectResolvedBridgeIdForLegacyBalanceForUpdate(
+                tenantId, balance.getBalanceId()) != null) {
+            throw invalidParamException("legacy inventory balance is frozen after canonical migration");
+        }
         require(balance.getBaseUomCode().equals(command.uomCode()), "base UOM does not match inventory balance");
 
         BigDecimal beforeOnHand = scaled(balance.getOnHandQuantity());

@@ -13,6 +13,7 @@ public class PublishedListingOfferView {
     private String listingId;
     private String listingNo;
     private String listingOfferId;
+    private String merchantId;
     private String channelCode;
     private String shopId;
     private String canonicalSpuId;

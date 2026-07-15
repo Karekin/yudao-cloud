@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.cloudmold.inventory.service;
 
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
+import cn.iocoder.yudao.framework.common.exception.ServiceException;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventResult;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
@@ -13,6 +14,7 @@ import cn.iocoder.yudao.module.cloudmold.inventory.dal.mysql.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -30,10 +32,12 @@ class InventoryCommandServiceImplTest {
     private final InventoryReservationMapper reservationMapper = mock(InventoryReservationMapper.class);
     private final InventoryLedgerTransactionMapper ledgerTransactionMapper = mock(InventoryLedgerTransactionMapper.class);
     private final InventoryLedgerEntryMapper ledgerEntryMapper = mock(InventoryLedgerEntryMapper.class);
+    private final InventoryMigrationStoreMapper migrationMapper = mock(InventoryMigrationStoreMapper.class);
     private final OutboxAppender outboxAppender = mock(OutboxAppender.class);
     private final CatalogSkuValidationApi catalogSkuValidationApi = mock(CatalogSkuValidationApi.class);
     private final InventoryCommandServiceImpl service = new InventoryCommandServiceImpl(operationMapper, balanceMapper,
-            reservationMapper, ledgerTransactionMapper, ledgerEntryMapper, outboxAppender, catalogSkuValidationApi);
+            reservationMapper, ledgerTransactionMapper, ledgerEntryMapper, migrationMapper,
+            outboxAppender, catalogSkuValidationApi);
 
     @BeforeEach
     void setUp() {
@@ -97,6 +101,30 @@ class InventoryCommandServiceImplTest {
         assertThat(replay.isDuplicate()).isTrue();
         assertThat(replay.getAggregateVersion()).isEqualTo(1L);
         verifyNoInteractions(balanceMapper, reservationMapper, ledgerTransactionMapper, ledgerEntryMapper, outboxAppender);
+        verifyNoInteractions(catalogSkuValidationApi, migrationMapper);
+    }
+
+    @Test
+    void shouldRejectNewLegacyWriteAfterCanonicalMigration() {
+        prepareNewOperation("RECEIVE");
+        when(balanceMapper.insertOrResolve(anyString(), eq(1L), anyString(), anyString(), anyString(),
+                eq("SELLABLE"), eq("QUALIFIED"), eq("PIECE"), any())).thenReturn(0);
+        when(balanceMapper.selectDimensionForUpdate(eq(1L), anyString(), anyString(), anyString(),
+                eq("SELLABLE"), eq("QUALIFIED")))
+                .thenReturn(balance("migrated-balance", "10.000000", "0.000000", 1L));
+        when(migrationMapper.selectResolvedBridgeIdForLegacyBalanceForUpdate(1L, "migrated-balance"))
+                .thenReturn("bridge-1");
+
+        assertThatThrownBy(() -> service.execute(command(InventoryOperation.RECEIVE, "1.000000", null)))
+                .isInstanceOf(ServiceException.class)
+                .hasMessage("legacy inventory balance is frozen after canonical migration");
+
+        verify(balanceMapper, never()).updateBalanceCas(anyLong(), anyString(), anyLong(), any(), any(), any());
+        verifyNoInteractions(ledgerTransactionMapper, ledgerEntryMapper, outboxAppender);
+        InOrder lockOrder = inOrder(balanceMapper, migrationMapper);
+        lockOrder.verify(balanceMapper).selectDimensionForUpdate(eq(1L), anyString(), anyString(), anyString(),
+                eq("SELLABLE"), eq("QUALIFIED"));
+        lockOrder.verify(migrationMapper).selectResolvedBridgeIdForLegacyBalanceForUpdate(1L, "migrated-balance");
     }
 
     @Test
@@ -136,18 +164,19 @@ class InventoryCommandServiceImplTest {
         assertThatThrownBy(() -> service.execute(command)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("quantity supports at most 6 fractional digits");
         verifyNoInteractions(operationMapper, balanceMapper, reservationMapper, ledgerTransactionMapper,
-                ledgerEntryMapper, outboxAppender);
+                ledgerEntryMapper, migrationMapper, outboxAppender);
     }
 
     @Test
     void shouldRejectInventoryWriteForInactiveCanonicalSku() {
+        prepareNewOperation("RECEIVE");
         doThrow(new IllegalArgumentException("canonical SKU is not ACTIVE"))
                 .when(catalogSkuValidationApi).requireActiveSku("sku-1");
 
         assertThatThrownBy(() -> service.execute(command(InventoryOperation.RECEIVE, "1.000000", null)))
                 .isInstanceOf(IllegalArgumentException.class).hasMessage("canonical SKU is not ACTIVE");
 
-        verifyNoInteractions(operationMapper, balanceMapper, reservationMapper,
+        verifyNoInteractions(balanceMapper, reservationMapper, migrationMapper,
                 ledgerTransactionMapper, ledgerEntryMapper, outboxAppender);
     }
 

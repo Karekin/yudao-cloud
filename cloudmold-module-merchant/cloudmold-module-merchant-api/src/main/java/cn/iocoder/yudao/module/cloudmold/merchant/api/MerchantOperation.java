@@ -1,0 +1,18 @@
+package cn.iocoder.yudao.module.cloudmold.merchant.api;
+
+public enum MerchantOperation {
+    CREATE_ONBOARDING_DRAFT,
+    SUBMIT_ONBOARDING,
+    START_ONBOARDING_REVIEW,
+    APPROVE_ONBOARDING,
+    REJECT_ONBOARDING,
+    WITHDRAW_ONBOARDING,
+    ACTIVATE_MERCHANT,
+    ACTIVATE_SHOP,
+    SUSPEND_MERCHANT,
+    RESUME_MERCHANT,
+    PAUSE_SHOP,
+    RESUME_SHOP,
+    LINK_SOURCE,
+    REVOKE_SOURCE
+}

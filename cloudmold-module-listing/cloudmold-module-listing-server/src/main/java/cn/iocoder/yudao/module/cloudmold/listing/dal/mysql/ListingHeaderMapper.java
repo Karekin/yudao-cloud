@@ -6,6 +6,7 @@ import cn.iocoder.yudao.module.cloudmold.listing.dal.dataobject.ListingHeaderDO;
 import org.apache.ibatis.annotations.*;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface ListingHeaderMapper extends BaseMapperX<ListingHeaderDO> {
@@ -19,6 +20,31 @@ public interface ListingHeaderMapper extends BaseMapperX<ListingHeaderDO> {
             FOR UPDATE
             """)
     ListingHeaderDO selectForUpdate(@Param("tenantId") Long tenantId, @Param("listingId") String listingId);
+
+    @Select("""
+            SELECT listing_id,tenant_id,listing_no,run_id,merchant_id,channel_code,shop_id,canonical_spu_id,
+                   revision,title,primary_image_url,category_ref,brand_ref,source_system,publisher_ref,currency_code,
+                   publish_start_at,publish_end_at,status,completion_passed,business_approved,risk_approved,
+                   version,created_at,updated_at
+            FROM cloudmold_listing_header
+            WHERE tenant_id=#{tenantId} AND listing_id=#{listingId}
+            """)
+    ListingHeaderDO selectTenantListing(@Param("tenantId") Long tenantId, @Param("listingId") String listingId);
+
+    @Select("""
+            SELECT listing_id,tenant_id,listing_no,run_id,merchant_id,channel_code,shop_id,canonical_spu_id,
+                   revision,title,primary_image_url,category_ref,brand_ref,source_system,publisher_ref,currency_code,
+                   publish_start_at,publish_end_at,status,completion_passed,business_approved,risk_approved,
+                   version,created_at,updated_at
+            FROM cloudmold_listing_header
+            WHERE tenant_id=#{tenantId} AND merchant_id=#{merchantId}
+              AND (#{shopId} IS NULL OR shop_id=#{shopId}) AND status='PUBLISHED'
+            ORDER BY listing_id
+            FOR UPDATE
+            """)
+    List<ListingHeaderDO> selectPublishedForEligibilityEnforcement(@Param("tenantId") Long tenantId,
+                                                                   @Param("merchantId") String merchantId,
+                                                                   @Param("shopId") String shopId);
 
     @Update("""
             UPDATE cloudmold_listing_header
@@ -37,7 +63,7 @@ public interface ListingHeaderMapper extends BaseMapperX<ListingHeaderDO> {
                    @Param("now") LocalDateTime now);
 
     @Select("""
-            SELECT h.listing_id,h.listing_no,o.listing_offer_id,h.channel_code,h.shop_id,h.canonical_spu_id,
+            SELECT h.listing_id,h.listing_no,o.listing_offer_id,h.merchant_id,h.channel_code,h.shop_id,h.canonical_spu_id,
                    o.canonical_sku_id,h.revision AS listing_revision,h.version AS listing_version,
                    o.price_minor,o.currency_code
             FROM cloudmold_listing_header h

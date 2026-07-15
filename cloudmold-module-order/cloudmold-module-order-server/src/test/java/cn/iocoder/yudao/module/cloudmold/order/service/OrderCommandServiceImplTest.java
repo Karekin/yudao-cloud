@@ -92,7 +92,7 @@ class OrderCommandServiceImplTest {
             PublishedOfferValidationCommand requested = invocation.getArgument(0);
             return PublishedListingOfferView.builder().listingId(requested.getListingId())
                     .listingNo("CML1").listingOfferId(requested.getListingOfferId())
-                    .channelCode("YSHOPPING_INTERNAL").shopId("YSHOPPING_INTERNAL")
+                    .merchantId("merchant-1").channelCode("YSHOPPING_INTERNAL").shopId("shop-1")
                     .canonicalSpuId("spu-1").canonicalSkuId(requested.getCanonicalSkuId())
                     .listingRevision(1).listingVersion(6L).priceMinor(requested.getExpectedPriceMinor())
                     .currencyCode("CNY").build();
@@ -108,6 +108,48 @@ class OrderCommandServiceImplTest {
         });
         verify(listingApi, times(2)).requirePublishedOffer(any());
         verify(outboxAppender).append(argThat(event -> event.getSchemaVersion() == 2));
+    }
+
+    @Test
+    void shouldFailClosedBeforeOrderWriteWhenListingMerchantOrShopIsInactive() {
+        claimNewOperation();
+        OrderCommand command = placeCommand();
+        command.setOperation(OrderOperation.PLACE_FROM_LISTING);
+        command.getItems().get(0).setListingId("listing-1");
+        command.getItems().get(0).setListingOfferId("offer-1");
+        command.getItems().get(1).setListingId("listing-1");
+        command.getItems().get(1).setListingOfferId("offer-2");
+        when(listingApi.requirePublishedOffer(any())).thenThrow(
+                new IllegalArgumentException("merchant/shop reference is not active or does not belong together"));
+
+        assertThatThrownBy(() -> service.execute(command)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("merchant/shop reference is not active or does not belong together");
+
+        verify(listingApi).requirePublishedOffer(any());
+        verify(orderMapper, never()).insert(any(OrderHeaderDO.class));
+        verify(itemMapper, never()).insert(any(OrderItemDO.class));
+        verifyNoInteractions(outboxAppender);
+    }
+
+    @Test
+    void shouldReplayListingBackedOrderWithoutRevalidatingCurrentOffer() {
+        AtomicReference<String> requestHash = new AtomicReference<>();
+        when(operationMapper.insertOrResolve(anyLong(), anyString(), anyString(), anyString(), anyString(), any()))
+                .thenAnswer(invocation -> { requestHash.set(invocation.getArgument(3)); return 0; });
+        OrderCommand command = listingPlaceCommand();
+        OrderCommandResult first = OrderCommandResult.builder().operationId(11L).orderId("order-1")
+                .orderNo("CMO1").currentStatus("PLACED").aggregateVersion(1L).duplicate(false).build();
+        when(operationMapper.selectForUpdate(11L, 1L)).thenAnswer(ignored -> new OrderOperationDO()
+                .setOperationId(11L).setTenantId(1L).setAttemptToken("existing")
+                .setRequestHash(requestHash.get()).setStatus(10).setResultJson(JsonUtils.toJsonString(first)));
+
+        OrderCommandResult replay = service.execute(command);
+
+        assertThat(replay.getDuplicate()).isTrue();
+        assertThat(replay.getOrderId()).isEqualTo("order-1");
+        verifyNoInteractions(listingApi);
+        verify(orderMapper, never()).insert(any(OrderHeaderDO.class));
+        verify(itemMapper, never()).insert(any(OrderItemDO.class));
     }
 
     @Test
@@ -274,6 +316,16 @@ class OrderCommandServiceImplTest {
                 .shippingAmountMinor(50L).discountAmountMinor(20L).currencyCode("CNY")
                 .correlationId("6f9619ff-8b86-d011-b42d-00cf4fc964ff").occurredAt(Instant.parse("2026-07-12T00:00:00Z"))
                 .build();
+    }
+
+    private static OrderCommand listingPlaceCommand() {
+        OrderCommand command = placeCommand();
+        command.setOperation(OrderOperation.PLACE_FROM_LISTING);
+        command.getItems().get(0).setListingId("listing-1");
+        command.getItems().get(0).setListingOfferId("offer-1");
+        command.getItems().get(1).setListingId("listing-1");
+        command.getItems().get(1).setListingOfferId("offer-2");
+        return command;
     }
 
     private static OrderCommand transitionCommand(OrderOperation operation, long version) {

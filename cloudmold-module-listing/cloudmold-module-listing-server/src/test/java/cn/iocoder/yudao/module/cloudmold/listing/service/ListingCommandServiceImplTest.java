@@ -6,9 +6,11 @@ import cn.iocoder.yudao.module.cloudmold.catalog.api.CatalogSkuProjectionApi;
 import cn.iocoder.yudao.module.cloudmold.catalog.api.CatalogSkuProjectionView;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventResult;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
+import cn.iocoder.yudao.module.cloudmold.identity.api.PrincipalValidationApi;
 import cn.iocoder.yudao.module.cloudmold.listing.api.*;
 import cn.iocoder.yudao.module.cloudmold.listing.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.listing.dal.mysql.*;
+import cn.iocoder.yudao.module.cloudmold.merchant.api.*;
 import org.junit.jupiter.api.*;
 
 import java.time.Instant;
@@ -27,9 +29,14 @@ class ListingCommandServiceImplTest {
     private final ListingStatusHistoryMapper historyMapper = mock(ListingStatusHistoryMapper.class);
     private final ListingReviewDecisionMapper reviewMapper = mock(ListingReviewDecisionMapper.class);
     private final CatalogSkuProjectionApi catalogApi = mock(CatalogSkuProjectionApi.class);
+    private final MerchantReferenceValidationApi merchantReferenceApi = mock(MerchantReferenceValidationApi.class);
+    private final MerchantOperatorAuthorizationApi merchantAuthorizationApi =
+            mock(MerchantOperatorAuthorizationApi.class);
+    private final PrincipalValidationApi principalValidationApi = mock(PrincipalValidationApi.class);
     private final OutboxAppender outboxAppender = mock(OutboxAppender.class);
     private final ListingCommandServiceImpl service = new ListingCommandServiceImpl(operationMapper, headerMapper,
-            offerMapper, historyMapper, reviewMapper, catalogApi, outboxAppender);
+            offerMapper, historyMapper, reviewMapper, catalogApi, merchantReferenceApi, merchantAuthorizationApi,
+            principalValidationApi, outboxAppender);
 
     private final AtomicReference<ListingHeaderDO> storedHeader = new AtomicReference<>();
     private final List<ListingOfferDO> storedOffers = new ArrayList<>();
@@ -64,6 +71,13 @@ class ListingCommandServiceImplTest {
             view.setCanonicalSpuId("spu-1"); view.setCanonicalSkuId(invocation.getArgument(0)); view.setCatalogStatus("ACTIVE");
             return view;
         });
+        when(merchantReferenceApi.requireActiveReference(any())).thenReturn(new MerchantReferenceView()
+                .setMerchantId("merchant-1").setMerchantStatus("ACTIVE").setShopId("shop-1")
+                .setShopStatus("ACTIVE").setChannelCode("YSHOPPING_INTERNAL"));
+        when(merchantAuthorizationApi.requireAuthorizedOperator(any())).thenReturn(
+                new MerchantOperatorAuthorizationView().setAssignmentId("assignment-1")
+                        .setMerchantId("merchant-1").setShopId("shop-1").setPrincipalId("internal-agent")
+                        .setRoleCode("OWNER").setAssignmentStatus("ACTIVE"));
         when(outboxAppender.append(any())).thenReturn(new AppendDomainEventResult("event-1", "a".repeat(64), false));
     }
 
@@ -96,6 +110,87 @@ class ListingCommandServiceImplTest {
         verify(historyMapper, times(6)).insert(any(ListingStatusHistoryDO.class));
         verify(reviewMapper, times(3)).insert(any(ListingReviewDecisionDO.class));
         verify(outboxAppender, times(9)).append(any());
+        verify(merchantReferenceApi, times(2)).requireActiveReference(argThat(reference ->
+                "merchant-1".equals(reference.getMerchantId()) && "shop-1".equals(reference.getShopId())));
+        verify(principalValidationApi, times(2)).requireActivePrincipal("internal-agent");
+        verify(merchantAuthorizationApi, times(2)).requireAuthorizedOperator(argThat(authorization ->
+                "merchant-1".equals(authorization.getMerchantId())
+                        && "shop-1".equals(authorization.getShopId())
+                        && "internal-agent".equals(authorization.getPrincipalId())
+                        && "OWNER".equals(authorization.getRoleCode())));
+    }
+
+    @Test
+    void shouldRejectDraftWhenMerchantShopReferenceIsInactiveOrUnrelated() {
+        when(merchantReferenceApi.requireActiveReference(any())).thenThrow(
+                new IllegalArgumentException("merchant/shop reference is not active or does not belong together"));
+
+        assertThatThrownBy(() -> service.execute(createCommand("listing-inactive-merchant")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("merchant/shop reference is not active or does not belong together");
+
+        verifyNoInteractions(principalValidationApi, merchantAuthorizationApi);
+        verify(headerMapper, never()).insert(any(ListingHeaderDO.class));
+        verifyNoInteractions(catalogApi);
+    }
+
+    @Test
+    void shouldRejectDraftWhenShopChannelDoesNotMatchListingChannel() {
+        when(merchantReferenceApi.requireActiveReference(any())).thenReturn(new MerchantReferenceView()
+                .setMerchantId("merchant-1").setMerchantStatus("ACTIVE").setShopId("shop-1")
+                .setShopStatus("ACTIVE").setChannelCode("YSHOPPING"));
+
+        assertThatThrownBy(() -> service.execute(createCommand("listing-shop-channel-mismatch")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("merchant shop channel does not match listing channel");
+
+        verifyNoInteractions(principalValidationApi, merchantAuthorizationApi);
+        verify(headerMapper, never()).insert(any(ListingHeaderDO.class));
+        verifyNoInteractions(catalogApi);
+    }
+
+    @Test
+    void shouldRejectDraftWhenPublisherPrincipalIsInactive() {
+        doThrow(new IllegalArgumentException("principal is not active"))
+                .when(principalValidationApi).requireActivePrincipal("internal-agent");
+
+        assertThatThrownBy(() -> service.execute(createCommand("listing-inactive-publisher")))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("principal is not active");
+
+        verifyNoInteractions(merchantAuthorizationApi);
+        verify(headerMapper, never()).insert(any(ListingHeaderDO.class));
+        verifyNoInteractions(catalogApi);
+    }
+
+    @Test
+    void shouldRejectDraftWhenPublisherHasNoActiveMerchantAssignment() {
+        when(merchantAuthorizationApi.requireAuthorizedOperator(any())).thenThrow(
+                new IllegalArgumentException("principal is not authorized for the merchant shop role"));
+
+        assertThatThrownBy(() -> service.execute(createCommand("listing-unauthorized-publisher")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("principal is not authorized for the merchant shop role");
+
+        verify(headerMapper, never()).insert(any(ListingHeaderDO.class));
+        verifyNoInteractions(catalogApi);
+    }
+
+    @Test
+    void shouldRevalidateMerchantAndPublisherBeforePublish() {
+        ListingCommandResult result = service.execute(createCommand("listing-revalidate-create"));
+        result = service.execute(transition(ListingOperation.SUBMIT, result, "listing-revalidate-submit"));
+        result = service.execute(transition(ListingOperation.PASS_COMPLETION, result, "listing-revalidate-completion"));
+        result = service.execute(transition(ListingOperation.APPROVE_BUSINESS, result, "listing-revalidate-business"));
+        result = service.execute(transition(ListingOperation.APPROVE_RISK, result, "listing-revalidate-risk"));
+        when(merchantReferenceApi.requireActiveReference(any())).thenThrow(
+                new IllegalArgumentException("merchant/shop reference is not active or does not belong together"));
+
+        ListingCommand publish = transition(ListingOperation.PUBLISH, result, "listing-revalidate-publish");
+        assertThatThrownBy(() -> service.execute(publish)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("merchant/shop reference is not active or does not belong together");
+
+        verify(headerMapper, never()).transition(anyLong(), anyString(), anyLong(), anyString(), eq("PUBLISHED"),
+                anyInt(), anyBoolean(), anyBoolean(), anyBoolean(), any(), any());
     }
 
     @Test
@@ -164,7 +259,8 @@ class ListingCommandServiceImplTest {
                 .thenAnswer(ignored -> "PUBLISHED".equals(header.getStatus()) ? PublishedListingOfferView.builder()
                         .listingId(header.getListingId()).listingNo(header.getListingNo())
                         .listingOfferId(offer.getListingOfferId()).channelCode(header.getChannelCode())
-                        .shopId(header.getShopId()).canonicalSpuId(header.getCanonicalSpuId()).canonicalSkuId("sku-1")
+                        .merchantId(header.getMerchantId()).shopId(header.getShopId())
+                        .canonicalSpuId(header.getCanonicalSpuId()).canonicalSkuId("sku-1")
                         .listingRevision(1).listingVersion(header.getVersion()).priceMinor(9900L).currencyCode("CNY")
                         .build() : null);
         PublishedOfferValidationCommand validation = PublishedOfferValidationCommand.builder()
@@ -180,6 +276,31 @@ class ListingCommandServiceImplTest {
         assertThat(unpublished.getCurrentStatus()).isEqualTo("UNPUBLISHED");
         assertThatThrownBy(() -> service.requirePublishedOffer(validation)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("listing offer is not currently published");
+    }
+
+    @Test
+    void shouldClosePublishedOfferGateWhenMerchantOrShopBecomesInactive() {
+        ListingHeaderDO header = publishedHeader();
+        ListingOfferDO offer = listingOffer(header.getListingId(), 1, "sku-1", 9900L);
+        when(headerMapper.selectPublishedOffer(1L, header.getListingId(), offer.getListingOfferId(), "sku-1"))
+                .thenReturn(PublishedListingOfferView.builder().listingId(header.getListingId())
+                        .listingNo(header.getListingNo()).listingOfferId(offer.getListingOfferId())
+                        .merchantId(header.getMerchantId()).channelCode(header.getChannelCode())
+                        .shopId(header.getShopId()).canonicalSpuId(header.getCanonicalSpuId()).canonicalSkuId("sku-1")
+                        .listingRevision(1).listingVersion(header.getVersion()).priceMinor(9900L).currencyCode("CNY")
+                        .build());
+        when(merchantReferenceApi.requireActiveReference(any())).thenThrow(
+                new IllegalArgumentException("merchant/shop reference is not active or does not belong together"));
+
+        PublishedOfferValidationCommand validation = PublishedOfferValidationCommand.builder()
+                .listingId(header.getListingId()).listingOfferId(offer.getListingOfferId()).canonicalSkuId("sku-1")
+                .expectedPriceMinor(9900L).currencyCode("CNY").build();
+        assertThatThrownBy(() -> service.requirePublishedOffer(validation))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("merchant/shop reference is not active or does not belong together");
+
+        verify(merchantReferenceApi).requireActiveReference(argThat(reference ->
+                "merchant-1".equals(reference.getMerchantId()) && "shop-1".equals(reference.getShopId())));
     }
 
     private String captureRequestHash(ListingCommand command) {

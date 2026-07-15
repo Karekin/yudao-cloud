@@ -31,6 +31,9 @@
         <module>yudao-module-ai</module>
         <!-- CloudMold red-zone modules: isolated from upstream business modules -->
         <module>cloudmold-module-data-contract</module>
+        <module>cloudmold-module-identity</module>
+        <module>cloudmold-module-merchant</module>
+        <module>cloudmold-module-warehouse</module>
         <module>cloudmold-module-catalog</module>
         <module>cloudmold-module-inventory</module>
         <module>cloudmold-module-listing</module>

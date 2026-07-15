@@ -7,9 +7,11 @@ import cn.iocoder.yudao.module.cloudmold.catalog.api.CatalogSkuProjectionApi;
 import cn.iocoder.yudao.module.cloudmold.catalog.api.CatalogSkuProjectionView;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventCommand;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
+import cn.iocoder.yudao.module.cloudmold.identity.api.PrincipalValidationApi;
 import cn.iocoder.yudao.module.cloudmold.listing.api.*;
 import cn.iocoder.yudao.module.cloudmold.listing.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.listing.dal.mysql.*;
+import cn.iocoder.yudao.module.cloudmold.merchant.api.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +25,7 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
 
     static final int OPERATION_SUCCEEDED = 10;
     private static final String CURRENCY_CNY = "CNY";
+    private static final String LISTING_OPERATOR_ROLE = "OWNER";
     private static final Set<String> FIRST_SLICE_CHANNELS = Set.of(
             "INTERNAL_COMPANY", "YSHOPPING_INTERNAL", "YSHOPPING");
 
@@ -32,6 +35,9 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
     private final ListingStatusHistoryMapper historyMapper;
     private final ListingReviewDecisionMapper reviewMapper;
     private final CatalogSkuProjectionApi catalogSkuProjectionApi;
+    private final MerchantReferenceValidationApi merchantReferenceValidationApi;
+    private final MerchantOperatorAuthorizationApi merchantOperatorAuthorizationApi;
+    private final PrincipalValidationApi principalValidationApi;
     private final OutboxAppender outboxAppender;
 
     @Override
@@ -79,6 +85,7 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
                 TenantContextHolder.getRequiredTenantId(), command.getListingId(), command.getListingOfferId(),
                 command.getCanonicalSkuId());
         require(offer != null, "listing offer is not currently published");
+        requireActiveMerchantShop(offer.getMerchantId(), offer.getChannelCode(), offer.getShopId());
         require(Objects.equals(offer.getPriceMinor(), command.getExpectedPriceMinor()),
                 "order price does not match published listing offer");
         require(Objects.equals(offer.getCurrencyCode(), command.getCurrencyCode()),
@@ -89,6 +96,8 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
     private ListingCommandResult createDraft(Long tenantId, Long operationId, ListingCommand command,
                                              LocalDateTime now) {
         validateCreate(command);
+        requireActiveMerchantPublisher(command.getMerchantId(), command.getChannelCode(), command.getShopId(),
+                command.getPublisherRef());
         List<ListingOfferDO> offers = buildOffers(tenantId, null, 1, command.getCanonicalSpuId(),
                 command.getOffers(), now);
         String listingId = UUID.randomUUID().toString();
@@ -120,6 +129,10 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
         require(header != null, "canonical listing does not exist");
         require(Objects.equals(header.getVersion(), command.getExpectedVersion()), "canonical listing version conflict");
         Transition next = resolveTransition(command, header);
+        if (command.getOperation() == ListingOperation.PUBLISH) {
+            requireActiveMerchantPublisher(header.getMerchantId(), header.getChannelCode(), header.getShopId(),
+                    command.getPublisherRef() != null ? command.getPublisherRef() : header.getPublisherRef());
+        }
         if ("REJECTED".equals(next.reviewDecision())) requireText(command.getReason(), "reason", 256);
         List<ListingOfferDO> offers;
         if (command.getOperation() == ListingOperation.REVISE) {
@@ -244,6 +257,33 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
                     .setExternalOfferId(command.getExternalOfferId()).setCreatedAt(now).setUpdatedAt(now));
         }
         return offers;
+    }
+
+    private void requireActiveMerchantPublisher(String merchantId, String channelCode, String shopId,
+                                                String publisherPrincipalId) {
+        requireActiveMerchantShop(merchantId, channelCode, shopId);
+        principalValidationApi.requireActivePrincipal(publisherPrincipalId);
+        MerchantOperatorAuthorizationView authorization = merchantOperatorAuthorizationApi.requireAuthorizedOperator(
+                new MerchantOperatorAuthorizationCommand().setMerchantId(merchantId).setShopId(shopId)
+                        .setPrincipalId(publisherPrincipalId).setRoleCode(LISTING_OPERATOR_ROLE));
+        require(authorization != null && Objects.equals(merchantId, authorization.getMerchantId())
+                        && Objects.equals(shopId, authorization.getShopId())
+                        && Objects.equals(publisherPrincipalId, authorization.getPrincipalId())
+                        && Objects.equals(LISTING_OPERATOR_ROLE, authorization.getRoleCode())
+                        && "ACTIVE".equals(authorization.getAssignmentStatus()),
+                "merchant operator authorization returned a different or inactive assignment");
+    }
+
+    private void requireActiveMerchantShop(String merchantId, String channelCode, String shopId) {
+        MerchantReferenceView reference = merchantReferenceValidationApi.requireActiveReference(
+                new MerchantReferenceValidationCommand().setMerchantId(merchantId).setShopId(shopId));
+        require(reference != null && Objects.equals(merchantId, reference.getMerchantId())
+                        && Objects.equals(shopId, reference.getShopId())
+                        && "ACTIVE".equals(reference.getMerchantStatus())
+                        && "ACTIVE".equals(reference.getShopStatus()),
+                "merchant/shop validation returned a different or inactive reference");
+        require(Objects.equals(channelCode, reference.getChannelCode()),
+                "merchant shop channel does not match listing channel");
     }
 
     private void appendHistory(Long tenantId, Long operationId, ListingHeaderDO header, String previous,
