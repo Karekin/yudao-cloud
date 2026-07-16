@@ -73,6 +73,41 @@ class AfterSaleBenefitReversalServiceTest {
     }
 
     @Test
+    void shouldReturnEveryDistinctStackedEntitlementAndConserveTheBatch() {
+        when(reversalMapper.selectByAfterSale(1L, "after-sale-1")).thenReturn(List.of());
+        when(orderQueryApi.requireEligible("order-1", "order-item-1"))
+                .thenReturn(stackedEntitlementOrder());
+        when(promotionCommandApi.execute(any())).thenAnswer(invocation -> {
+            PromotionCommand command = invocation.getArgument(0);
+            return PromotionCommandResult.builder()
+                    .aggregateId(command.getCouponEntitlement().getEntitlementId())
+                    .aggregateVersion(5L).status("RETURNED").build();
+        });
+        when(reversalMapper.insert(any(AfterSaleBenefitReversalDO.class))).thenReturn(1);
+        when(fundingMapper.insert(any(AfterSaleBenefitFundingReversalDO.class))).thenReturn(1);
+
+        AfterSaleBenefitReversalResult result = service.record(saga(), LocalDateTime.now());
+
+        assertThat(result.reversalCount()).isEqualTo(2);
+        assertThat(result.fundingReversalCount()).isEqualTo(2);
+        assertThat(result.amountMinor()).isEqualTo(3800L);
+        ArgumentCaptor<PromotionCommand> commandCaptor = ArgumentCaptor.forClass(PromotionCommand.class);
+        verify(promotionCommandApi, times(2)).execute(commandCaptor.capture());
+        assertThat(commandCaptor.getAllValues())
+                .extracting(command -> command.getCouponEntitlement().getEntitlementId())
+                .containsExactlyInAnyOrder("entitlement-platform", "entitlement-merchant");
+        assertThat(commandCaptor.getAllValues())
+                .extracting(command -> command.getCouponEntitlement().getExpectedVersion()).containsOnly(4L);
+        ArgumentCaptor<AfterSaleBenefitReversalDO> reversalCaptor =
+                ArgumentCaptor.forClass(AfterSaleBenefitReversalDO.class);
+        verify(reversalMapper, times(2)).insert(reversalCaptor.capture());
+        assertThat(reversalCaptor.getAllValues()).extracting(AfterSaleBenefitReversalDO::getAmountMinor)
+                .containsExactlyInAnyOrder(2000L, 1800L);
+        assertThat(reversalCaptor.getAllValues()).extracting(AfterSaleBenefitReversalDO::getReversalBatchId)
+                .containsOnly(result.batchId());
+    }
+
+    @Test
     void shouldFailClosedWhenEntitlementSourceSnapshotIsNotExact() {
         when(reversalMapper.selectByAfterSale(1L, "after-sale-1")).thenReturn(List.of());
         OrderAfterSaleView order = order("entitlement-1");
@@ -132,5 +167,32 @@ class AfterSaleBenefitReversalServiceTest {
         return OrderAfterSaleView.builder().orderId("order-1").orderItemId("order-item-1")
                 .lineAmountMinor(39800L).discountAmountMinor(3800L).netAmountMinor(36000L)
                 .benefitApplications(List.of(application)).build();
+    }
+
+    private static OrderAfterSaleView stackedEntitlementOrder() {
+        OrderBenefitApplicationView platform = entitlementApplication(
+                "application-platform", "allocation-platform", "funding-platform",
+                "entitlement-platform", "PLATFORM", "cloudmold", 2000L);
+        OrderBenefitApplicationView merchant = entitlementApplication(
+                "application-merchant", "allocation-merchant", "funding-merchant",
+                "entitlement-merchant", "MERCHANT", "merchant-1", 1800L);
+        return OrderAfterSaleView.builder().orderId("order-1").orderItemId("order-item-1")
+                .lineAmountMinor(39800L).discountAmountMinor(3800L).netAmountMinor(36000L)
+                .benefitApplications(List.of(platform, merchant)).build();
+    }
+
+    private static OrderBenefitApplicationView entitlementApplication(
+            String applicationId, String allocationId, String fundingId, String entitlementId,
+            String funderType, String funderId, long amountMinor) {
+        OrderBenefitFundingView funding = OrderBenefitFundingView.builder()
+                .benefitFundingId(fundingId).funderType(funderType).funderId(funderId)
+                .amountMinor(amountMinor).currencyCode("CNY").build();
+        OrderBenefitAllocationView allocation = OrderBenefitAllocationView.builder()
+                .benefitAllocationId(allocationId).orderItemId("order-item-1")
+                .amountMinor(amountMinor).currencyCode("CNY").funding(List.of(funding)).build();
+        return OrderBenefitApplicationView.builder().benefitApplicationId(applicationId)
+                .benefitType("COUPON").benefitSourceType("COUPON_ENTITLEMENT")
+                .benefitSourceId(entitlementId).benefitSourceVersion(4L).entitlementId(entitlementId)
+                .amountMinor(amountMinor).currencyCode("CNY").allocations(List.of(allocation)).build();
     }
 }

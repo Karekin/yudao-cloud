@@ -179,6 +179,34 @@ class OrderCommandServiceImplTest {
     }
 
     @Test
+    void shouldAcceptDistinctEntitlementsAtTheSameAggregateVersion() {
+        claimNewOperation();
+        OrderCommand command = placeCommand();
+        command.setDiscountAmountMinor(30L);
+        List<OrderBenefitApplicationCommand> applications = new ArrayList<>(command.getBenefitApplications());
+        applications.add(OrderBenefitApplicationCommand.builder()
+                .applicationKey("application-2").benefitType("COUPON")
+                .benefitSourceType("COUPON_ENTITLEMENT").benefitSourceId("entitlement-2")
+                .benefitSourceVersion(3L).entitlementId("entitlement-2").amountMinor(10L)
+                .calculationDigest("b".repeat(64)).allocations(List.of(
+                        OrderBenefitAllocationCommand.builder().allocationKey("allocation-3")
+                                .lineKey("line-2").amountMinor(10L).funding(List.of(
+                                        OrderBenefitFundingCommand.builder().fundingKey("funding-4")
+                                                .funderType("MERCHANT").funderId("merchant-1")
+                                                .amountMinor(10L).build())).build())).build());
+        command.setBenefitApplications(applications);
+
+        OrderCommandResult result = service.execute(command);
+
+        assertThat(result.getBenefitApplications()).hasSize(2)
+                .extracting(OrderBenefitApplicationView::getBenefitSourceId)
+                .containsExactly("entitlement-1", "entitlement-2");
+        assertThat(result.getBenefitApplications())
+                .extracting(OrderBenefitApplicationView::getBenefitSourceVersion).containsOnly(3L);
+        verify(benefitApplicationMapper, times(2)).insert(any(OrderBenefitApplicationDO.class));
+    }
+
+    @Test
     void shouldReplayTheSameImmutableBenefitReadModelFromOperationResult() {
         AtomicReference<String> attemptToken = new AtomicReference<>();
         AtomicReference<String> requestHash = new AtomicReference<>();
