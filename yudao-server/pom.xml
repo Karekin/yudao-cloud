@@ -109,6 +109,11 @@
         </dependency>
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-gamification-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
             <artifactId>cloudmold-integration-yudao-server</artifactId>
             <version>${revision}</version>
         </dependency>

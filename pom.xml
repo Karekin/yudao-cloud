@@ -47,6 +47,7 @@
         <module>cloudmold-module-ai-operations</module>
         <module>cloudmold-module-token-platform</module>
         <module>cloudmold-module-risk</module>
+        <module>cloudmold-module-gamification</module>
         <module>cloudmold-integration-yudao</module>
     </modules>
 
