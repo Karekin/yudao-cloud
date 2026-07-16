@@ -33,13 +33,15 @@ public class ForwardFulfillmentAfterSaleQueryServiceImpl implements ForwardFulfi
                 "forward Fulfillment does not belong to order");
         require("DELIVERED".equals(fulfillment.getStatus()), "after sale requires DELIVERED Fulfillment");
         List<FulfillmentItemDO> items = itemMapper.selectByFulfillment(tenantId, fulfillmentId);
-        require(items.size() == 1 && Objects.equals(orderItemId, items.get(0).getOrderItemId()),
-                "after-sale first slice requires exact sole Fulfillment item");
+        List<FulfillmentItemDO> matchedItems = items.stream()
+                .filter(value -> Objects.equals(orderItemId, value.getOrderItemId())).toList();
+        require(matchedItems.size() == 1,
+                "after sale requires exactly one matching Fulfillment item");
         ShipmentDO shipment = shipmentMapper.selectByFulfillment(tenantId, fulfillmentId);
         require(shipment != null && Objects.equals(shipmentId, shipment.getShipmentId())
                         && "DELIVERED".equals(shipment.getStatus()),
                 "forward shipment is not the delivered order shipment");
-        FulfillmentItemDO item = items.get(0);
+        FulfillmentItemDO item = matchedItems.get(0);
         return ForwardFulfillmentAfterSaleView.builder().fulfillmentId(fulfillmentId)
                 .shipmentId(shipmentId).orderId(orderId).orderItemId(orderItemId)
                 .canonicalSkuId(item.getCanonicalSkuId()).quantity(item.getQuantity())
