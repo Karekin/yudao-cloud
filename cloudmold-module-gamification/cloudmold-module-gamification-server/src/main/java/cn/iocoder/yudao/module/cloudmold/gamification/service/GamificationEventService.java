@@ -81,7 +81,8 @@ public class GamificationEventService {
                 "game_version", game.getCurrentVersion(), "definition_sha256", version.getDefinitionSha256(),
                 "previous_status", previousStatus, "current_status", game.getStatus(),
                 "virtual_currency_code", game.getVirtualCurrencyCode(), "assist_daily_limit", game.getAssistDailyLimit(),
-                "max_rounds_per_session", game.getMaxRoundsPerSession());
+                "max_rounds_per_session", game.getMaxRoundsPerSession(),
+                "session_ttl_seconds", game.getSessionTtlSeconds());
         append("gamification.game.definition_published", "gamification_game", game.getGameId(),
                 game.getCurrentVersion(), game.getTenantId(), command, occurredAt, payload);
     }
@@ -203,6 +204,7 @@ public class GamificationEventService {
                 value.getSeasonSeriesId(), value.getSeriesVersion(), value.getTenantId(), command, occurredAt,
                 payload("season_series_id", value.getSeasonSeriesId(), "series_version", value.getSeriesVersion(),
                         "game_id", value.getGameId(), "series_code", value.getSeriesCode(),
+                        "series_name", value.getSeriesName(),
                         "definition_sha256", value.getDefinitionSha256()));
     }
 
@@ -211,9 +213,11 @@ public class GamificationEventService {
                 value.getSeasonVersion(), value.getTenantId(), command, occurredAt,
                 payload("season_id", value.getSeasonId(), "season_version", value.getSeasonVersion(),
                         "season_series_id", value.getSeasonSeriesId(), "series_version", value.getSeriesVersion(),
-                        "game_id", value.getGameId(), "status", value.getStatus(),
+                        "game_id", value.getGameId(), "season_code", value.getSeasonCode(),
+                        "season_name", value.getSeasonName(), "status", value.getStatus(),
                         "starts_at", value.getStartsAt().toInstant(ZoneOffset.UTC).toString(),
-                        "ends_at", value.getEndsAt().toInstant(ZoneOffset.UTC).toString()));
+                        "ends_at", value.getEndsAt().toInstant(ZoneOffset.UTC).toString(),
+                        "definition_sha256", value.getDefinitionSha256()));
     }
 
     public void appendCollectibleDefinition(CollectibleDefinition value, GamificationCommand command,
@@ -223,6 +227,7 @@ public class GamificationEventService {
                 occurredAt, payload("collectible_definition_id", value.getCollectibleDefinitionId(),
                         "collectible_version", value.getCollectibleVersion(), "game_id", value.getGameId(),
                         "collectible_code", value.getCollectibleCode(), "collectible_kind", value.getCollectibleKind(),
+                        "collectible_name", value.getCollectibleName(),
                         "definition_sha256", value.getDefinitionSha256()));
     }
 
@@ -246,6 +251,8 @@ public class GamificationEventService {
                 value.getRedemptionIntentId(), value.getVersion(), value.getTenantId(), command, occurredAt,
                 payload("redemption_intent_id", value.getRedemptionIntentId(), "game_id", value.getGameId(),
                         "principal_id", value.getPrincipalId(), "adapter_code", value.getAdapterCode(),
+                        "collectible_definition_id", value.getCollectibleDefinitionId(),
+                        "collectible_version", value.getCollectibleVersion(), "quantity", value.getQuantity(),
                         "external_intent_ref", value.getExternalIntentRef(),
                         "external_result_ref", value.getExternalResultRef(), "previous_status", previousStatus,
                         "current_status", value.getStatus(), "contains_external_balance", false));
@@ -261,6 +268,9 @@ public class GamificationEventService {
                         "principal_id", value.getPrincipalId(), "reward_definition_id", value.getRewardDefinitionId(),
                         "reward_version", value.getRewardVersion(), "previous_status", previousStatus,
                         "current_status", value.getStatus(), "reward_grant_id", value.getRewardGrantId(),
+                        "source_type", value.getSourceType(), "source_id", value.getSourceId(),
+                        "claimed_at", value.getClaimedAt() == null ? null
+                                : value.getClaimedAt().toInstant(ZoneOffset.UTC).toString(),
                         "claim_expires_at", value.getClaimExpiresAt().toInstant(ZoneOffset.UTC).toString()));
     }
 
