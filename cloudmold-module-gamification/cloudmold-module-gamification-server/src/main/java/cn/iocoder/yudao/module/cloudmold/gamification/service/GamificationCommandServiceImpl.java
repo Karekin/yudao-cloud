@@ -72,8 +72,19 @@ public class GamificationCommandServiceImpl implements GamificationCommandApi, G
             case DEFINE_TASK -> defineTask(tenantId, operationId, command, occurredAt, now);
             case ADVANCE_TASK -> advanceTask(tenantId, operationId, command, occurredAt, now);
             case TRANSFER_GIFT -> transferGift(tenantId, operationId, command, occurredAt, now);
+            case DEFINE_SEASON_SERIES -> defineSeasonSeries(tenantId, operationId, command, occurredAt, now);
+            case DEFINE_SEASON -> defineSeason(tenantId, operationId, command, occurredAt, now);
+            case DEFINE_COLLECTIBLE -> defineCollectible(tenantId, operationId, command, occurredAt, now);
+            case GRANT_COLLECTIBLE -> grantCollectible(tenantId, operationId, command, occurredAt, now);
+            case CREATE_REDEMPTION_INTENT -> createRedemption(tenantId, operationId, command, occurredAt, now);
+            case RECORD_REDEMPTION_RESULT -> recordRedemptionResult(tenantId, operationId, command, occurredAt, now);
+            case CREATE_REWARD_CLAIM -> createRewardClaim(tenantId, operationId, command, occurredAt, now);
+            case CLAIM_REWARD -> claimReward(tenantId, operationId, command, occurredAt, now);
+            case EXPIRE_REWARD_CLAIM -> expireRewardClaim(tenantId, operationId, command, occurredAt, now);
         };
-        String aggregateId = firstNonNull(result.getGiftTransferId(), result.getTaskProgressId(),
+        String aggregateId = firstNonNull(result.getRewardClaimId(), result.getRedemptionIntentId(),
+                result.getCollectibleDefinitionId(), result.getSeasonId(), result.getSeasonSeriesId(),
+                result.getGiftTransferId(), result.getTaskProgressId(),
                 result.getAssistRecordId(), result.getDrawRequestId(), result.getRewardGrantId(), result.getRoundId(),
                 result.getSessionId(), result.getAccountId(), result.getGameId());
         require(mapper.markOperationSucceeded(operationId, tenantId, aggregateId, JsonUtils.toJsonString(result), now) == 1,
@@ -127,6 +138,57 @@ public class GamificationCommandServiceImpl implements GamificationCommandApi, G
                 principalId, fragmentCode);
         require(balance != null, "game fragment balance does not exist");
         return fragmentView(null, balance, false);
+    }
+
+    @Override
+    public GamificationView getCollectibleOwnership(String gameId, String principalId, String definitionId,
+                                                     Long definitionVersion) {
+        requireId(gameId, "gameId"); requireId(principalId, "principalId"); requireId(definitionId, "definitionId");
+        require(definitionVersion != null && definitionVersion > 0, "definitionVersion must be positive");
+        CollectibleOwnership value = mapper.selectCollectibleOwnership(TenantContextHolder.getRequiredTenantId(),
+                gameId, principalId, definitionId, definitionVersion);
+        require(value != null, "collectible ownership does not exist");
+        return collectibleView(null, value);
+    }
+
+    @Override
+    public GamificationView getRewardClaim(String rewardClaimId) {
+        requireId(rewardClaimId, "rewardClaimId");
+        RewardClaim value = mapper.selectRewardClaim(TenantContextHolder.getRequiredTenantId(), rewardClaimId);
+        require(value != null, "reward claim does not exist"); return claimView(null, value);
+    }
+
+    @Override
+    public GamificationView getRedemption(String redemptionIntentId) {
+        requireId(redemptionIntentId, "redemptionIntentId");
+        RedemptionIntent value = mapper.selectRedemption(TenantContextHolder.getRequiredTenantId(), redemptionIntentId);
+        require(value != null, "redemption does not exist"); return redemptionView(null, value);
+    }
+
+    @Override
+    public GamificationView getSeasonSeries(String id, Long version) {
+        requireId(id,"seasonSeriesId"); require(version!=null && version>0,"seriesVersion must be positive");
+        SeasonSeries value=mapper.selectSeasonSeries(TenantContextHolder.getRequiredTenantId(),id,version);
+        require(value!=null,"season-series version does not exist");
+        return new GamificationView().setGameId(value.getGameId()).setSeasonSeriesId(id).setSeasonSeriesVersion(version);
+    }
+
+    @Override
+    public GamificationView getSeason(String id, Long version) {
+        requireId(id,"seasonId"); require(version!=null && version>0,"seasonVersion must be positive");
+        Season value=mapper.selectSeason(TenantContextHolder.getRequiredTenantId(),id,version);
+        require(value!=null,"season version does not exist");
+        return new GamificationView().setGameId(value.getGameId()).setSeasonId(id).setSeasonVersion(version)
+                .setSeasonSeriesId(value.getSeasonSeriesId()).setSeasonSeriesVersion(value.getSeriesVersion());
+    }
+
+    @Override
+    public GamificationView getCollectibleDefinition(String id, Long version) {
+        requireId(id,"collectibleDefinitionId"); require(version!=null && version>0,"collectibleVersion must be positive");
+        CollectibleDefinition value=mapper.selectCollectibleDefinition(TenantContextHolder.getRequiredTenantId(),id,version);
+        require(value!=null,"collectible definition version does not exist");
+        return new GamificationView().setGameId(value.getGameId()).setCollectibleDefinitionId(id)
+                .setCollectibleVersion(version);
     }
 
     private GamificationView createGame(Long tenantId, Long operationId, GamificationCommand command,
@@ -551,6 +613,203 @@ public class GamificationCommandServiceImpl implements GamificationCommandApi, G
                 .setGiftTransferId(giftId).setLedgerTransactionId(gift.getLedgerTransactionId());
     }
 
+    private GamificationView defineSeasonSeries(Long tenantId, Long operationId, GamificationCommand command,
+                                                Instant occurredAt, LocalDateTime now) {
+        Game game = requirePublishedGame(tenantId, command.getGameId());
+        requireCode(command.getSeasonSeriesCode(), "seasonSeriesCode");
+        requireText(command.getSeasonSeriesName(), "seasonSeriesName", 128);
+        require(command.getSeasonSeriesVersion() != null && command.getSeasonSeriesVersion() > 0,
+                "seasonSeriesVersion must be positive");
+        String id = command.getSeasonSeriesId() == null ? UUID.randomUUID().toString() : command.getSeasonSeriesId();
+        requireId(id, "seasonSeriesId");
+        SeasonSeries value = new SeasonSeries().setSeasonSeriesId(id).setTenantId(tenantId).setGameId(game.getGameId())
+                .setSeriesCode(command.getSeasonSeriesCode()).setSeriesVersion(command.getSeasonSeriesVersion())
+                .setSeriesName(command.getSeasonSeriesName()).setDefinitionSha256(DigestUtil.sha256Hex(game.getGameId()
+                        + "|" + command.getSeasonSeriesCode() + "|" + command.getSeasonSeriesVersion() + "|"
+                        + command.getSeasonSeriesName())).setPublishedAt(now);
+        require(mapper.insertSeasonSeries(value) == 1, "failed to publish immutable season-series version");
+        eventService.appendSeasonSeries(value, command, occurredAt);
+        return new GamificationView().setOperationId(operationId).setDuplicate(false).setGameId(game.getGameId())
+                .setSeasonSeriesId(id).setSeasonSeriesVersion(value.getSeriesVersion());
+    }
+
+    private GamificationView defineSeason(Long tenantId, Long operationId, GamificationCommand command,
+                                          Instant occurredAt, LocalDateTime now) {
+        requireId(command.getSeasonSeriesId(), "seasonSeriesId");
+        require(command.getSeasonSeriesVersion() != null && command.getSeasonSeriesVersion() > 0,
+                "seasonSeriesVersion must be positive");
+        SeasonSeries series = mapper.selectSeasonSeries(tenantId, command.getSeasonSeriesId(),
+                command.getSeasonSeriesVersion());
+        require(series != null, "season-series version does not exist");
+        requireCode(command.getSeasonCode(), "seasonCode"); requireText(command.getSeasonName(), "seasonName", 128);
+        require(command.getSeasonVersion() != null && command.getSeasonVersion() > 0,
+                "seasonVersion must be positive");
+        require(command.getSeasonStartsAt() != null && command.getSeasonEndsAt() != null
+                && command.getSeasonEndsAt().isAfter(command.getSeasonStartsAt()), "season interval is invalid");
+        String id = command.getSeasonId() == null ? UUID.randomUUID().toString() : command.getSeasonId();
+        requireId(id, "seasonId");
+        Season value = new Season().setSeasonId(id).setTenantId(tenantId).setGameId(series.getGameId())
+                .setSeasonSeriesId(series.getSeasonSeriesId()).setSeriesVersion(series.getSeriesVersion())
+                .setSeasonCode(command.getSeasonCode()).setSeasonVersion(command.getSeasonVersion())
+                .setSeasonName(command.getSeasonName()).setStatus("PUBLISHED")
+                .setStartsAt(LocalDateTime.ofInstant(command.getSeasonStartsAt(), ZoneOffset.UTC))
+                .setEndsAt(LocalDateTime.ofInstant(command.getSeasonEndsAt(), ZoneOffset.UTC))
+                .setDefinitionSha256(DigestUtil.sha256Hex(series.getSeasonSeriesId() + "|" + series.getSeriesVersion()
+                        + "|" + command.getSeasonCode() + "|" + command.getSeasonVersion() + "|"
+                        + command.getSeasonStartsAt() + "|" + command.getSeasonEndsAt())).setPublishedAt(now);
+        require(mapper.insertSeason(value) == 1, "failed to publish immutable season version");
+        eventService.appendSeason(value, command, occurredAt);
+        return new GamificationView().setOperationId(operationId).setDuplicate(false).setGameId(value.getGameId())
+                .setSeasonId(id).setSeasonVersion(value.getSeasonVersion()).setSeasonSeriesId(value.getSeasonSeriesId())
+                .setSeasonSeriesVersion(value.getSeriesVersion());
+    }
+
+    private GamificationView defineCollectible(Long tenantId, Long operationId, GamificationCommand command,
+                                               Instant occurredAt, LocalDateTime now) {
+        Game game = requirePublishedGame(tenantId, command.getGameId()); requireCode(command.getCollectibleCode(), "collectibleCode");
+        requireText(command.getCollectibleName(), "collectibleName", 128);
+        require(Set.of("GK", "FIGURE", "COLLECTIBLE").contains(command.getCollectibleKind()), "unsupported collectibleKind");
+        require(command.getCollectibleVersion() != null && command.getCollectibleVersion() > 0,
+                "collectibleVersion must be positive");
+        String id = command.getCollectibleDefinitionId() == null ? UUID.randomUUID().toString() : command.getCollectibleDefinitionId();
+        requireId(id, "collectibleDefinitionId");
+        CollectibleDefinition value = new CollectibleDefinition().setCollectibleDefinitionId(id).setTenantId(tenantId)
+                .setGameId(game.getGameId()).setCollectibleCode(command.getCollectibleCode())
+                .setCollectibleVersion(command.getCollectibleVersion()).setCollectibleKind(command.getCollectibleKind())
+                .setCollectibleName(command.getCollectibleName()).setDefinitionSha256(DigestUtil.sha256Hex(game.getGameId()
+                        + "|" + command.getCollectibleCode() + "|" + command.getCollectibleVersion() + "|"
+                        + command.getCollectibleKind())).setPublishedAt(now);
+        require(mapper.insertCollectibleDefinition(value) == 1, "failed to publish immutable collectible version");
+        eventService.appendCollectibleDefinition(value, command, occurredAt);
+        return new GamificationView().setOperationId(operationId).setDuplicate(false).setGameId(game.getGameId())
+                .setCollectibleDefinitionId(id).setCollectibleVersion(value.getCollectibleVersion());
+    }
+
+    private GamificationView grantCollectible(Long tenantId, Long operationId, GamificationCommand command,
+                                              Instant occurredAt, LocalDateTime now) {
+        require("ADMIN_ADJUSTMENT".equals(command.getRewardSourceType()), "collectible grant requires ADMIN_ADJUSTMENT");
+        require(command.getEvidenceRef() != null && EVIDENCE.matcher(command.getEvidenceRef()).matches(), "collectible grant requires sha256 evidenceRef");
+        return collectibleView(operationId, applyCollectible(tenantId, command.getPrincipalId(),
+                command.getCollectibleDefinitionId(), command.getCollectibleVersion(), command.getCollectibleQuantity(),
+                "ADMIN_ADJUSTMENT", command.getRewardSourceId(), command, occurredAt, now));
+    }
+
+    private CollectibleOwnership applyCollectible(Long tenantId, String principalId, String definitionId,
+            Long definitionVersion, Long quantity, String sourceType, String sourceId, GamificationCommand command,
+            Instant occurredAt, LocalDateTime now) {
+        requireId(principalId, "principalId"); requireId(sourceId, "sourceId");
+        require(quantity != null && quantity != 0, "collectibleQuantity delta must be non-zero");
+        CollectibleDefinition definition = mapper.selectCollectibleDefinition(tenantId, definitionId, definitionVersion);
+        require(definition != null, "collectible definition version does not exist");
+        CollectibleOwnership ownership = mapper.selectCollectibleOwnershipForUpdate(tenantId, definition.getGameId(),
+                principalId, definitionId, definitionVersion);
+        if (ownership == null) {
+            require(quantity > 0, "collectible debit requires an existing sufficient ownership");
+            ownership = new CollectibleOwnership().setOwnershipId(UUID.randomUUID().toString()).setTenantId(tenantId)
+                    .setGameId(definition.getGameId()).setPrincipalId(principalId).setCollectibleDefinitionId(definitionId)
+                    .setCollectibleVersion(definitionVersion).setQuantity(quantity).setVersion(1L).setCreatedAt(now).setUpdatedAt(now);
+            require(mapper.insertCollectibleOwnership(ownership) == 1, "failed to create collectible ownership");
+        } else {
+            require(mapper.applyCollectibleDelta(tenantId, ownership.getOwnershipId(), ownership.getVersion(), quantity, now) == 1,
+                    "collectible ownership version conflict");
+            ownership.setQuantity(Math.addExact(ownership.getQuantity(), quantity)).setVersion(ownership.getVersion()+1).setUpdatedAt(now);
+        }
+        CollectibleLedgerEntry entry = new CollectibleLedgerEntry().setCollectibleEntryId(UUID.randomUUID().toString())
+                .setTenantId(tenantId).setOwnershipId(ownership.getOwnershipId()).setSourceType(sourceType).setSourceId(sourceId)
+                .setDeltaQuantity(quantity).setBalanceAfterQuantity(ownership.getQuantity())
+                .setOccurredAt(LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC)).setCreatedAt(now);
+        require(mapper.insertCollectibleEntry(entry) == 1, "duplicate collectible source");
+        eventService.appendCollectible(entry, ownership, command, occurredAt); return ownership;
+    }
+
+    private GamificationView createRedemption(Long tenantId, Long operationId, GamificationCommand command,
+                                              Instant occurredAt, LocalDateTime now) {
+        requireId(command.getPrincipalId(), "principalId");
+        CollectibleDefinition definition = mapper.selectCollectibleDefinition(tenantId,
+                command.getCollectibleDefinitionId(), command.getCollectibleVersion());
+        require(definition != null, "collectible definition version does not exist");
+        require(command.getCollectibleQuantity() != null && command.getCollectibleQuantity() > 0, "collectibleQuantity must be positive");
+        require("MALL_REDEMPTION_V1".equals(command.getAdapterCode()), "only governed mall redemption adapter is supported");
+        requireId(command.getExternalIntentRef(), "externalIntentRef");
+        require(command.getAssetAmountMicrounits() == null && command.getGiftAmountMicrounits() == null
+                && command.getVirtualCurrencyCode() == null, "redemption stores adapter references, never external balances or money");
+        RedemptionIntent value = new RedemptionIntent().setRedemptionIntentId(UUID.randomUUID().toString())
+                .setTenantId(tenantId).setGameId(definition.getGameId()).setPrincipalId(command.getPrincipalId())
+                .setCollectibleDefinitionId(definition.getCollectibleDefinitionId()).setCollectibleVersion(definition.getCollectibleVersion())
+                .setQuantity(command.getCollectibleQuantity()).setAdapterCode(command.getAdapterCode())
+                .setExternalIntentRef(command.getExternalIntentRef()).setStatus("PENDING").setVersion(1L)
+                .setOccurredAt(LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC)).setCreatedAt(now).setUpdatedAt(now);
+        require(mapper.insertRedemptionIntent(value) == 1, "duplicate external redemption intent");
+        eventService.appendRedemption(operationId, value, null, command, occurredAt, now); return redemptionView(operationId, value);
+    }
+
+    private GamificationView recordRedemptionResult(Long tenantId, Long operationId, GamificationCommand command,
+                                                    Instant occurredAt, LocalDateTime now) {
+        requireId(command.getRedemptionIntentId(), "redemptionIntentId"); requireExpectedVersion(command);
+        require(Set.of("SUCCEEDED", "REJECTED").contains(command.getRedemptionOutcome()), "invalid redemptionOutcome");
+        requireId(command.getExternalResultRef(), "externalResultRef");
+        RedemptionIntent value = mapper.selectRedemptionForUpdate(tenantId, command.getRedemptionIntentId());
+        require(value != null && "PENDING".equals(value.getStatus()), "redemption is not pending");
+        require(value.getVersion().equals(command.getExpectedVersion()), "redemption version conflict");
+        if ("SUCCEEDED".equals(command.getRedemptionOutcome())) {
+            applyCollectible(tenantId, value.getPrincipalId(), value.getCollectibleDefinitionId(), value.getCollectibleVersion(),
+                    Math.negateExact(value.getQuantity()), "REDEMPTION", value.getRedemptionIntentId(), command,
+                    occurredAt, now);
+        }
+        require(mapper.completeRedemption(tenantId, value.getRedemptionIntentId(), value.getVersion(),
+                command.getExternalResultRef(), command.getRedemptionOutcome(), now) == 1, "redemption transition conflict");
+        String previous=value.getStatus(); value.setExternalResultRef(command.getExternalResultRef()).setStatus(command.getRedemptionOutcome())
+                .setVersion(value.getVersion()+1).setUpdatedAt(now);
+        eventService.appendRedemption(operationId, value, previous, command, occurredAt, now); return redemptionView(operationId, value);
+    }
+
+    private GamificationView createRewardClaim(Long tenantId, Long operationId, GamificationCommand command,
+                                               Instant occurredAt, LocalDateTime now) {
+        Game game = requirePublishedGame(tenantId, command.getGameId()); requireId(command.getPrincipalId(), "principalId");
+        RewardDefinition reward = requireReward(tenantId, command.getRewardDefinitionId(), command.getRewardVersion());
+        require(game.getGameId().equals(reward.getGameId()), "claim reward belongs to another game");
+        requireCode(command.getRewardSourceType(), "rewardSourceType"); requireId(command.getRewardSourceId(), "rewardSourceId");
+        require(command.getClaimExpiresAt()!=null && command.getClaimExpiresAt().isAfter(occurredAt)
+                && command.getClaimExpiresAt().isAfter(now.toInstant(ZoneOffset.UTC)),
+                "claimExpiresAt must be in the future and after occurredAt");
+        RewardClaim value = new RewardClaim().setRewardClaimId(UUID.randomUUID().toString()).setTenantId(tenantId)
+                .setGameId(game.getGameId()).setPrincipalId(command.getPrincipalId()).setRewardDefinitionId(reward.getRewardDefinitionId())
+                .setRewardVersion(reward.getRewardVersion()).setSourceType(command.getRewardSourceType()).setSourceId(command.getRewardSourceId())
+                .setStatus("CLAIMABLE").setVersion(1L).setClaimExpiresAt(LocalDateTime.ofInstant(command.getClaimExpiresAt(), ZoneOffset.UTC))
+                .setCreatedAt(now).setUpdatedAt(now);
+        require(mapper.insertRewardClaim(value)==1, "duplicate reward claim source");
+        eventService.appendClaim(operationId,value,null,command,occurredAt,now); return claimView(operationId,value);
+    }
+
+    private GamificationView claimReward(Long tenantId, Long operationId, GamificationCommand command,
+                                         Instant occurredAt, LocalDateTime now) {
+        requireId(command.getRewardClaimId(), "rewardClaimId"); requireExpectedVersion(command);
+        RewardClaim value=mapper.selectRewardClaimForUpdate(tenantId,command.getRewardClaimId());
+        require(value!=null && "CLAIMABLE".equals(value.getStatus()), "reward claim is not claimable");
+        require(value.getVersion().equals(command.getExpectedVersion()), "reward claim version conflict");
+        require(value.getClaimExpiresAt().isAfter(now), "reward claim is expired");
+        GrantOutcome grant=applyReward(tenantId,value.getGameId(),value.getPrincipalId(),value.getRewardDefinitionId(),
+                value.getRewardVersion(),"REWARD_CLAIM",value.getRewardClaimId(),operationId,command,occurredAt,now);
+        require(mapper.transitionRewardClaim(tenantId,value.getRewardClaimId(),value.getVersion(),"CLAIMED",
+                grant.grant().getRewardGrantId(),now,now)==1,"reward claim transition conflict");
+        String previous=value.getStatus(); value.setStatus("CLAIMED").setRewardGrantId(grant.grant().getRewardGrantId())
+                .setClaimedAt(now).setVersion(value.getVersion()+1).setUpdatedAt(now);
+        eventService.appendClaim(operationId,value,previous,command,occurredAt,now); return claimView(operationId,value);
+    }
+
+    private GamificationView expireRewardClaim(Long tenantId, Long operationId, GamificationCommand command,
+                                               Instant occurredAt, LocalDateTime now) {
+        requireId(command.getRewardClaimId(), "rewardClaimId"); requireExpectedVersion(command);
+        RewardClaim value=mapper.selectRewardClaimForUpdate(tenantId,command.getRewardClaimId());
+        require(value!=null && "CLAIMABLE".equals(value.getStatus()),"reward claim is not claimable");
+        require(value.getVersion().equals(command.getExpectedVersion()),"reward claim version conflict");
+        require(!value.getClaimExpiresAt().isAfter(now),"reward claim has not expired");
+        require(mapper.transitionRewardClaim(tenantId,value.getRewardClaimId(),value.getVersion(),"EXPIRED",null,null,now)==1,
+                "reward claim expiry conflict");
+        String previous=value.getStatus(); value.setStatus("EXPIRED").setVersion(value.getVersion()+1).setUpdatedAt(now);
+        eventService.appendClaim(operationId,value,previous,command,occurredAt,now); return claimView(operationId,value);
+    }
+
     private GrantOutcome applyReward(Long tenantId, String gameId, String principalId, String definitionId,
                                      Long rewardVersion, String sourceType, String sourceId, Long operationId,
                                      GamificationCommand command, Instant occurredAt, LocalDateTime now) {
@@ -748,6 +1007,27 @@ public class GamificationCommandServiceImpl implements GamificationCommandApi, G
     private static GamificationView fragmentView(Long operationId, FragmentBalance balance, boolean duplicate) {
         return new GamificationView().setOperationId(operationId).setDuplicate(duplicate).setGameId(balance.getGameId())
                 .setFragmentCode(balance.getFragmentCode()).setFragmentQuantity(balance.getQuantity());
+    }
+
+    private static GamificationView collectibleView(Long operationId, CollectibleOwnership value) {
+        return new GamificationView().setOperationId(operationId).setDuplicate(false).setGameId(value.getGameId())
+                .setCollectibleDefinitionId(value.getCollectibleDefinitionId())
+                .setCollectibleVersion(value.getCollectibleVersion()).setCollectibleQuantity(value.getQuantity())
+                .setVersion(value.getVersion());
+    }
+
+    private static GamificationView redemptionView(Long operationId, RedemptionIntent value) {
+        return new GamificationView().setOperationId(operationId).setDuplicate(false).setGameId(value.getGameId())
+                .setRedemptionIntentId(value.getRedemptionIntentId()).setRedemptionStatus(value.getStatus())
+                .setCollectibleDefinitionId(value.getCollectibleDefinitionId())
+                .setCollectibleVersion(value.getCollectibleVersion()).setVersion(value.getVersion());
+    }
+
+    private static GamificationView claimView(Long operationId, RewardClaim value) {
+        return new GamificationView().setOperationId(operationId).setDuplicate(false).setGameId(value.getGameId())
+                .setRewardClaimId(value.getRewardClaimId()).setRewardClaimStatus(value.getStatus())
+                .setRewardDefinitionId(value.getRewardDefinitionId()).setRewardVersion(value.getRewardVersion())
+                .setRewardGrantId(value.getRewardGrantId()).setVersion(value.getVersion());
     }
 
     private static void validateCommon(GamificationCommand command) {

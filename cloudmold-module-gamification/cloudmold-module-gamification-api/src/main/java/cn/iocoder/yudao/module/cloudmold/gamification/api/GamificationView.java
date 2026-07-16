@@ -44,4 +44,16 @@ public class GamificationView {
     private Long fragmentQuantity;
     private String giftTransferId;
     private String ledgerTransactionId;
+    private String seasonSeriesId;
+    private Long seasonSeriesVersion;
+    private String seasonId;
+    private Long seasonVersion;
+    private String collectibleDefinitionId;
+    private Long collectibleVersion;
+    private Long collectibleQuantity;
+    private String redemptionIntentId;
+    private String redemptionStatus;
+    private String rewardClaimId;
+    private String rewardClaimStatus;
+    private Long version;
 }

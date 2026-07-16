@@ -169,4 +169,57 @@ public final class GamificationRecords {
         private String previousStatus; private String currentStatus; private Long operationId;
         private LocalDateTime occurredAt; private LocalDateTime createdAt;
     }
+
+    @Data @Accessors(chain = true)
+    public static class SeasonSeries {
+        private String seasonSeriesId; private Long tenantId; private String gameId; private String seriesCode;
+        private Long seriesVersion; private String seriesName; private String definitionSha256;
+        private LocalDateTime publishedAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class Season {
+        private String seasonId; private Long tenantId; private String gameId; private String seasonSeriesId;
+        private Long seriesVersion; private String seasonCode; private Long seasonVersion; private String seasonName;
+        private String status; private LocalDateTime startsAt; private LocalDateTime endsAt;
+        private String definitionSha256; private LocalDateTime publishedAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class CollectibleDefinition {
+        private String collectibleDefinitionId; private Long tenantId; private String gameId;
+        private String collectibleCode; private Long collectibleVersion; private String collectibleKind;
+        private String collectibleName; private String definitionSha256; private LocalDateTime publishedAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class CollectibleOwnership {
+        private String ownershipId; private Long tenantId; private String gameId; private String principalId;
+        private String collectibleDefinitionId; private Long collectibleVersion; private Long quantity;
+        private Long version; private LocalDateTime createdAt; private LocalDateTime updatedAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class CollectibleLedgerEntry {
+        private String collectibleEntryId; private Long tenantId; private String ownershipId; private String sourceType;
+        private String sourceId; private Long deltaQuantity; private Long balanceAfterQuantity;
+        private LocalDateTime occurredAt; private LocalDateTime createdAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class RedemptionIntent {
+        private String redemptionIntentId; private Long tenantId; private String gameId; private String principalId;
+        private String collectibleDefinitionId; private Long collectibleVersion; private Long quantity;
+        private String adapterCode; private String externalIntentRef; private String externalResultRef;
+        private String status; private Long version; private LocalDateTime occurredAt;
+        private LocalDateTime createdAt; private LocalDateTime updatedAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class RewardClaim {
+        private String rewardClaimId; private Long tenantId; private String gameId; private String principalId;
+        private String rewardDefinitionId; private Long rewardVersion; private String sourceType; private String sourceId;
+        private String status; private String rewardGrantId; private Long version; private LocalDateTime claimExpiresAt;
+        private LocalDateTime claimedAt; private LocalDateTime createdAt; private LocalDateTime updatedAt;
+    }
 }

@@ -15,6 +15,7 @@ public interface GamificationStoreMapper {
               (tenant_id,idempotency_key,command_type,request_hash,attempt_token,status,created_at,updated_at)
             VALUES (#{tenantId},#{idempotencyKey},#{commandType},#{requestHash},#{attemptToken},0,#{now},#{now})
             ON DUPLICATE KEY UPDATE operation_id=LAST_INSERT_ID(operation_id)
+
             """)
     int insertOrResolveOperation(@Param("tenantId") Long tenantId, @Param("idempotencyKey") String idempotencyKey,
                                  @Param("commandType") String commandType, @Param("requestHash") String requestHash,
@@ -27,6 +28,7 @@ public interface GamificationStoreMapper {
                    aggregate_id,result_json,created_at,updated_at
             FROM cloudmold_gamification_operation
             WHERE operation_id=#{operationId} AND tenant_id=#{tenantId} FOR UPDATE
+
             """) Operation selectOperationForUpdate(@Param("operationId") Long operationId,
                                                        @Param("tenantId") Long tenantId);
 
@@ -34,6 +36,7 @@ public interface GamificationStoreMapper {
             UPDATE cloudmold_gamification_operation SET status=10,aggregate_id=#{aggregateId},
               result_json=CAST(#{resultJson} AS JSON),updated_at=#{now}
             WHERE operation_id=#{operationId} AND tenant_id=#{tenantId} AND status=0
+
             """)
     int markOperationSucceeded(@Param("operationId") Long operationId, @Param("tenantId") Long tenantId,
                                @Param("aggregateId") String aggregateId, @Param("resultJson") String resultJson,
@@ -43,18 +46,21 @@ public interface GamificationStoreMapper {
             INSERT INTO cloudmold_gamification_game
               (game_id,tenant_id,game_code,game_name,status,current_version,created_at,updated_at)
             VALUES (#{gameId},#{tenantId},#{gameCode},#{gameName},#{status},#{currentVersion},#{createdAt},#{updatedAt})
+
             """) int insertGame(Game value);
 
     @Select("""
             SELECT game_id,tenant_id,game_code,game_name,status,current_version,virtual_currency_code,
                    assist_daily_limit,max_rounds_per_session,session_ttl_seconds,created_at,updated_at
             FROM cloudmold_gamification_game WHERE tenant_id=#{tenantId} AND game_id=#{gameId}
+
             """) Game selectGame(@Param("tenantId") Long tenantId, @Param("gameId") String gameId);
 
     @Select("""
             SELECT game_id,tenant_id,game_code,game_name,status,current_version,virtual_currency_code,
                    assist_daily_limit,max_rounds_per_session,session_ttl_seconds,created_at,updated_at
             FROM cloudmold_gamification_game WHERE tenant_id=#{tenantId} AND game_id=#{gameId} FOR UPDATE
+
             """) Game selectGameForUpdate(@Param("tenantId") Long tenantId, @Param("gameId") String gameId);
 
     @Insert("""
@@ -63,6 +69,7 @@ public interface GamificationStoreMapper {
                assist_daily_limit,max_rounds_per_session,session_ttl_seconds,published_at)
             VALUES (#{gameVersionId},#{tenantId},#{gameId},#{gameVersion},#{definitionSha256},#{virtualCurrencyCode},
                     #{assistDailyLimit},#{maxRoundsPerSession},#{sessionTtlSeconds},#{publishedAt})
+
             """) int insertGameVersion(GameVersion value);
 
     @Update("""
@@ -70,6 +77,7 @@ public interface GamificationStoreMapper {
               virtual_currency_code=#{currencyCode},assist_daily_limit=#{assistLimit},
               max_rounds_per_session=#{maxRounds},session_ttl_seconds=#{ttlSeconds},updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND game_id=#{gameId} AND current_version=#{expectedVersion}
+
             """)
     int publishGame(@Param("tenantId") Long tenantId, @Param("gameId") String gameId,
                     @Param("expectedVersion") Long expectedVersion, @Param("currencyCode") String currencyCode,
@@ -82,6 +90,7 @@ public interface GamificationStoreMapper {
                status,version,created_at,updated_at)
             VALUES (#{accountId},#{tenantId},#{gameId},#{ownerType},#{ownerRef},#{assetClass},#{currencyCode},
                     #{balanceMicrounits},#{status},#{version},#{createdAt},#{updatedAt})
+
             """) int insertAccount(Account value);
 
     @Select("""
@@ -89,6 +98,7 @@ public interface GamificationStoreMapper {
                    status,version,created_at,updated_at
             FROM cloudmold_gamification_currency_account
             WHERE tenant_id=#{tenantId} AND game_id=#{gameId} AND owner_type=#{ownerType} AND owner_ref=#{ownerRef}
+
             """)
     Account selectAccountByOwner(@Param("tenantId") Long tenantId, @Param("gameId") String gameId,
                                  @Param("ownerType") String ownerType, @Param("ownerRef") String ownerRef);
@@ -98,6 +108,7 @@ public interface GamificationStoreMapper {
                    status,version,created_at,updated_at
             FROM cloudmold_gamification_currency_account
             WHERE tenant_id=#{tenantId} AND account_id=#{accountId} FOR UPDATE
+
             """) Account selectAccountByIdForUpdate(@Param("tenantId") Long tenantId,
                                                         @Param("accountId") String accountId);
 
@@ -106,6 +117,7 @@ public interface GamificationStoreMapper {
             SET balance_microunits=balance_microunits+#{delta},version=version+1,updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND account_id=#{accountId} AND version=#{expectedVersion}
               AND (owner_type='TREASURY' OR balance_microunits+#{delta}>=0)
+
             """)
     int applyAccountDelta(@Param("tenantId") Long tenantId, @Param("accountId") String accountId,
                           @Param("expectedVersion") Long expectedVersion, @Param("delta") Long delta,
@@ -117,6 +129,7 @@ public interface GamificationStoreMapper {
                amount_microunits,occurred_at,created_at)
             VALUES (#{ledgerTransactionId},#{tenantId},#{gameId},#{currencyCode},#{businessType},#{businessId},
                     #{amountMicrounits},#{occurredAt},#{createdAt})
+
             """) int insertCurrencyTransaction(CurrencyTransaction value);
 
     @Insert("""
@@ -125,6 +138,7 @@ public interface GamificationStoreMapper {
                balance_after_microunits,created_at)
             VALUES (#{ledgerEntryId},#{tenantId},#{ledgerTransactionId},#{entrySequence},#{accountId},
                     #{deltaMicrounits},#{balanceAfterMicrounits},#{createdAt})
+
             """) int insertCurrencyEntry(CurrencyEntry value);
 
     @Insert("""
@@ -133,12 +147,14 @@ public interface GamificationStoreMapper {
                expires_at,created_at,updated_at)
             VALUES (#{sessionId},#{tenantId},#{gameId},#{gameVersion},#{principalId},#{status},#{roundCount},
                     #{version},#{expiresAt},#{createdAt},#{updatedAt})
+
             """) int insertSession(Session value);
 
     @Select("""
             SELECT session_id,tenant_id,game_id,game_version,principal_id,status,round_count,version,
                    expires_at,created_at,updated_at
             FROM cloudmold_gamification_session WHERE tenant_id=#{tenantId} AND session_id=#{sessionId}
+
             """) Session selectSession(@Param("tenantId") Long tenantId, @Param("sessionId") String sessionId);
 
     @Select("""
@@ -146,12 +162,14 @@ public interface GamificationStoreMapper {
                    expires_at,created_at,updated_at
             FROM cloudmold_gamification_session
             WHERE tenant_id=#{tenantId} AND session_id=#{sessionId} FOR UPDATE
+
             """) Session selectSessionForUpdate(@Param("tenantId") Long tenantId, @Param("sessionId") String sessionId);
 
     @Update("""
             UPDATE cloudmold_gamification_session SET round_count=round_count+1,version=version+1,updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND session_id=#{sessionId} AND version=#{expectedVersion}
               AND status='OPEN' AND round_count<#{maxRounds} AND expires_at>#{now}
+
             """) int addSessionRound(@Param("tenantId") Long tenantId, @Param("sessionId") String sessionId,
                                       @Param("expectedVersion") Long expectedVersion,
                                       @Param("maxRounds") Integer maxRounds, @Param("now") LocalDateTime now);
@@ -162,18 +180,21 @@ public interface GamificationStoreMapper {
                version,started_at,updated_at)
             VALUES (#{roundId},#{tenantId},#{sessionId},#{gameId},#{gameVersion},#{principalId},#{roundNumber},
                     #{status},#{version},#{startedAt},#{updatedAt})
+
             """) int insertRound(Round value);
 
     @Select("""
             SELECT round_id,tenant_id,session_id,game_id,game_version,principal_id,round_number,status,outcome,
                    score,version,started_at,completed_at,updated_at
             FROM cloudmold_gamification_round WHERE tenant_id=#{tenantId} AND round_id=#{roundId} FOR UPDATE
+
             """) Round selectRoundForUpdate(@Param("tenantId") Long tenantId, @Param("roundId") String roundId);
 
     @Update("""
             UPDATE cloudmold_gamification_round SET status='COMPLETED',outcome=#{outcome},score=#{score},
               version=version+1,completed_at=#{now},updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND round_id=#{roundId} AND status='ACTIVE' AND version=#{expectedVersion}
+
             """) int completeRound(@Param("tenantId") Long tenantId, @Param("roundId") String roundId,
                                     @Param("expectedVersion") Long expectedVersion, @Param("outcome") String outcome,
                                     @Param("score") Long score, @Param("now") LocalDateTime now);
@@ -185,6 +206,7 @@ public interface GamificationStoreMapper {
             VALUES (#{rewardDefinitionId},#{tenantId},#{gameId},#{rewardCode},#{rewardVersion},#{rewardKind},
                     #{assetClass},#{assetCode},#{currencyAmountMicrounits},#{fragmentQuantity},
                     #{definitionSha256},#{publishedAt})
+
             """) int insertRewardDefinition(RewardDefinition value);
 
     @Select("""
@@ -192,6 +214,7 @@ public interface GamificationStoreMapper {
                    asset_code,currency_amount_microunits,fragment_quantity,definition_sha256,published_at
             FROM cloudmold_gamification_reward_definition
             WHERE tenant_id=#{tenantId} AND reward_definition_id=#{rewardDefinitionId} AND reward_version=#{rewardVersion}
+
             """) RewardDefinition selectRewardDefinition(@Param("tenantId") Long tenantId,
                                                             @Param("rewardDefinitionId") String rewardDefinitionId,
                                                             @Param("rewardVersion") Long rewardVersion);
@@ -204,11 +227,13 @@ public interface GamificationStoreMapper {
             VALUES (#{rewardGrantId},#{tenantId},#{gameId},#{principalId},#{rewardDefinitionId},#{rewardVersion},
                     #{sourceType},#{sourceId},#{ledgerTransactionId},#{grantedCurrencyMicrounits},
                     #{grantedFragmentQuantity},#{occurredAt},#{createdAt})
+
             """) int insertRewardGrant(RewardGrant value);
 
     @Update("""
             UPDATE cloudmold_gamification_reward_grant SET ledger_transaction_id=#{ledgerTransactionId}
             WHERE tenant_id=#{tenantId} AND reward_grant_id=#{rewardGrantId} AND ledger_transaction_id IS NULL
+
             """)
     int attachRewardGrantLedger(@Param("tenantId") Long tenantId, @Param("rewardGrantId") String rewardGrantId,
                                 @Param("ledgerTransactionId") String ledgerTransactionId);
@@ -219,6 +244,7 @@ public interface GamificationStoreMapper {
                total_weight,definition_sha256,published_at)
             VALUES (#{drawPoolId},#{tenantId},#{gameId},#{drawPoolCode},#{poolVersion},#{status},
                     #{priceMicrounits},#{totalWeight},#{definitionSha256},#{publishedAt})
+
             """) int insertDrawPool(DrawPool value);
 
     @Insert("""
@@ -227,6 +253,7 @@ public interface GamificationStoreMapper {
                reward_version,weight,cumulative_weight)
             VALUES (#{drawPoolItemId},#{tenantId},#{drawPoolId},#{poolVersion},#{itemSequence},
                     #{rewardDefinitionId},#{rewardVersion},#{weight},#{cumulativeWeight})
+
             """) int insertDrawPoolItem(DrawPoolItem value);
 
     @Select("""
@@ -234,6 +261,7 @@ public interface GamificationStoreMapper {
                    total_weight,definition_sha256,published_at
             FROM cloudmold_gamification_draw_pool
             WHERE tenant_id=#{tenantId} AND draw_pool_id=#{drawPoolId} AND pool_version=#{poolVersion}
+
             """) DrawPool selectDrawPool(@Param("tenantId") Long tenantId, @Param("drawPoolId") String drawPoolId,
                                            @Param("poolVersion") Long poolVersion);
 
@@ -243,6 +271,7 @@ public interface GamificationStoreMapper {
             FROM cloudmold_gamification_draw_pool_item
             WHERE tenant_id=#{tenantId} AND draw_pool_id=#{drawPoolId} AND pool_version=#{poolVersion}
             ORDER BY item_sequence
+
             """) List<DrawPoolItem> selectDrawPoolItems(@Param("tenantId") Long tenantId,
                                                           @Param("drawPoolId") String drawPoolId,
                                                           @Param("poolVersion") Long poolVersion);
@@ -253,6 +282,7 @@ public interface GamificationStoreMapper {
                price_microunits,status,occurred_at,created_at)
             VALUES (#{drawRequestId},#{tenantId},#{gameId},#{principalId},#{drawPoolId},#{poolVersion},
                     #{chargeTransactionId},#{priceMicrounits},#{status},#{occurredAt},#{createdAt})
+
             """) int insertDrawRequest(DrawRequest value);
 
     @Insert("""
@@ -261,6 +291,7 @@ public interface GamificationStoreMapper {
                draw_pool_item_id,reward_grant_id,created_at)
             VALUES (#{drawResultId},#{tenantId},#{drawRequestId},#{selectedTicket},#{totalWeight},#{entropySha256},
                     #{drawPoolItemId},#{rewardGrantId},#{createdAt})
+
             """) int insertDrawResult(DrawResult value);
 
     @Select("""
@@ -269,6 +300,7 @@ public interface GamificationStoreMapper {
             FROM cloudmold_gamification_assist_quota
             WHERE tenant_id=#{tenantId} AND game_id=#{gameId} AND beneficiary_principal_id=#{principalId}
               AND quota_date=#{quotaDate} FOR UPDATE
+
             """) AssistQuota selectAssistQuotaForUpdate(@Param("tenantId") Long tenantId,
                                                            @Param("gameId") String gameId,
                                                            @Param("principalId") String principalId,
@@ -280,6 +312,7 @@ public interface GamificationStoreMapper {
                assists_used,version,created_at,updated_at)
             VALUES (#{assistQuotaId},#{tenantId},#{gameId},#{beneficiaryPrincipalId},#{quotaDate},#{assistLimit},
                     #{assistsUsed},#{version},#{createdAt},#{updatedAt})
+
             """) int insertAssistQuota(AssistQuota value);
 
     @Update("""
@@ -287,6 +320,7 @@ public interface GamificationStoreMapper {
             SET assists_used=assists_used+1,version=version+1,updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND assist_quota_id=#{quotaId} AND version=#{expectedVersion}
               AND assists_used<assist_limit
+
             """) int consumeAssistQuota(@Param("tenantId") Long tenantId, @Param("quotaId") String quotaId,
                                           @Param("expectedVersion") Long expectedVersion,
                                           @Param("now") LocalDateTime now);
@@ -297,6 +331,7 @@ public interface GamificationStoreMapper {
                quota_date,ordinal,occurred_at,created_at)
             VALUES (#{assistRecordId},#{tenantId},#{gameId},#{helperPrincipalId},#{beneficiaryPrincipalId},
                     #{quotaDate},#{ordinal},#{occurredAt},#{createdAt})
+
             """) int insertAssistRecord(AssistRecord value);
 
     @Insert("""
@@ -305,6 +340,7 @@ public interface GamificationStoreMapper {
                reward_version,definition_sha256,published_at)
             VALUES (#{taskDefinitionId},#{tenantId},#{gameId},#{taskCode},#{taskVersion},#{targetUnits},
                     #{rewardDefinitionId},#{rewardVersion},#{definitionSha256},#{publishedAt})
+
             """) int insertTaskDefinition(TaskDefinition value);
 
     @Select("""
@@ -312,6 +348,7 @@ public interface GamificationStoreMapper {
                    reward_version,definition_sha256,published_at
             FROM cloudmold_gamification_task_definition
             WHERE tenant_id=#{tenantId} AND task_definition_id=#{taskDefinitionId} AND task_version=#{taskVersion}
+
             """) TaskDefinition selectTaskDefinition(@Param("tenantId") Long tenantId,
                                                         @Param("taskDefinitionId") String taskDefinitionId,
                                                         @Param("taskVersion") Long taskVersion);
@@ -322,6 +359,7 @@ public interface GamificationStoreMapper {
             FROM cloudmold_gamification_task_progress
             WHERE tenant_id=#{tenantId} AND task_definition_id=#{taskDefinitionId}
               AND task_version=#{taskVersion} AND principal_id=#{principalId}
+
             """) TaskProgress selectTaskProgress(@Param("tenantId") Long tenantId,
                                                    @Param("taskDefinitionId") String taskDefinitionId,
                                                    @Param("taskVersion") Long taskVersion,
@@ -333,6 +371,7 @@ public interface GamificationStoreMapper {
             FROM cloudmold_gamification_task_progress
             WHERE tenant_id=#{tenantId} AND task_definition_id=#{taskDefinitionId}
               AND task_version=#{taskVersion} AND principal_id=#{principalId} FOR UPDATE
+
             """) TaskProgress selectTaskProgressForUpdate(@Param("tenantId") Long tenantId,
                                                             @Param("taskDefinitionId") String taskDefinitionId,
                                                             @Param("taskVersion") Long taskVersion,
@@ -344,6 +383,7 @@ public interface GamificationStoreMapper {
                completed_units,target_units,status,reward_grant_id,version,created_at,updated_at)
             VALUES (#{taskProgressId},#{tenantId},#{taskDefinitionId},#{taskVersion},#{gameId},#{principalId},
                     #{completedUnits},#{targetUnits},#{status},#{rewardGrantId},#{version},#{createdAt},#{updatedAt})
+
             """) int insertTaskProgress(TaskProgress value);
 
     @Update("""
@@ -352,6 +392,7 @@ public interface GamificationStoreMapper {
               version=version+1,updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND task_progress_id=#{progressId} AND version=#{expectedVersion}
               AND status='IN_PROGRESS'
+
             """) int updateTaskProgress(@Param("tenantId") Long tenantId, @Param("progressId") String progressId,
                                           @Param("expectedVersion") Long expectedVersion,
                                           @Param("completedUnits") Long completedUnits,
@@ -365,6 +406,7 @@ public interface GamificationStoreMapper {
             FROM cloudmold_gamification_fragment_balance
             WHERE tenant_id=#{tenantId} AND game_id=#{gameId} AND principal_id=#{principalId}
               AND fragment_code=#{fragmentCode}
+
             """) FragmentBalance selectFragmentBalance(@Param("tenantId") Long tenantId,
                                                           @Param("gameId") String gameId,
                                                           @Param("principalId") String principalId,
@@ -376,6 +418,7 @@ public interface GamificationStoreMapper {
             FROM cloudmold_gamification_fragment_balance
             WHERE tenant_id=#{tenantId} AND game_id=#{gameId} AND principal_id=#{principalId}
               AND fragment_code=#{fragmentCode} FOR UPDATE
+
             """) FragmentBalance selectFragmentBalanceForUpdate(@Param("tenantId") Long tenantId,
                                                                    @Param("gameId") String gameId,
                                                                    @Param("principalId") String principalId,
@@ -387,6 +430,7 @@ public interface GamificationStoreMapper {
                version,created_at,updated_at)
             VALUES (#{fragmentBalanceId},#{tenantId},#{gameId},#{principalId},#{assetClass},#{fragmentCode},
                     #{quantity},#{version},#{createdAt},#{updatedAt})
+
             """) int insertFragmentBalance(FragmentBalance value);
 
     @Update("""
@@ -394,6 +438,7 @@ public interface GamificationStoreMapper {
             SET quantity=quantity+#{delta},version=version+1,updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND fragment_balance_id=#{balanceId} AND version=#{expectedVersion}
               AND quantity+#{delta}>=0
+
             """) int applyFragmentDelta(@Param("tenantId") Long tenantId, @Param("balanceId") String balanceId,
                                           @Param("expectedVersion") Long expectedVersion,
                                           @Param("delta") Long delta, @Param("now") LocalDateTime now);
@@ -404,6 +449,7 @@ public interface GamificationStoreMapper {
                balance_after_quantity,occurred_at,created_at)
             VALUES (#{fragmentEntryId},#{tenantId},#{fragmentBalanceId},#{rewardGrantId},#{deltaQuantity},
                     #{balanceAfterQuantity},#{occurredAt},#{createdAt})
+
             """) int insertFragmentEntry(FragmentEntry value);
 
     @Insert("""
@@ -412,6 +458,7 @@ public interface GamificationStoreMapper {
                amount_microunits,ledger_transaction_id,reason_code,occurred_at,created_at)
             VALUES (#{giftTransferId},#{tenantId},#{gameId},#{currencyCode},#{fromPrincipalId},#{toPrincipalId},
                     #{amountMicrounits},#{ledgerTransactionId},#{reasonCode},#{occurredAt},#{createdAt})
+
             """) int insertGiftTransfer(GiftTransfer value);
 
     @Insert("""
@@ -420,5 +467,165 @@ public interface GamificationStoreMapper {
                operation_id,occurred_at,created_at)
             VALUES (#{tenantId},#{aggregateType},#{aggregateId},#{aggregateVersion},#{previousStatus},
                     #{currentStatus},#{operationId},#{occurredAt},#{createdAt})
+
             """) int insertStatusHistory(StatusHistory value);
+
+    @Insert("""
+            INSERT INTO cloudmold_gamification_season_series
+            (season_series_id,tenant_id,game_id,series_code,series_version,series_name,definition_sha256,published_at)
+            VALUES (#{seasonSeriesId},#{tenantId},#{gameId},#{seriesCode},#{seriesVersion},#{seriesName},#{definitionSha256},#{publishedAt})
+            """)
+    int insertSeasonSeries(SeasonSeries value);
+
+    @Select("""
+            SELECT season_series_id,tenant_id,game_id,series_code,series_version,series_name,definition_sha256,published_at
+            FROM cloudmold_gamification_season_series WHERE tenant_id=#{tenantId} AND season_series_id=#{id} AND series_version=#{version}
+            """)
+    SeasonSeries selectSeasonSeries(@Param("tenantId") Long tenantId, @Param("id") String id,
+                                    @Param("version") Long version);
+
+    @Insert("""
+            INSERT INTO cloudmold_gamification_season
+            (season_id,tenant_id,game_id,season_series_id,series_version,season_code,season_version,season_name,status,
+             starts_at,ends_at,definition_sha256,published_at)
+            VALUES (#{seasonId},#{tenantId},#{gameId},#{seasonSeriesId},#{seriesVersion},#{seasonCode},#{seasonVersion},
+                    #{seasonName},#{status},#{startsAt},#{endsAt},#{definitionSha256},#{publishedAt})
+            """)
+    int insertSeason(Season value);
+
+    @Select("""
+            SELECT season_id,tenant_id,game_id,season_series_id,series_version,season_code,season_version,season_name,
+            status,starts_at,ends_at,definition_sha256,published_at FROM cloudmold_gamification_season
+            WHERE tenant_id=#{tenantId} AND season_id=#{id} AND season_version=#{version}
+            """)
+    Season selectSeason(@Param("tenantId") Long tenantId, @Param("id") String id, @Param("version") Long version);
+
+    @Insert("""
+            INSERT INTO cloudmold_gamification_collectible_definition
+            (collectible_definition_id,tenant_id,game_id,collectible_code,collectible_version,collectible_kind,
+             collectible_name,definition_sha256,published_at)
+            VALUES (#{collectibleDefinitionId},#{tenantId},#{gameId},#{collectibleCode},#{collectibleVersion},
+                    #{collectibleKind},#{collectibleName},#{definitionSha256},#{publishedAt})
+            """)
+    int insertCollectibleDefinition(CollectibleDefinition value);
+
+    @Select("""
+            SELECT collectible_definition_id,tenant_id,game_id,collectible_code,collectible_version,
+            collectible_kind,collectible_name,definition_sha256,published_at
+            FROM cloudmold_gamification_collectible_definition
+            WHERE tenant_id=#{tenantId} AND collectible_definition_id=#{id} AND collectible_version=#{version}
+            """)
+    CollectibleDefinition selectCollectibleDefinition(@Param("tenantId") Long tenantId, @Param("id") String id,
+                                                       @Param("version") Long version);
+
+    @Select("""
+            SELECT ownership_id,tenant_id,game_id,principal_id,collectible_definition_id,collectible_version,
+            quantity,version,created_at,updated_at FROM cloudmold_gamification_collectible_ownership
+            WHERE tenant_id=#{tenantId} AND game_id=#{gameId} AND principal_id=#{principalId}
+              AND collectible_definition_id=#{definitionId} AND collectible_version=#{definitionVersion}
+            """)
+    CollectibleOwnership selectCollectibleOwnership(@Param("tenantId") Long tenantId, @Param("gameId") String gameId,
+            @Param("principalId") String principalId, @Param("definitionId") String definitionId,
+            @Param("definitionVersion") Long definitionVersion);
+
+    @Select("""
+            SELECT ownership_id,tenant_id,game_id,principal_id,collectible_definition_id,collectible_version,
+            quantity,version,created_at,updated_at FROM cloudmold_gamification_collectible_ownership
+            WHERE tenant_id=#{tenantId} AND game_id=#{gameId} AND principal_id=#{principalId}
+              AND collectible_definition_id=#{definitionId} AND collectible_version=#{definitionVersion} FOR UPDATE
+            """)
+    CollectibleOwnership selectCollectibleOwnershipForUpdate(@Param("tenantId") Long tenantId,
+            @Param("gameId") String gameId, @Param("principalId") String principalId,
+            @Param("definitionId") String definitionId, @Param("definitionVersion") Long definitionVersion);
+
+    @Insert("""
+            INSERT INTO cloudmold_gamification_collectible_ownership
+            (ownership_id,tenant_id,game_id,principal_id,collectible_definition_id,collectible_version,quantity,
+             version,created_at,updated_at) VALUES (#{ownershipId},#{tenantId},#{gameId},#{principalId},
+             #{collectibleDefinitionId},#{collectibleVersion},#{quantity},#{version},#{createdAt},#{updatedAt})
+            """)
+    int insertCollectibleOwnership(CollectibleOwnership value);
+
+    @Update("""
+            UPDATE cloudmold_gamification_collectible_ownership SET quantity=quantity+#{delta},version=version+1,
+            updated_at=#{now} WHERE tenant_id=#{tenantId} AND ownership_id=#{ownershipId}
+            AND version=#{expectedVersion} AND quantity+#{delta}>=0
+            """)
+    int applyCollectibleDelta(@Param("tenantId") Long tenantId, @Param("ownershipId") String ownershipId,
+            @Param("expectedVersion") Long expectedVersion, @Param("delta") Long delta,
+            @Param("now") LocalDateTime now);
+
+    @Insert("""
+            INSERT INTO cloudmold_gamification_collectible_ledger_entry
+            (collectible_entry_id,tenant_id,ownership_id,source_type,source_id,delta_quantity,
+             balance_after_quantity,occurred_at,created_at) VALUES (#{collectibleEntryId},#{tenantId},#{ownershipId},
+             #{sourceType},#{sourceId},#{deltaQuantity},#{balanceAfterQuantity},#{occurredAt},#{createdAt})
+            """)
+    int insertCollectibleEntry(CollectibleLedgerEntry value);
+
+    @Insert("""
+            INSERT INTO cloudmold_gamification_redemption_intent
+            (redemption_intent_id,tenant_id,game_id,principal_id,collectible_definition_id,collectible_version,
+             quantity,adapter_code,external_intent_ref,status,version,occurred_at,created_at,updated_at)
+            VALUES (#{redemptionIntentId},#{tenantId},#{gameId},#{principalId},#{collectibleDefinitionId},
+             #{collectibleVersion},#{quantity},#{adapterCode},#{externalIntentRef},#{status},#{version},#{occurredAt},
+             #{createdAt},#{updatedAt})
+            """) int insertRedemptionIntent(RedemptionIntent value);
+
+    @Select("""
+            SELECT redemption_intent_id,tenant_id,game_id,principal_id,collectible_definition_id,
+            collectible_version,quantity,adapter_code,external_intent_ref,external_result_ref,status,version,
+            occurred_at,created_at,updated_at FROM cloudmold_gamification_redemption_intent
+            WHERE tenant_id=#{tenantId} AND redemption_intent_id=#{id}
+            """)
+    RedemptionIntent selectRedemption(@Param("tenantId") Long tenantId, @Param("id") String id);
+
+    @Select("""
+            SELECT redemption_intent_id,tenant_id,game_id,principal_id,collectible_definition_id,
+            collectible_version,quantity,adapter_code,external_intent_ref,external_result_ref,status,version,
+            occurred_at,created_at,updated_at FROM cloudmold_gamification_redemption_intent
+            WHERE tenant_id=#{tenantId} AND redemption_intent_id=#{id} FOR UPDATE
+            """)
+    RedemptionIntent selectRedemptionForUpdate(@Param("tenantId") Long tenantId, @Param("id") String id);
+
+    @Update("""
+            UPDATE cloudmold_gamification_redemption_intent SET external_result_ref=#{externalResultRef},
+            status=#{status},version=version+1,updated_at=#{now} WHERE tenant_id=#{tenantId}
+            AND redemption_intent_id=#{id} AND version=#{expectedVersion} AND status='PENDING'
+            """)
+    int completeRedemption(@Param("tenantId") Long tenantId, @Param("id") String id,
+            @Param("expectedVersion") Long expectedVersion, @Param("externalResultRef") String externalResultRef,
+            @Param("status") String status, @Param("now") LocalDateTime now);
+
+    @Insert("""
+            INSERT INTO cloudmold_gamification_reward_claim
+            (reward_claim_id,tenant_id,game_id,principal_id,reward_definition_id,reward_version,source_type,source_id,
+             status,version,claim_expires_at,created_at,updated_at) VALUES (#{rewardClaimId},#{tenantId},#{gameId},
+             #{principalId},#{rewardDefinitionId},#{rewardVersion},#{sourceType},#{sourceId},#{status},#{version},
+             #{claimExpiresAt},#{createdAt},#{updatedAt})
+            """) int insertRewardClaim(RewardClaim value);
+
+    @Select("""
+            SELECT reward_claim_id,tenant_id,game_id,principal_id,reward_definition_id,reward_version,
+            source_type,source_id,status,reward_grant_id,version,claim_expires_at,claimed_at,created_at,updated_at
+            FROM cloudmold_gamification_reward_claim WHERE tenant_id=#{tenantId} AND reward_claim_id=#{id}
+            """)
+    RewardClaim selectRewardClaim(@Param("tenantId") Long tenantId, @Param("id") String id);
+
+    @Select("""
+            SELECT reward_claim_id,tenant_id,game_id,principal_id,reward_definition_id,reward_version,
+            source_type,source_id,status,reward_grant_id,version,claim_expires_at,claimed_at,created_at,updated_at
+            FROM cloudmold_gamification_reward_claim WHERE tenant_id=#{tenantId} AND reward_claim_id=#{id} FOR UPDATE
+            """)
+    RewardClaim selectRewardClaimForUpdate(@Param("tenantId") Long tenantId, @Param("id") String id);
+
+    @Update("""
+            UPDATE cloudmold_gamification_reward_claim SET status=#{status},reward_grant_id=#{grantId},
+            claimed_at=#{claimedAt},version=version+1,updated_at=#{now} WHERE tenant_id=#{tenantId}
+            AND reward_claim_id=#{id} AND version=#{expectedVersion} AND status='CLAIMABLE'
+            """)
+    int transitionRewardClaim(@Param("tenantId") Long tenantId, @Param("id") String id,
+            @Param("expectedVersion") Long expectedVersion, @Param("status") String status,
+            @Param("grantId") String grantId, @Param("claimedAt") LocalDateTime claimedAt,
+            @Param("now") LocalDateTime now);
 }

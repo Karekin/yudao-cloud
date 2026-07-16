@@ -248,3 +248,94 @@ CREATE TABLE cloudmold_gamification_status_history (
   CONSTRAINT fk_gamification_history_operation FOREIGN KEY (tenant_id,operation_id) REFERENCES cloudmold_gamification_operation (tenant_id,operation_id),
   CONSTRAINT ck_gamification_history_version CHECK (aggregate_version>=0 AND (previous_status IS NULL OR previous_status<>current_status))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Immutable season/series definitions. Leaderboards are deliberately absent: they are lakehouse-derived read models.
+CREATE TABLE cloudmold_gamification_season_series (
+  season_series_id VARCHAR(128) NOT NULL, tenant_id BIGINT NOT NULL, game_id VARCHAR(128) NOT NULL,
+  series_code VARCHAR(64) NOT NULL, series_version BIGINT NOT NULL, series_name VARCHAR(128) NOT NULL,
+  definition_sha256 CHAR(64) NOT NULL, published_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (tenant_id,season_series_id,series_version),
+  UNIQUE KEY uk_gamification_series_code_version (tenant_id,game_id,series_code,series_version),
+  CONSTRAINT fk_gamification_series_game FOREIGN KEY (tenant_id,game_id) REFERENCES cloudmold_gamification_game (tenant_id,game_id),
+  CONSTRAINT ck_gamification_series_version CHECK (series_version>0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE cloudmold_gamification_season (
+  season_id VARCHAR(128) NOT NULL, tenant_id BIGINT NOT NULL, game_id VARCHAR(128) NOT NULL,
+  season_series_id VARCHAR(128) NOT NULL, series_version BIGINT NOT NULL, season_code VARCHAR(64) NOT NULL,
+  season_version BIGINT NOT NULL, season_name VARCHAR(128) NOT NULL, status VARCHAR(16) NOT NULL,
+  starts_at DATETIME(3) NOT NULL, ends_at DATETIME(3) NOT NULL, definition_sha256 CHAR(64) NOT NULL,
+  published_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (tenant_id,season_id,season_version),
+  UNIQUE KEY uk_gamification_season_code_version (tenant_id,game_id,season_code,season_version),
+  CONSTRAINT fk_gamification_season_series FOREIGN KEY (tenant_id,season_series_id,series_version)
+    REFERENCES cloudmold_gamification_season_series (tenant_id,season_series_id,series_version),
+  CONSTRAINT ck_gamification_season_values CHECK (season_version>0 AND status='PUBLISHED' AND ends_at>starts_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE cloudmold_gamification_collectible_definition (
+  collectible_definition_id VARCHAR(128) NOT NULL, tenant_id BIGINT NOT NULL, game_id VARCHAR(128) NOT NULL,
+  collectible_code VARCHAR(64) NOT NULL, collectible_version BIGINT NOT NULL, collectible_kind VARCHAR(16) NOT NULL,
+  collectible_name VARCHAR(128) NOT NULL, definition_sha256 CHAR(64) NOT NULL, published_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (tenant_id,collectible_definition_id,collectible_version),
+  UNIQUE KEY uk_gamification_collectible_code_version (tenant_id,game_id,collectible_code,collectible_version),
+  CONSTRAINT fk_gamification_collectible_game FOREIGN KEY (tenant_id,game_id) REFERENCES cloudmold_gamification_game (tenant_id,game_id),
+  CONSTRAINT ck_gamification_collectible_values CHECK (collectible_version>0 AND collectible_kind IN ('GK','FIGURE','COLLECTIBLE'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE cloudmold_gamification_collectible_ownership (
+  ownership_id VARCHAR(128) NOT NULL, tenant_id BIGINT NOT NULL, game_id VARCHAR(128) NOT NULL,
+  principal_id VARCHAR(128) NOT NULL, collectible_definition_id VARCHAR(128) NOT NULL,
+  collectible_version BIGINT NOT NULL, quantity BIGINT NOT NULL, version BIGINT NOT NULL,
+  created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (ownership_id), UNIQUE KEY uk_gamification_ownership_tenant_id (tenant_id,ownership_id),
+  UNIQUE KEY uk_gamification_collectible_owner (tenant_id,game_id,principal_id,collectible_definition_id,collectible_version),
+  CONSTRAINT fk_gamification_ownership_definition FOREIGN KEY (tenant_id,collectible_definition_id,collectible_version)
+    REFERENCES cloudmold_gamification_collectible_definition (tenant_id,collectible_definition_id,collectible_version),
+  CONSTRAINT ck_gamification_ownership_values CHECK (quantity>=0 AND version>0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE cloudmold_gamification_collectible_ledger_entry (
+  collectible_entry_id VARCHAR(128) NOT NULL, tenant_id BIGINT NOT NULL, ownership_id VARCHAR(128) NOT NULL,
+  source_type VARCHAR(32) NOT NULL, source_id VARCHAR(128) NOT NULL, delta_quantity BIGINT NOT NULL,
+  balance_after_quantity BIGINT NOT NULL, occurred_at DATETIME(3) NOT NULL, created_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (collectible_entry_id), UNIQUE KEY uk_gamification_collectible_source (tenant_id,source_type,source_id),
+  CONSTRAINT fk_gamification_collectible_entry_owner FOREIGN KEY (tenant_id,ownership_id)
+    REFERENCES cloudmold_gamification_collectible_ownership (tenant_id,ownership_id),
+  CONSTRAINT ck_gamification_collectible_entry CHECK (delta_quantity<>0 AND balance_after_quantity>=0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Cross-domain exchange stores opaque adapter references only: no mall balance, mall points, coupon, Token or fiat amount.
+CREATE TABLE cloudmold_gamification_redemption_intent (
+  redemption_intent_id VARCHAR(128) NOT NULL, tenant_id BIGINT NOT NULL, game_id VARCHAR(128) NOT NULL,
+  principal_id VARCHAR(128) NOT NULL, collectible_definition_id VARCHAR(128) NOT NULL,
+  collectible_version BIGINT NOT NULL, quantity BIGINT NOT NULL, adapter_code VARCHAR(32) NOT NULL,
+  external_intent_ref VARCHAR(128) NOT NULL, external_result_ref VARCHAR(128) NULL, status VARCHAR(16) NOT NULL,
+  version BIGINT NOT NULL, occurred_at DATETIME(3) NOT NULL, created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (redemption_intent_id), UNIQUE KEY uk_gamification_redemption_tenant_id (tenant_id,redemption_intent_id),
+  UNIQUE KEY uk_gamification_redemption_external_intent (tenant_id,adapter_code,external_intent_ref),
+  UNIQUE KEY uk_gamification_redemption_external_result (tenant_id,adapter_code,external_result_ref),
+  CONSTRAINT fk_gamification_redemption_definition FOREIGN KEY (tenant_id,collectible_definition_id,collectible_version)
+    REFERENCES cloudmold_gamification_collectible_definition (tenant_id,collectible_definition_id,collectible_version),
+  CONSTRAINT ck_gamification_redemption_values CHECK (quantity>0 AND adapter_code='MALL_REDEMPTION_V1' AND version>0 AND
+    ((status='PENDING' AND external_result_ref IS NULL) OR (status IN ('SUCCEEDED','REJECTED') AND external_result_ref IS NOT NULL)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE cloudmold_gamification_reward_claim (
+  reward_claim_id VARCHAR(128) NOT NULL, tenant_id BIGINT NOT NULL, game_id VARCHAR(128) NOT NULL,
+  principal_id VARCHAR(128) NOT NULL, reward_definition_id VARCHAR(128) NOT NULL, reward_version BIGINT NOT NULL,
+  source_type VARCHAR(32) NOT NULL, source_id VARCHAR(128) NOT NULL, status VARCHAR(16) NOT NULL,
+  reward_grant_id VARCHAR(128) NULL, version BIGINT NOT NULL, claim_expires_at DATETIME(3) NOT NULL,
+  claimed_at DATETIME(3) NULL, created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL,
+  PRIMARY KEY (reward_claim_id), UNIQUE KEY uk_gamification_claim_tenant_id (tenant_id,reward_claim_id),
+  UNIQUE KEY uk_gamification_claim_source (tenant_id,source_type,source_id,reward_definition_id,reward_version),
+  UNIQUE KEY uk_gamification_claim_grant (tenant_id,reward_grant_id),
+  CONSTRAINT fk_gamification_claim_reward FOREIGN KEY (tenant_id,reward_definition_id,reward_version)
+    REFERENCES cloudmold_gamification_reward_definition (tenant_id,reward_definition_id,reward_version),
+  CONSTRAINT fk_gamification_claim_grant FOREIGN KEY (tenant_id,reward_grant_id)
+    REFERENCES cloudmold_gamification_reward_grant (tenant_id,reward_grant_id),
+  CONSTRAINT ck_gamification_claim_state CHECK (version>0 AND claim_expires_at>created_at AND
+    ((status='CLAIMABLE' AND reward_grant_id IS NULL AND claimed_at IS NULL) OR
+     (status='CLAIMED' AND reward_grant_id IS NOT NULL AND claimed_at IS NOT NULL) OR
+     (status='EXPIRED' AND reward_grant_id IS NULL AND claimed_at IS NULL)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

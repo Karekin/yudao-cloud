@@ -198,6 +198,72 @@ public class GamificationEventService {
                         "ledger_transaction_id", gift.getLedgerTransactionId(), "reason_code", gift.getReasonCode()));
     }
 
+    public void appendSeasonSeries(SeasonSeries value, GamificationCommand command, Instant occurredAt) {
+        append("gamification.season_series.version_published", "gamification_season_series",
+                value.getSeasonSeriesId(), value.getSeriesVersion(), value.getTenantId(), command, occurredAt,
+                payload("season_series_id", value.getSeasonSeriesId(), "series_version", value.getSeriesVersion(),
+                        "game_id", value.getGameId(), "series_code", value.getSeriesCode(),
+                        "definition_sha256", value.getDefinitionSha256()));
+    }
+
+    public void appendSeason(Season value, GamificationCommand command, Instant occurredAt) {
+        append("gamification.season.version_published", "gamification_season", value.getSeasonId(),
+                value.getSeasonVersion(), value.getTenantId(), command, occurredAt,
+                payload("season_id", value.getSeasonId(), "season_version", value.getSeasonVersion(),
+                        "season_series_id", value.getSeasonSeriesId(), "series_version", value.getSeriesVersion(),
+                        "game_id", value.getGameId(), "status", value.getStatus(),
+                        "starts_at", value.getStartsAt().toInstant(ZoneOffset.UTC).toString(),
+                        "ends_at", value.getEndsAt().toInstant(ZoneOffset.UTC).toString()));
+    }
+
+    public void appendCollectibleDefinition(CollectibleDefinition value, GamificationCommand command,
+                                            Instant occurredAt) {
+        append("gamification.collectible.version_published", "gamification_collectible_definition",
+                value.getCollectibleDefinitionId(), value.getCollectibleVersion(), value.getTenantId(), command,
+                occurredAt, payload("collectible_definition_id", value.getCollectibleDefinitionId(),
+                        "collectible_version", value.getCollectibleVersion(), "game_id", value.getGameId(),
+                        "collectible_code", value.getCollectibleCode(), "collectible_kind", value.getCollectibleKind(),
+                        "definition_sha256", value.getDefinitionSha256()));
+    }
+
+    public void appendCollectible(CollectibleLedgerEntry entry, CollectibleOwnership ownership,
+                                  GamificationCommand command, Instant occurredAt) {
+        append("gamification.collectible.ownership_changed", "gamification_collectible_ownership",
+                ownership.getOwnershipId(), ownership.getVersion(), ownership.getTenantId(), command, occurredAt,
+                payload("collectible_entry_id", entry.getCollectibleEntryId(), "ownership_id", ownership.getOwnershipId(),
+                        "game_id", ownership.getGameId(), "principal_id", ownership.getPrincipalId(),
+                        "collectible_definition_id", ownership.getCollectibleDefinitionId(),
+                        "collectible_version", ownership.getCollectibleVersion(), "delta_quantity", entry.getDeltaQuantity(),
+                        "quantity", ownership.getQuantity(), "source_type", entry.getSourceType(),
+                        "source_id", entry.getSourceId()));
+    }
+
+    public void appendRedemption(Long operationId, RedemptionIntent value, String previousStatus,
+                                 GamificationCommand command, Instant occurredAt, LocalDateTime now) {
+        history(operationId, value.getTenantId(), "REDEMPTION", value.getRedemptionIntentId(), value.getVersion(),
+                previousStatus, value.getStatus(), occurredAt, now);
+        append("gamification.redemption.status_changed", "gamification_redemption_intent",
+                value.getRedemptionIntentId(), value.getVersion(), value.getTenantId(), command, occurredAt,
+                payload("redemption_intent_id", value.getRedemptionIntentId(), "game_id", value.getGameId(),
+                        "principal_id", value.getPrincipalId(), "adapter_code", value.getAdapterCode(),
+                        "external_intent_ref", value.getExternalIntentRef(),
+                        "external_result_ref", value.getExternalResultRef(), "previous_status", previousStatus,
+                        "current_status", value.getStatus(), "contains_external_balance", false));
+    }
+
+    public void appendClaim(Long operationId, RewardClaim value, String previousStatus,
+                            GamificationCommand command, Instant occurredAt, LocalDateTime now) {
+        history(operationId, value.getTenantId(), "REWARD_CLAIM", value.getRewardClaimId(), value.getVersion(),
+                previousStatus, value.getStatus(), occurredAt, now);
+        append("gamification.reward_claim.status_changed", "gamification_reward_claim", value.getRewardClaimId(),
+                value.getVersion(), value.getTenantId(), command, occurredAt,
+                payload("reward_claim_id", value.getRewardClaimId(), "game_id", value.getGameId(),
+                        "principal_id", value.getPrincipalId(), "reward_definition_id", value.getRewardDefinitionId(),
+                        "reward_version", value.getRewardVersion(), "previous_status", previousStatus,
+                        "current_status", value.getStatus(), "reward_grant_id", value.getRewardGrantId(),
+                        "claim_expires_at", value.getClaimExpiresAt().toInstant(ZoneOffset.UTC).toString()));
+    }
+
     private void history(Long operationId, Long tenantId, String type, String id, Long version, String previous,
                          String current, Instant occurredAt, LocalDateTime now) {
         mapper.insertStatusHistory(new StatusHistory().setTenantId(tenantId).setAggregateType(type).setAggregateId(id)

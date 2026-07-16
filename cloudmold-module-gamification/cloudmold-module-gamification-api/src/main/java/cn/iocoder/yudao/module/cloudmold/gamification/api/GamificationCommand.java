@@ -66,6 +66,33 @@ public class GamificationCommand {
     private Long giftAmountMicrounits;
     private String reasonCode;
 
+    private String seasonSeriesId;
+    private String seasonSeriesCode;
+    private Long seasonSeriesVersion;
+    private String seasonSeriesName;
+    private String seasonId;
+    private String seasonCode;
+    private Long seasonVersion;
+    private String seasonName;
+    private Instant seasonStartsAt;
+    private Instant seasonEndsAt;
+
+    private String collectibleDefinitionId;
+    private String collectibleCode;
+    private Long collectibleVersion;
+    private String collectibleKind;
+    private String collectibleName;
+    private Long collectibleQuantity;
+
+    private String redemptionIntentId;
+    private String adapterCode;
+    private String externalIntentRef;
+    private String externalResultRef;
+    private String redemptionOutcome;
+
+    private String rewardClaimId;
+    private Instant claimExpiresAt;
+
     @Data
     @Builder
     @NoArgsConstructor

@@ -58,4 +58,46 @@ public class GamificationAdminController {
                                                              @RequestParam("fragmentCode") String fragmentCode) {
         return success(queryApi.getFragmentBalance(gameId, principalId, fragmentCode));
     }
+
+    @GetMapping("/collectible/get")
+    @PreAuthorize("@ss.hasPermission('cloudmold:gamification:query')")
+    public CommonResult<GamificationView> getCollectible(@RequestParam("gameId") String gameId,
+            @RequestParam("principalId") String principalId,
+            @RequestParam("collectibleDefinitionId") String collectibleDefinitionId,
+            @RequestParam("collectibleVersion") Long collectibleVersion) {
+        return success(queryApi.getCollectibleOwnership(gameId, principalId, collectibleDefinitionId, collectibleVersion));
+    }
+
+    @GetMapping("/reward-claim/get")
+    @PreAuthorize("@ss.hasPermission('cloudmold:gamification:query')")
+    public CommonResult<GamificationView> getRewardClaim(@RequestParam("rewardClaimId") String rewardClaimId) {
+        return success(queryApi.getRewardClaim(rewardClaimId));
+    }
+
+    @GetMapping("/redemption/get")
+    @PreAuthorize("@ss.hasPermission('cloudmold:gamification:query')")
+    public CommonResult<GamificationView> getRedemption(@RequestParam("redemptionIntentId") String id) {
+        return success(queryApi.getRedemption(id));
+    }
+
+    @GetMapping("/season-series/get")
+    @PreAuthorize("@ss.hasPermission('cloudmold:gamification:query')")
+    public CommonResult<GamificationView> getSeasonSeries(@RequestParam("seasonSeriesId") String id,
+            @RequestParam("seriesVersion") Long version) {
+        return success(queryApi.getSeasonSeries(id, version));
+    }
+
+    @GetMapping("/season/get")
+    @PreAuthorize("@ss.hasPermission('cloudmold:gamification:query')")
+    public CommonResult<GamificationView> getSeason(@RequestParam("seasonId") String id,
+            @RequestParam("seasonVersion") Long version) {
+        return success(queryApi.getSeason(id, version));
+    }
+
+    @GetMapping("/collectible-definition/get")
+    @PreAuthorize("@ss.hasPermission('cloudmold:gamification:query')")
+    public CommonResult<GamificationView> getCollectibleDefinition(@RequestParam("collectibleDefinitionId") String id,
+            @RequestParam("collectibleVersion") Long version) {
+        return success(queryApi.getCollectibleDefinition(id, version));
+    }
 }
