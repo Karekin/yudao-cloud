@@ -158,6 +158,7 @@ public class MetadataCommandServiceImpl implements MetadataCommandApi, MetadataQ
                 .setSchemaSha256(command.getSchemaSha256()).setStorageLocationRef(command.getStorageLocationRef())
                 .setRetentionDays(command.getRetentionDays());
         require(mapper.insertDatasetVersion(value) == 1, "failed to persist immutable dataset version");
+        List<FieldVersion> fieldVersions = new ArrayList<>(command.getFields().size());
         int ordinal = 0;
         for (MetadataCommand.FieldDefinition field : command.getFields()) {
             FieldVersion record = new FieldVersion().setTenantId(tenantId).setDatasetId(value.getDefinitionId())
@@ -166,6 +167,7 @@ public class MetadataCommandServiceImpl implements MetadataCommandApi, MetadataQ
                     .setPrimaryKeyPart(field.getPrimaryKeyPart()).setSemanticType(field.getSemanticType())
                     .setClassification(field.getClassification());
             require(mapper.insertFieldVersion(record) == 1, "failed to persist immutable dataset field");
+            fieldVersions.add(record);
         }
         completePublish(published, command, now);
         Map<String, Object> payload = ordered("data_source_id", value.getDataSourceId(),
@@ -176,6 +178,7 @@ public class MetadataCommandServiceImpl implements MetadataCommandApi, MetadataQ
                 "field_count", command.getFields().size());
         appendPublished(operationId, published, command, occurredAt, now,
                 "metadata.dataset.version_published", payload);
+        fieldVersions.forEach(field -> eventService.appendDatasetField(field, command, occurredAt));
         return definitionView(operationId, published.definition(), false);
     }
 
@@ -212,6 +215,7 @@ public class MetadataCommandServiceImpl implements MetadataCommandApi, MetadataQ
                 .setExecutableArtifactRef(command.getExecutableArtifactRef()).setCodeSha256(command.getCodeSha256())
                 .setScheduleSha256(command.getScheduleSha256()).setResourceGroupRef(command.getResourceGroupRef());
         require(mapper.insertTaskVersion(value) == 1, "failed to persist immutable task version");
+        List<TaskDependency> dependencyRecords = new ArrayList<>(dependencies.size());
         int sequence = 0;
         for (MetadataCommand.TaskDependency dependency : dependencies) {
             TaskDependency record = new TaskDependency().setTenantId(tenantId).setTaskId(value.getDefinitionId())
@@ -220,6 +224,7 @@ public class MetadataCommandServiceImpl implements MetadataCommandApi, MetadataQ
                     .setUpstreamTaskVersion(dependency.getUpstreamTaskVersion())
                     .setDependencyType(dependency.getDependencyType()).setRequired(dependency.getRequired());
             require(mapper.insertTaskDependency(record) == 1, "failed to persist immutable task dependency");
+            dependencyRecords.add(record);
         }
         MetadataCommand.TaskSla sla = command.getSla();
         TaskSla slaRecord = new TaskSla().setTenantId(tenantId).setTaskId(value.getDefinitionId())
@@ -242,6 +247,7 @@ public class MetadataCommandServiceImpl implements MetadataCommandApi, MetadataQ
                 "sla_approved_by_principal_id", sla.getApprovedByPrincipalId());
         appendPublished(operationId, published, command, occurredAt, now,
                 "metadata.task.version_published", payload);
+        dependencyRecords.forEach(dependency -> eventService.appendTaskDependency(dependency, command, occurredAt));
         return definitionView(operationId, published.definition(), false);
     }
 

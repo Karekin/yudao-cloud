@@ -65,11 +65,17 @@ Every event also carries the common CloudMold envelope. Payload fields are exact
 - `metadata.dataset.version_published`: common definition fields plus `data_source_id`,
   `data_source_version`, `dataset_type`, `qualified_name`, `layer_code`, `grain_code`,
   `schema_sha256`, `storage_location_ref`, `retention_days`, `field_count`.
+- `metadata.dataset_field.version_published`: `dataset_id`, `dataset_version`,
+  `ordinal_position`, `field_code`, `data_type`, `nullable`, `primary_key_part`,
+  `semantic_type`, `classification`.
 - `metadata.task.version_published`: common definition fields plus `task_type`,
   `executable_artifact_ref`, `code_sha256`, `schedule_sha256`, `resource_group_ref`,
   `dependency_count`, `service_level_code`, `deadline_minute_utc`,
   `maximum_duration_millis`, `maximum_freshness_millis`,
   `sla_approved_by_principal_id`.
+- `metadata.task_dependency.version_published`: `task_id`, `task_version`,
+  `dependency_sequence`, `upstream_task_id`, `upstream_task_version`, `dependency_type`,
+  `required`.
 - `metadata.task_run.observed`: `run_id`, `task_id`, `task_version`, `attempt`,
   `observation_sequence`, `previous_status`, `current_status`, `scheduled_at`, `started_at`,
   `finished_at`, `duration_millis`, `compute_cost_minor`, `cost_currency`, `resource_millis`,

@@ -21,7 +21,7 @@ class MetadataEventServiceTest {
     private final MetadataEventService service = new MetadataEventService(mapper, outbox);
 
     @Test
-    void shouldEmitEightFixedPiiSafeContractsWithExactRuntimeEvidence() {
+    void shouldEmitTenFixedPiiSafeContractsWithReplayableChildren() {
         when(mapper.insertStatusHistory(any())).thenReturn(1);
         Instant occurredAt = Instant.parse("2026-07-16T00:00:00Z");
         LocalDateTime now = LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC);
@@ -57,6 +57,15 @@ class MetadataEventServiceTest {
                         "expression_sha256", "1".repeat(64), "filter_sha256", "2".repeat(64),
                         "dimensions_sha256", "3".repeat(64), "semantic_version", "1.0.0"));
 
+        FieldVersion field = new FieldVersion().setTenantId(1L).setDatasetId("dataset-01").setDatasetVersion(1L)
+                .setOrdinalPosition(2).setFieldCode("amount_minor").setDataType("BIGINT").setNullable(false)
+                .setPrimaryKeyPart(false).setSemanticType("MONEY_MINOR").setClassification("INTERNAL");
+        service.appendDatasetField(field, command, occurredAt);
+        TaskDependency dependency = new TaskDependency().setTenantId(1L).setTaskId("task-01").setTaskVersion(1L)
+                .setDependencySequence(3).setUpstreamTaskId("task-upstream").setUpstreamTaskVersion(2L)
+                .setDependencyType("DATA").setRequired(true);
+        service.appendTaskDependency(dependency, command, occurredAt);
+
         TaskRunObservation run = new TaskRunObservation().setTenantId(1L).setRunId("task-run-01")
                 .setTaskId("task-01").setTaskVersion(2L).setAttempt(1).setObservationSequence(3L)
                 .setStatus("SUCCEEDED").setScheduledAt(now.minusMinutes(2)).setStartedAt(now.minusMinutes(1))
@@ -72,11 +81,12 @@ class MetadataEventServiceTest {
         service.appendDqcResult(result, command, occurredAt);
 
         ArgumentCaptor<AppendDomainEventCommand> captor = ArgumentCaptor.forClass(AppendDomainEventCommand.class);
-        verify(outbox, times(8)).append(captor.capture());
+        verify(outbox, times(10)).append(captor.capture());
         Map<String, AppendDomainEventCommand> events = new HashMap<>();
         captor.getAllValues().forEach(event -> events.put(event.getEventType(), event));
         assertThat(events).containsOnlyKeys("metadata.datasource.version_published",
                 "metadata.dataset.version_published", "metadata.task.version_published",
+                "metadata.dataset_field.version_published", "metadata.task_dependency.version_published",
                 "metadata.lineage.version_published", "metadata.dqc_rule.version_published",
                 "metadata.metric.version_published", "metadata.task_run.observed",
                 "metadata.dqc_result.recorded");
@@ -99,6 +109,50 @@ class MetadataEventServiceTest {
                 .containsEntry("expected_value", "0.000000000")
                 .containsEntry("actual_value", "0.000000000")
                 .containsEntry("violation_count", 0L);
+        AppendDomainEventCommand fieldEvent = events.get("metadata.dataset_field.version_published");
+        assertThat(fieldEvent.getAggregateType()).isEqualTo("metadata_dataset");
+        assertThat(fieldEvent.getAggregateId()).isEqualTo("dataset-01");
+        assertThat(fieldEvent.getAggregateVersion()).isEqualTo(1L);
+        assertThat(fieldEvent.getEventSequence()).isEqualTo((short) 3);
+        assertThat(fieldEvent.getIdempotencyKey())
+                .isEqualTo("metadata_dataset:dataset-01:detail:1:3");
+        assertThat(fieldEvent.getPayload()).containsOnly(
+                entry("dataset_id", "dataset-01"), entry("dataset_version", 1L),
+                entry("ordinal_position", 2), entry("field_code", "amount_minor"),
+                entry("data_type", "BIGINT"), entry("nullable", false),
+                entry("primary_key_part", false), entry("semantic_type", "MONEY_MINOR"),
+                entry("classification", "INTERNAL"));
+        AppendDomainEventCommand dependencyEvent = events.get("metadata.task_dependency.version_published");
+        assertThat(dependencyEvent.getAggregateType()).isEqualTo("metadata_task");
+        assertThat(dependencyEvent.getAggregateId()).isEqualTo("task-01");
+        assertThat(dependencyEvent.getAggregateVersion()).isEqualTo(1L);
+        assertThat(dependencyEvent.getEventSequence()).isEqualTo((short) 4);
+        assertThat(dependencyEvent.getIdempotencyKey())
+                .isEqualTo("metadata_task:task-01:detail:1:4");
+        assertThat(dependencyEvent.getPayload()).containsOnly(
+                entry("task_id", "task-01"), entry("task_version", 1L),
+                entry("dependency_sequence", 3), entry("upstream_task_id", "task-upstream"),
+                entry("upstream_task_version", 2L), entry("dependency_type", "DATA"),
+                entry("required", true));
+        assertThat(captor.getAllValues()).extracting(AppendDomainEventCommand::getIdempotencyKey)
+                .doesNotHaveDuplicates();
+    }
+
+    @Test
+    void shouldKeepDetailIdempotencyWithinTheOutboxLimitForMaximumAggregateId() {
+        String maximumDatasetId = "d".repeat(128);
+        MetadataCommand command = MetadataCommand.builder().runTraceId("metadata-run-01").build();
+        FieldVersion field = new FieldVersion().setTenantId(1L).setDatasetId(maximumDatasetId)
+                .setDatasetVersion(Long.MAX_VALUE).setOrdinalPosition(2000).setFieldCode("amount_minor")
+                .setDataType("BIGINT").setNullable(false).setPrimaryKeyPart(false)
+                .setSemanticType("MONEY_MINOR").setClassification("INTERNAL");
+
+        service.appendDatasetField(field, command, Instant.parse("2026-07-16T00:00:00Z"));
+
+        ArgumentCaptor<AppendDomainEventCommand> captor = ArgumentCaptor.forClass(AppendDomainEventCommand.class);
+        verify(outbox).append(captor.capture());
+        assertThat(captor.getValue().getIdempotencyKey()).hasSizeLessThanOrEqualTo(200)
+                .startsWith("metadata_dataset:" + maximumDatasetId + ":detail:");
     }
 
     private void emitDefinition(Long operationId, String kind, String eventType, MetadataCommand command,

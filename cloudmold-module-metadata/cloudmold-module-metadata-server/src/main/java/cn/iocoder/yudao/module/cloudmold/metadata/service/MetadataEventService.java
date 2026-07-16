@@ -90,6 +90,36 @@ public class MetadataEventService {
                 result.getTenantId(), command, occurredAt, payload);
     }
 
+    public void appendDatasetField(FieldVersion field, MetadataCommand command, Instant occurredAt) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("dataset_id", field.getDatasetId());
+        payload.put("dataset_version", field.getDatasetVersion());
+        payload.put("ordinal_position", field.getOrdinalPosition());
+        payload.put("field_code", field.getFieldCode());
+        payload.put("data_type", field.getDataType());
+        payload.put("nullable", field.getNullable());
+        payload.put("primary_key_part", field.getPrimaryKeyPart());
+        payload.put("semantic_type", field.getSemanticType());
+        payload.put("classification", field.getClassification());
+        appendDetail("metadata.dataset_field.version_published", "metadata_dataset", field.getDatasetId(),
+                field.getDatasetVersion(), field.getOrdinalPosition(), field.getTenantId(), command, occurredAt,
+                payload);
+    }
+
+    public void appendTaskDependency(TaskDependency dependency, MetadataCommand command, Instant occurredAt) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("task_id", dependency.getTaskId());
+        payload.put("task_version", dependency.getTaskVersion());
+        payload.put("dependency_sequence", dependency.getDependencySequence());
+        payload.put("upstream_task_id", dependency.getUpstreamTaskId());
+        payload.put("upstream_task_version", dependency.getUpstreamTaskVersion());
+        payload.put("dependency_type", dependency.getDependencyType());
+        payload.put("required", dependency.getRequired());
+        appendDetail("metadata.task_dependency.version_published", "metadata_task", dependency.getTaskId(),
+                dependency.getTaskVersion(), dependency.getDependencySequence(), dependency.getTenantId(), command,
+                occurredAt, payload);
+    }
+
     private void history(Long operationId, Long tenantId, String aggregateType, String aggregateId, Long version,
                          String previousStatus, String currentStatus, String reasonCode, Instant occurredAt,
                          LocalDateTime now) {
@@ -103,12 +133,32 @@ public class MetadataEventService {
 
     private void append(String eventType, String aggregateType, String aggregateId, Long version, Long tenantId,
                         MetadataCommand command, Instant occurredAt, Map<String, Object> payload) {
+        append(eventType, aggregateType, aggregateId, version, (short) 1,
+                aggregateType + ":" + aggregateId + ":event:" + version,
+                tenantId, command, occurredAt, payload);
+    }
+
+    private void appendDetail(String eventType, String aggregateType, String aggregateId, Long version,
+                              Integer detailSequence, Long tenantId, MetadataCommand command, Instant occurredAt,
+                              Map<String, Object> payload) {
+        if (detailSequence == null || detailSequence < 1 || detailSequence >= Short.MAX_VALUE) {
+            throw new IllegalArgumentException("metadata detail event sequence is out of range");
+        }
+        short eventSequence = (short) (detailSequence + 1);
+        append(eventType, aggregateType, aggregateId, version, eventSequence,
+                aggregateType + ":" + aggregateId + ":detail:" + version + ":" + eventSequence,
+                tenantId, command, occurredAt, payload);
+    }
+
+    private void append(String eventType, String aggregateType, String aggregateId, Long version,
+                        short eventSequence, String idempotencyKey, Long tenantId, MetadataCommand command,
+                        Instant occurredAt, Map<String, Object> payload) {
         outboxAppender.append(AppendDomainEventCommand.builder().eventType(eventType).schemaVersion(1)
                 .sourceSystem(SOURCE_SYSTEM).tenantId(tenantId).aggregateType(aggregateType)
-                .aggregateId(aggregateId).aggregateVersion(version).eventSequence((short) 1)
+                .aggregateId(aggregateId).aggregateVersion(version).eventSequence(eventSequence)
                 .occurredAt(occurredAt).traceId(command.getRunTraceId()).correlationId(command.getCorrelationId())
                 .causationId(command.getCausationId())
-                .idempotencyKey(aggregateType + ":" + aggregateId + ":event:" + version)
+                .idempotencyKey(idempotencyKey)
                 .payload(payload).headers(Map.of("pii_safe", true, "raw_sql_stored", false,
                         "raw_connection_stored", false)).destination("lakehouse").build());
     }

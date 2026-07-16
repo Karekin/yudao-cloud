@@ -5,6 +5,7 @@ import cn.iocoder.yudao.module.cloudmold.metadata.api.*;
 import cn.iocoder.yudao.module.cloudmold.metadata.dal.dataobject.MetadataRecords.*;
 import cn.iocoder.yudao.module.cloudmold.metadata.dal.mysql.MetadataStoreMapper;
 import org.junit.jupiter.api.*;
+import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -59,6 +60,10 @@ class MetadataCommandServiceImplTest {
         assertThat(datasetFirst.getDefinitionKind()).isEqualTo("DATASET");
         assertThat(datasetFirst.getDefinitionVersion()).isEqualTo(1L);
         verify(mapper, times(2)).insertFieldVersion(any(FieldVersion.class));
+        ArgumentCaptor<FieldVersion> fieldCaptor = ArgumentCaptor.forClass(FieldVersion.class);
+        verify(eventService, times(2)).appendDatasetField(fieldCaptor.capture(), same(dataset), any(Instant.class));
+        assertThat(fieldCaptor.getAllValues()).extracting(FieldVersion::getOrdinalPosition, FieldVersion::getFieldCode)
+                .containsExactly(tuple(1, "order_id"), tuple(2, "amount_minor"));
 
         assertThatThrownBy(() -> service.execute(dataset("dataset-stale-01", "dataset-orders", "datasource-main")
                 .expectedVersion(0L).build())).hasMessage("metadata definition version conflict");
@@ -73,6 +78,14 @@ class MetadataCommandServiceImplTest {
         service.execute(task("task-upstream-publish", "task-upstream", List.of()).build());
         service.execute(task("task-downstream-publish", "task-downstream", List.of(
                 dependency("task-upstream", 1L))).build());
+        ArgumentCaptor<TaskDependency> dependencyCaptor = ArgumentCaptor.forClass(TaskDependency.class);
+        verify(eventService).appendTaskDependency(dependencyCaptor.capture(), any(MetadataCommand.class),
+                any(Instant.class));
+        assertThat(dependencyCaptor.getValue()).extracting(TaskDependency::getTaskId,
+                        TaskDependency::getTaskVersion, TaskDependency::getDependencySequence,
+                        TaskDependency::getUpstreamTaskId, TaskDependency::getUpstreamTaskVersion,
+                        TaskDependency::getDependencyType, TaskDependency::getRequired)
+                .containsExactly("task-downstream", 1L, 1, "task-upstream", 1L, "DATA", true);
         when(mapper.countTaskDependencyPath(1L, "task-downstream", 1L, "task-upstream")).thenReturn(1);
         assertThatThrownBy(() -> service.execute(task("task-cycle-publish", "task-upstream", List.of(
                 dependency("task-downstream", 1L))).expectedVersion(1L).build()))
