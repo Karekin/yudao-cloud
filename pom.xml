@@ -48,6 +48,7 @@
         <module>cloudmold-module-token-platform</module>
         <module>cloudmold-module-risk</module>
         <module>cloudmold-module-gamification</module>
+        <module>cloudmold-module-metadata</module>
         <module>cloudmold-integration-yudao</module>
     </modules>
 
