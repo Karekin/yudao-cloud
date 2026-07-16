@@ -148,9 +148,14 @@ class MerchantCommandServiceImplTest {
         MerchantOperatorAuthorizationView authorized = harness.service.requireAuthorizedOperator(
                 new MerchantOperatorAuthorizationCommand().setMerchantId(approved.getMerchantId())
                         .setShopId(approved.getShopId()).setPrincipalId("principal-owner").setRoleCode("OWNER"));
+        MerchantOperatorAuthorizationView ownerAsListingOperator = harness.service.requireAuthorizedOperator(
+                new MerchantOperatorAuthorizationCommand().setMerchantId(approved.getMerchantId())
+                        .setShopId(approved.getShopId()).setPrincipalId("principal-owner")
+                        .setRoleCode("LISTING_OPERATOR"));
 
         assertThat(reference.getShopStatus()).isEqualTo("ACTIVE");
         assertThat(authorized.getAssignmentStatus()).isEqualTo("ACTIVE");
+        assertThat(ownerAsListingOperator.getRoleCode()).isEqualTo("OWNER");
         assertThatThrownBy(() -> harness.service.requireAuthorizedOperator(
                 new MerchantOperatorAuthorizationCommand().setMerchantId(approved.getMerchantId())
                         .setShopId(approved.getShopId()).setPrincipalId("principal-other").setRoleCode("OWNER")))

@@ -8,7 +8,8 @@ WHERE a.status='COMPLETED'
   AND (a.version<>4 OR a.refund_status<>'SUCCEEDED' OR a.approved_amount_minor IS NULL
     OR a.return_fulfillment_id IS NULL OR a.return_shipment_id IS NULL OR a.inspection_id IS NULL
     OR s.status<>'COMPLETED'
-    OR s.version<>CASE WHEN s.benefit_amount_minor=0 THEN 10 ELSE 12 END
+    OR s.version<CASE WHEN s.benefit_amount_minor=0 THEN 10 ELSE 12 END
+    OR MOD(s.version-CASE WHEN s.benefit_amount_minor=0 THEN 10 ELSE 12 END,2)<>0
     OR s.active_step<>'NONE' OR s.completed_at IS NULL);
 
 SELECT COUNT(*) AS after_sale_item_link_violation

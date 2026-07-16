@@ -127,6 +127,10 @@ public class MerchantCommandServiceImpl implements MerchantCommandApi, MerchantR
         MerchantOperatorAuthorizationView result = mapper.selectActiveAssignment(
                 TenantContextHolder.getRequiredTenantId(), command.getMerchantId(), command.getShopId(),
                 command.getPrincipalId(), command.getRoleCode());
+        if (result == null && !"OWNER".equals(command.getRoleCode())) {
+            result = mapper.selectActiveAssignment(TenantContextHolder.getRequiredTenantId(), command.getMerchantId(),
+                    command.getShopId(), command.getPrincipalId(), "OWNER");
+        }
         require(result != null, "principal is not authorized for the merchant shop role");
         return result;
     }
