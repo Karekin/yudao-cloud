@@ -6,8 +6,9 @@ fragment balances and gifts.
 
 Season/series and GK/figure/collectible definitions are immutable and versioned. Player ownership
 is an append-only signed change ledger plus an optimistic balance projection. A successful mall
-redemption debits the exact collectible version and stores only opaque adapter intent/result
-references; reward claims transition exactly once from claimable to claimed or expired.
+redemption debits either the exact collectible version or the game's own virtual currency through
+its balanced ledger, while storing only opaque adapter intent/result references and no mall-side
+value; reward claims transition exactly once from claimable to claimed or expired.
 
 It deliberately does **not** own or alias money, coupons, loyalty points, Token Platform quota,
 Catalog products, or payment settlement. Cross-domain redemption requires a separate versioned

@@ -565,36 +565,41 @@ public interface GamificationStoreMapper {
 
     @Insert("""
             INSERT INTO cloudmold_gamification_redemption_intent
-            (redemption_intent_id,tenant_id,game_id,principal_id,collectible_definition_id,collectible_version,
-             quantity,adapter_code,external_intent_ref,status,version,occurred_at,created_at,updated_at)
-            VALUES (#{redemptionIntentId},#{tenantId},#{gameId},#{principalId},#{collectibleDefinitionId},
-             #{collectibleVersion},#{quantity},#{adapterCode},#{externalIntentRef},#{status},#{version},#{occurredAt},
-             #{createdAt},#{updatedAt})
+            (redemption_intent_id,tenant_id,game_id,principal_id,source_asset_class,collectible_definition_id,
+             collectible_version,quantity,currency_code,amount_microunits,adapter_code,external_intent_ref,status,
+             version,occurred_at,created_at,updated_at)
+            VALUES (#{redemptionIntentId},#{tenantId},#{gameId},#{principalId},#{sourceAssetClass},
+             #{collectibleDefinitionId},#{collectibleVersion},#{quantity},#{currencyCode},#{amountMicrounits},
+             #{adapterCode},#{externalIntentRef},#{status},#{version},#{occurredAt},#{createdAt},#{updatedAt})
             """) int insertRedemptionIntent(RedemptionIntent value);
 
     @Select("""
-            SELECT redemption_intent_id,tenant_id,game_id,principal_id,collectible_definition_id,
-            collectible_version,quantity,adapter_code,external_intent_ref,external_result_ref,status,version,
-            occurred_at,created_at,updated_at FROM cloudmold_gamification_redemption_intent
+            SELECT redemption_intent_id,tenant_id,game_id,principal_id,source_asset_class,
+            collectible_definition_id,collectible_version,quantity,currency_code,amount_microunits,adapter_code,
+            external_intent_ref,external_result_ref,source_ledger_transaction_id,status,version,occurred_at,
+            created_at,updated_at FROM cloudmold_gamification_redemption_intent
             WHERE tenant_id=#{tenantId} AND redemption_intent_id=#{id}
             """)
     RedemptionIntent selectRedemption(@Param("tenantId") Long tenantId, @Param("id") String id);
 
     @Select("""
-            SELECT redemption_intent_id,tenant_id,game_id,principal_id,collectible_definition_id,
-            collectible_version,quantity,adapter_code,external_intent_ref,external_result_ref,status,version,
-            occurred_at,created_at,updated_at FROM cloudmold_gamification_redemption_intent
+            SELECT redemption_intent_id,tenant_id,game_id,principal_id,source_asset_class,
+            collectible_definition_id,collectible_version,quantity,currency_code,amount_microunits,adapter_code,
+            external_intent_ref,external_result_ref,source_ledger_transaction_id,status,version,occurred_at,
+            created_at,updated_at FROM cloudmold_gamification_redemption_intent
             WHERE tenant_id=#{tenantId} AND redemption_intent_id=#{id} FOR UPDATE
             """)
     RedemptionIntent selectRedemptionForUpdate(@Param("tenantId") Long tenantId, @Param("id") String id);
 
     @Update("""
             UPDATE cloudmold_gamification_redemption_intent SET external_result_ref=#{externalResultRef},
-            status=#{status},version=version+1,updated_at=#{now} WHERE tenant_id=#{tenantId}
+            source_ledger_transaction_id=#{sourceLedgerTransactionId},status=#{status},version=version+1,
+            updated_at=#{now} WHERE tenant_id=#{tenantId}
             AND redemption_intent_id=#{id} AND version=#{expectedVersion} AND status='PENDING'
             """)
     int completeRedemption(@Param("tenantId") Long tenantId, @Param("id") String id,
             @Param("expectedVersion") Long expectedVersion, @Param("externalResultRef") String externalResultRef,
+            @Param("sourceLedgerTransactionId") String sourceLedgerTransactionId,
             @Param("status") String status, @Param("now") LocalDateTime now);
 
     @Insert("""

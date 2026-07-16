@@ -85,6 +85,9 @@ public class GamificationCommand {
     private Long collectibleQuantity;
 
     private String redemptionIntentId;
+    private String redemptionAssetClass;
+    private String redemptionCurrencyCode;
+    private Long redemptionCurrencyAmountMicrounits;
     private String adapterCode;
     private String externalIntentRef;
     private String externalResultRef;

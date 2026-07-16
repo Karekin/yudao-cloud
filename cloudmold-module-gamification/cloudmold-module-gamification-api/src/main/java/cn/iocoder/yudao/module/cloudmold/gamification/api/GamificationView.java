@@ -52,6 +52,9 @@ public class GamificationView {
     private Long collectibleVersion;
     private Long collectibleQuantity;
     private String redemptionIntentId;
+    private String redemptionAssetClass;
+    private String redemptionCurrencyCode;
+    private Long redemptionCurrencyAmountMicrounits;
     private String redemptionStatus;
     private String rewardClaimId;
     private String rewardClaimStatus;

@@ -209,9 +209,10 @@ public final class GamificationRecords {
     @Data @Accessors(chain = true)
     public static class RedemptionIntent {
         private String redemptionIntentId; private Long tenantId; private String gameId; private String principalId;
-        private String collectibleDefinitionId; private Long collectibleVersion; private Long quantity;
+        private String sourceAssetClass; private String collectibleDefinitionId; private Long collectibleVersion;
+        private Long quantity; private String currencyCode; private Long amountMicrounits;
         private String adapterCode; private String externalIntentRef; private String externalResultRef;
-        private String status; private Long version; private LocalDateTime occurredAt;
+        private String sourceLedgerTransactionId; private String status; private Long version; private LocalDateTime occurredAt;
         private LocalDateTime createdAt; private LocalDateTime updatedAt;
     }
 

@@ -20,6 +20,7 @@ public class GamificationCommandServiceImpl implements GamificationCommandApi, G
     static final int OPERATION_SUCCEEDED = 10;
     static final String GAME_CURRENCY_ASSET_CLASS = "GAME_VIRTUAL_CURRENCY";
     static final String GAME_FRAGMENT_ASSET_CLASS = "GAME_FRAGMENT";
+    static final String GAME_COLLECTIBLE_ASSET_CLASS = "GAME_COLLECTIBLE";
     private static final Pattern CODE = Pattern.compile("[A-Z][A-Z0-9_]{1,63}");
     private static final Pattern ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]{1,127}");
     private static final Pattern GAME_CURRENCY = Pattern.compile("GAME_COIN_[A-Z0-9_]{2,40}");
@@ -725,18 +726,44 @@ public class GamificationCommandServiceImpl implements GamificationCommandApi, G
     private GamificationView createRedemption(Long tenantId, Long operationId, GamificationCommand command,
                                               Instant occurredAt, LocalDateTime now) {
         requireId(command.getPrincipalId(), "principalId");
-        CollectibleDefinition definition = mapper.selectCollectibleDefinition(tenantId,
-                command.getCollectibleDefinitionId(), command.getCollectibleVersion());
-        require(definition != null, "collectible definition version does not exist");
-        require(command.getCollectibleQuantity() != null && command.getCollectibleQuantity() > 0, "collectibleQuantity must be positive");
+        require(Set.of(GAME_COLLECTIBLE_ASSET_CLASS, GAME_CURRENCY_ASSET_CLASS)
+                .contains(command.getRedemptionAssetClass()), "unsupported redemptionAssetClass");
         require("MALL_REDEMPTION_V1".equals(command.getAdapterCode()), "only governed mall redemption adapter is supported");
         requireId(command.getExternalIntentRef(), "externalIntentRef");
-        require(command.getAssetAmountMicrounits() == null && command.getGiftAmountMicrounits() == null
-                && command.getVirtualCurrencyCode() == null, "redemption stores adapter references, never external balances or money");
+        require(command.getAssetAmountMicrounits() == null && command.getGiftAmountMicrounits() == null,
+                "redemption stores no external balances or money fields");
+        Game game;
+        CollectibleDefinition definition = null;
+        if (GAME_COLLECTIBLE_ASSET_CLASS.equals(command.getRedemptionAssetClass())) {
+            definition = mapper.selectCollectibleDefinition(tenantId, command.getCollectibleDefinitionId(),
+                    command.getCollectibleVersion());
+            require(definition != null, "collectible definition version does not exist");
+            game = requirePublishedGame(tenantId, definition.getGameId());
+            require(command.getCollectibleQuantity() != null && command.getCollectibleQuantity() > 0,
+                    "collectibleQuantity must be positive");
+            require(command.getRedemptionCurrencyCode() == null
+                    && command.getRedemptionCurrencyAmountMicrounits() == null,
+                    "collectible redemption cannot carry game-currency fields");
+        } else {
+            game = requirePublishedGame(tenantId, command.getGameId());
+            require(command.getCollectibleDefinitionId() == null && command.getCollectibleVersion() == null
+                    && command.getCollectibleQuantity() == null,
+                    "game-currency redemption cannot carry collectible fields");
+            requireGameCurrency(command.getRedemptionCurrencyCode());
+            require(game.getVirtualCurrencyCode().equals(command.getRedemptionCurrencyCode()),
+                    "redemption currency must equal the game's immutable virtual currency");
+            require(command.getRedemptionCurrencyAmountMicrounits() != null
+                    && command.getRedemptionCurrencyAmountMicrounits() > 0,
+                    "redemptionCurrencyAmountMicrounits must be positive");
+        }
         RedemptionIntent value = new RedemptionIntent().setRedemptionIntentId(UUID.randomUUID().toString())
-                .setTenantId(tenantId).setGameId(definition.getGameId()).setPrincipalId(command.getPrincipalId())
-                .setCollectibleDefinitionId(definition.getCollectibleDefinitionId()).setCollectibleVersion(definition.getCollectibleVersion())
-                .setQuantity(command.getCollectibleQuantity()).setAdapterCode(command.getAdapterCode())
+                .setTenantId(tenantId).setGameId(game.getGameId()).setPrincipalId(command.getPrincipalId())
+                .setSourceAssetClass(command.getRedemptionAssetClass())
+                .setCollectibleDefinitionId(definition == null ? null : definition.getCollectibleDefinitionId())
+                .setCollectibleVersion(definition == null ? null : definition.getCollectibleVersion())
+                .setQuantity(command.getCollectibleQuantity()).setCurrencyCode(command.getRedemptionCurrencyCode())
+                .setAmountMicrounits(command.getRedemptionCurrencyAmountMicrounits())
+                .setAdapterCode(command.getAdapterCode())
                 .setExternalIntentRef(command.getExternalIntentRef()).setStatus("PENDING").setVersion(1L)
                 .setOccurredAt(LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC)).setCreatedAt(now).setUpdatedAt(now);
         require(mapper.insertRedemptionIntent(value) == 1, "duplicate external redemption intent");
@@ -751,15 +778,27 @@ public class GamificationCommandServiceImpl implements GamificationCommandApi, G
         RedemptionIntent value = mapper.selectRedemptionForUpdate(tenantId, command.getRedemptionIntentId());
         require(value != null && "PENDING".equals(value.getStatus()), "redemption is not pending");
         require(value.getVersion().equals(command.getExpectedVersion()), "redemption version conflict");
+        String sourceLedgerTransactionId = null;
         if ("SUCCEEDED".equals(command.getRedemptionOutcome())) {
-            applyCollectible(tenantId, value.getPrincipalId(), value.getCollectibleDefinitionId(), value.getCollectibleVersion(),
-                    Math.negateExact(value.getQuantity()), "REDEMPTION", value.getRedemptionIntentId(), command,
-                    occurredAt, now);
+            if (GAME_COLLECTIBLE_ASSET_CLASS.equals(value.getSourceAssetClass())) {
+                applyCollectible(tenantId, value.getPrincipalId(), value.getCollectibleDefinitionId(),
+                        value.getCollectibleVersion(), Math.negateExact(value.getQuantity()), "REDEMPTION",
+                        value.getRedemptionIntentId(), command, occurredAt, now);
+            } else if (GAME_CURRENCY_ASSET_CLASS.equals(value.getSourceAssetClass())) {
+                Game game = requirePublishedGame(tenantId, value.getGameId());
+                TransferOutcome transfer = postCurrencyTransfer(tenantId, game, value.getPrincipalId(), "PLAYER",
+                        game.getGameId(), "TREASURY", value.getAmountMicrounits(), "REDEMPTION",
+                        value.getRedemptionIntentId(), command, occurredAt, now);
+                sourceLedgerTransactionId = transfer.transaction().getLedgerTransactionId();
+            } else {
+                throw new IllegalStateException("redemption source asset boundary is invalid");
+            }
         }
         require(mapper.completeRedemption(tenantId, value.getRedemptionIntentId(), value.getVersion(),
-                command.getExternalResultRef(), command.getRedemptionOutcome(), now) == 1, "redemption transition conflict");
+                command.getExternalResultRef(), sourceLedgerTransactionId, command.getRedemptionOutcome(), now) == 1,
+                "redemption transition conflict");
         String previous=value.getStatus(); value.setExternalResultRef(command.getExternalResultRef()).setStatus(command.getRedemptionOutcome())
-                .setVersion(value.getVersion()+1).setUpdatedAt(now);
+                .setSourceLedgerTransactionId(sourceLedgerTransactionId).setVersion(value.getVersion()+1).setUpdatedAt(now);
         eventService.appendRedemption(operationId, value, previous, command, occurredAt, now); return redemptionView(operationId, value);
     }
 
@@ -1019,6 +1058,10 @@ public class GamificationCommandServiceImpl implements GamificationCommandApi, G
     private static GamificationView redemptionView(Long operationId, RedemptionIntent value) {
         return new GamificationView().setOperationId(operationId).setDuplicate(false).setGameId(value.getGameId())
                 .setRedemptionIntentId(value.getRedemptionIntentId()).setRedemptionStatus(value.getStatus())
+                .setRedemptionAssetClass(value.getSourceAssetClass())
+                .setRedemptionCurrencyCode(value.getCurrencyCode())
+                .setRedemptionCurrencyAmountMicrounits(value.getAmountMicrounits())
+                .setLedgerTransactionId(value.getSourceLedgerTransactionId())
                 .setCollectibleDefinitionId(value.getCollectibleDefinitionId())
                 .setCollectibleVersion(value.getCollectibleVersion()).setVersion(value.getVersion());
     }

@@ -251,11 +251,14 @@ public class GamificationEventService {
                 value.getRedemptionIntentId(), value.getVersion(), value.getTenantId(), command, occurredAt,
                 payload("redemption_intent_id", value.getRedemptionIntentId(), "game_id", value.getGameId(),
                         "principal_id", value.getPrincipalId(), "adapter_code", value.getAdapterCode(),
+                        "source_asset_class", value.getSourceAssetClass(),
                         "collectible_definition_id", value.getCollectibleDefinitionId(),
                         "collectible_version", value.getCollectibleVersion(), "quantity", value.getQuantity(),
+                        "currency_code", value.getCurrencyCode(), "amount_microunits", value.getAmountMicrounits(),
                         "external_intent_ref", value.getExternalIntentRef(),
                         "external_result_ref", value.getExternalResultRef(), "previous_status", previousStatus,
-                        "current_status", value.getStatus(), "contains_external_balance", false));
+                        "current_status", value.getStatus(), "source_ledger_transaction_id",
+                        value.getSourceLedgerTransactionId(), "contains_external_balance", false));
     }
 
     public void appendClaim(Long operationId, RewardClaim value, String previousStatus,

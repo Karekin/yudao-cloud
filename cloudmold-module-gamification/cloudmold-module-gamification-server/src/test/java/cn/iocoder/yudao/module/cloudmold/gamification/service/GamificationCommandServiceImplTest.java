@@ -78,12 +78,13 @@ class GamificationCommandServiceImplTest {
                         .setTenantId(41L).setGameId("game-01"));
         GamificationCommand command = base(GamificationOperation.CREATE_REDEMPTION_INTENT)
                 .setIdempotencyKey("redemption-mixed-001").setPrincipalId("player-01")
+                .setRedemptionAssetClass("GAME_COLLECTIBLE")
                 .setCollectibleDefinitionId("collectible-01").setCollectibleVersion(1L).setCollectibleQuantity(1L)
                 .setAdapterCode("MALL_REDEMPTION_V1").setExternalIntentRef("mall-intent-01")
                 .setAssetAmountMicrounits(100L);
 
         IllegalStateException error = assertThrows(IllegalStateException.class, () -> service.execute(command));
-        assertTrue(error.getMessage().contains("never external balances or money"));
+        assertTrue(error.getMessage().contains("no external balances or money"));
         verify(mapper, never()).insertRedemptionIntent(any());
         verify(mapper, never()).insertCurrencyTransaction(any());
     }
@@ -94,7 +95,8 @@ class GamificationCommandServiceImplTest {
                 .setRedemptionIntentId("redemption-01").setTenantId(41L).setGameId("game-01")
                 .setPrincipalId("player-01").setCollectibleDefinitionId("collectible-01")
                 .setCollectibleVersion(1L).setQuantity(2L).setAdapterCode("MALL_REDEMPTION_V1")
-                .setExternalIntentRef("mall-intent-01").setStatus("PENDING").setVersion(1L));
+                .setSourceAssetClass("GAME_COLLECTIBLE").setExternalIntentRef("mall-intent-01")
+                .setStatus("PENDING").setVersion(1L));
         when(mapper.selectCollectibleDefinition(41L, "collectible-01", 1L)).thenReturn(
                 new CollectibleDefinition().setCollectibleDefinitionId("collectible-01")
                         .setCollectibleVersion(1L).setTenantId(41L).setGameId("game-01"));
@@ -107,7 +109,7 @@ class GamificationCommandServiceImplTest {
                 .thenReturn(1);
         when(mapper.insertCollectibleEntry(any())).thenReturn(1);
         when(mapper.completeRedemption(eq(41L), eq("redemption-01"), eq(1L), eq("mall-result-01"),
-                eq("SUCCEEDED"), any())).thenReturn(1);
+                isNull(), eq("SUCCEEDED"), any())).thenReturn(1);
 
         GamificationView result = service.execute(base(GamificationOperation.RECORD_REDEMPTION_RESULT)
                 .setIdempotencyKey("redemption-result-01").setRedemptionIntentId("redemption-01")
@@ -120,6 +122,27 @@ class GamificationCommandServiceImplTest {
                 && entry.getBalanceAfterQuantity().equals(1L)
                 && entry.getSourceType().equals("REDEMPTION")
                 && entry.getSourceId().equals("redemption-01")));
+    }
+
+    @Test
+    void currencyRedemptionStoresOnlyTheGameAssetSideOfTheExchange() {
+        when(mapper.selectGame(41L, "game-01")).thenReturn(new Game().setTenantId(41L).setGameId("game-01")
+                .setStatus("PUBLISHED").setCurrentVersion(1L).setVirtualCurrencyCode("GAME_COIN_GEM"));
+        when(mapper.insertRedemptionIntent(any())).thenReturn(1);
+
+        GamificationView result = service.execute(base(GamificationOperation.CREATE_REDEMPTION_INTENT)
+                .setIdempotencyKey("currency-redemption-01").setGameId("game-01").setPrincipalId("player-01")
+                .setRedemptionAssetClass("GAME_VIRTUAL_CURRENCY").setRedemptionCurrencyCode("GAME_COIN_GEM")
+                .setRedemptionCurrencyAmountMicrounits(250L).setAdapterCode("MALL_REDEMPTION_V1")
+                .setExternalIntentRef("mall-currency-intent-01"));
+
+        assertEquals("GAME_VIRTUAL_CURRENCY", result.getRedemptionAssetClass());
+        assertEquals(250L, result.getRedemptionCurrencyAmountMicrounits());
+        verify(mapper).insertRedemptionIntent(argThat(value -> value.getCollectibleDefinitionId() == null
+                && value.getSourceAssetClass().equals("GAME_VIRTUAL_CURRENCY")
+                && value.getCurrencyCode().equals("GAME_COIN_GEM")
+                && value.getAmountMicrounits().equals(250L)));
+        verify(mapper, never()).insertCurrencyTransaction(any());
     }
 
     @Test

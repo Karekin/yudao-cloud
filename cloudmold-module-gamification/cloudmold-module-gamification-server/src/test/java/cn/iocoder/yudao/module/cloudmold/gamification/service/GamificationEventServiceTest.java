@@ -79,6 +79,7 @@ class GamificationEventServiceTest {
                 .setDefinitionSha256("d".repeat(64)), command, occurredAt);
         service.appendRedemption(2L, new RedemptionIntent().setTenantId(9L).setGameId("game-01")
                 .setRedemptionIntentId("redemption-01").setVersion(1L).setPrincipalId("player-01")
+                .setSourceAssetClass("GAME_COLLECTIBLE")
                 .setCollectibleDefinitionId("collectible-01").setCollectibleVersion(1L).setQuantity(2L)
                 .setAdapterCode("MALL_REDEMPTION_V1").setExternalIntentRef("intent-01").setStatus("PENDING"),
                 null, command, occurredAt, now);
