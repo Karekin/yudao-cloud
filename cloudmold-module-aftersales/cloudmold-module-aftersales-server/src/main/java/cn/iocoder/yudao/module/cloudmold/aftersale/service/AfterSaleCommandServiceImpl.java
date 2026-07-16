@@ -104,7 +104,7 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
                 "order item already owns an active after-sale case");
         OrderAfterSaleView order = orderQueryApi.requireEligible(command.getOrderId(), command.getOrderItemId());
         PaymentRefundView payment = paymentQueryApi.requireRefundable(order.getOrderId(), order.getPaymentId(),
-                order.getPayableAmountMinor(), order.getCurrencyCode());
+                order.getNetAmountMinor(), order.getCurrencyCode());
         ForwardFulfillmentAfterSaleView forward = forwardFulfillmentQueryApi.requireDelivered(order.getOrderId(),
                 order.getFulfillmentId(), order.getShipmentId(), order.getOrderItemId());
         require(Objects.equals(order.getCanonicalSkuId(), forward.getCanonicalSkuId())
@@ -126,7 +126,9 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
         AfterSaleItemDO item = new AfterSaleItemDO().setAfterSaleItemId(UUID.randomUUID().toString())
                 .setTenantId(tenantId).setAfterSaleId(id).setOrderItemId(order.getOrderItemId())
                 .setCanonicalSkuId(order.getCanonicalSkuId()).setQuantity(order.getQuantity())
-                .setLineAmountMinor(order.getLineAmountMinor()).setListingId(order.getListingId())
+                .setLineAmountMinor(order.getLineAmountMinor())
+                .setDiscountAmountMinor(order.getDiscountAmountMinor()).setNetAmountMinor(order.getNetAmountMinor())
+                .setListingId(order.getListingId())
                 .setListingOfferId(order.getListingOfferId()).setActiveGuard(1).setCreatedAt(now);
         caseMapper.insert(sale);
         itemMapper.insert(item);
@@ -139,7 +141,7 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
         requireText(command.getReviewerId(), "reviewerId", 128);
         AfterSaleItemDO item = requireSingleItem(tenantId, sale.getAfterSaleId());
         OrderAfterSaleView order = orderQueryApi.requireEligible(sale.getOrderId(), item.getOrderItemId());
-        paymentQueryApi.requireRefundable(order.getOrderId(), sale.getPaymentId(), order.getPayableAmountMinor(),
+        paymentQueryApi.requireRefundable(order.getOrderId(), sale.getPaymentId(), order.getNetAmountMinor(),
                 sale.getCurrencyCode());
         ForwardFulfillmentAfterSaleView forward = forwardFulfillmentQueryApi.requireDelivered(sale.getOrderId(),
                 sale.getForwardFulfillmentId(), sale.getForwardShipmentId(), item.getOrderItemId());
@@ -152,12 +154,12 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
                 .quantity(item.getQuantity()).ownerId(forward.getOwnerId()).warehouseId(forward.getWarehouseId())
                 .uomCode(forward.getUomCode()).correlationId(sale.getCorrelationId())
                 .causationId(sale.getCausationId()).occurredAt(command.getOccurredAt()).build());
-        require(caseMapper.approve(tenantId, sale.getAfterSaleId(), sale.getVersion(), order.getPayableAmountMinor(),
+        require(caseMapper.approve(tenantId, sale.getAfterSaleId(), sale.getVersion(), order.getNetAmountMinor(),
                 command.getReviewerId(), returned.getReturnFulfillmentId(), now) == 1,
                 "after-sale approval conflict");
         String previous = sale.getStatus();
         sale.setStatus("APPROVED").setRefundStatus("REQUESTED")
-                .setApprovedAmountMinor(order.getPayableAmountMinor()).setReviewerId(command.getReviewerId())
+                .setApprovedAmountMinor(order.getNetAmountMinor()).setReviewerId(command.getReviewerId())
                 .setReturnFulfillmentId(returned.getReturnFulfillmentId())
                 .setVersion(sale.getVersion() + 1).setUpdatedAt(now);
         eventService.appendRefund(sale, item, "NOT_REQUESTED", "REQUESTED", 1L, null,
@@ -216,12 +218,20 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
                 .setReturnShipmentId(returned.getReturnShipmentId()).setInspectionId(returned.getInspectionId())
                 .setCanonicalSkuId(item.getCanonicalSkuId()).setQuantity(item.getQuantity())
                 .setOwnerId(sale.getOwnerId()).setWarehouseId(sale.getWarehouseId()).setUomCode(sale.getUomCode())
-                .setApprovedAmountMinor(sale.getApprovedAmountMinor()).setCurrencyCode(sale.getCurrencyCode())
+                .setApprovedAmountMinor(sale.getApprovedAmountMinor())
+                .setGrossAmountMinor(item.getLineAmountMinor()).setBenefitAmountMinor(item.getDiscountAmountMinor())
+                .setNetAmountMinor(item.getNetAmountMinor())
+                .setBenefitReversalStatus(item.getDiscountAmountMinor() == 0 ? "NOT_REQUIRED" : "PENDING")
+                .setBenefitReversalAmountMinor(0L).setCurrencyCode(sale.getCurrencyCode())
                 .setReason(sale.getReason())
                 .setStatus("REQUESTED").setActiveStep("RETURN_INVENTORY").setAttemptCount(0).setMaxAttempts(8)
                 .setVersion(1L).setCorrelationId(sale.getCorrelationId()).setCausationId(sale.getCausationId())
-                .setInventoryOccurredAt(at(command.getOccurredAt(), 1)).setPaymentOccurredAt(at(command.getOccurredAt(), 2))
-                .setOrderRefundOccurredAt(at(command.getOccurredAt(), 3)).setOrderReturnOccurredAt(at(command.getOccurredAt(), 4))
+                .setInventoryOccurredAt(at(command.getOccurredAt(), 1))
+                .setBenefitReversalOccurredAt(item.getDiscountAmountMinor() == 0 ? null
+                        : at(command.getOccurredAt(), 2))
+                .setPaymentOccurredAt(at(command.getOccurredAt(), 3))
+                .setOrderRefundOccurredAt(at(command.getOccurredAt(), 4))
+                .setOrderReturnOccurredAt(at(command.getOccurredAt(), 5))
                 .setCreatedAt(now).setUpdatedAt(now);
         sagaMapper.insert(saga);
         require(caseMapper.startResolution(tenantId, sale.getAfterSaleId(), sale.getVersion(),
@@ -274,7 +284,9 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
                 .afterSaleType(sale.getAfterSaleType()).reasonCode(sale.getReasonCode())
                 .responsibility(sale.getResponsibility()).caseStatus(sale.getStatus())
                 .aggregateVersion(sale.getVersion()).refundStatus(sale.getRefundStatus())
-                .approvedAmountMinor(sale.getApprovedAmountMinor()).currencyCode(sale.getCurrencyCode())
+                .approvedAmountMinor(sale.getApprovedAmountMinor()).grossAmountMinor(item.getLineAmountMinor())
+                .benefitAmountMinor(item.getDiscountAmountMinor()).netAmountMinor(item.getNetAmountMinor())
+                .currencyCode(sale.getCurrencyCode())
                 .returnFulfillmentId(sale.getReturnFulfillmentId())
                 .returnFulfillmentStatus(returned == null ? null : returned.getCurrentStatus())
                 .returnShipmentId(returned == null ? sale.getReturnShipmentId() : returned.getReturnShipmentId())
@@ -285,6 +297,11 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
                 .paymentRefundTransactionId(saga == null ? null : saga.getPaymentRefundTransactionId())
                 .inventoryOperationId(saga == null ? null : saga.getInventoryOperationId())
                 .inventoryLedgerTransactionId(saga == null ? null : saga.getInventoryLedgerTransactionId())
+                .benefitReversalStatus(saga == null
+                        ? (item.getDiscountAmountMinor() == 0 ? "NOT_REQUIRED" : "PENDING")
+                        : saga.getBenefitReversalStatus())
+                .benefitReversalBatchId(saga == null ? null : saga.getBenefitReversalBatchId())
+                .benefitReversalAmountMinor(saga == null ? 0L : saga.getBenefitReversalAmountMinor())
                 .duplicate(duplicate).build();
     }
 

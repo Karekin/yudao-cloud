@@ -33,6 +33,13 @@ public class AfterSaleResolutionSagaDO {
     private String warehouseId;
     private String uomCode;
     private Long approvedAmountMinor;
+    private Long grossAmountMinor;
+    private Long benefitAmountMinor;
+    private Long netAmountMinor;
+    private String benefitReversalStatus;
+    private String benefitReversalBatchId;
+    private Long benefitReversalAmountMinor;
+    private LocalDateTime benefitReversalOccurredAt;
     private String currencyCode;
     private String reason;
     private String status;

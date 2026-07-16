@@ -19,6 +19,8 @@ public class AfterSaleItemDO {
     private String canonicalSkuId;
     private BigDecimal quantity;
     private Long lineAmountMinor;
+    private Long discountAmountMinor;
+    private Long netAmountMinor;
     private String listingId;
     private String listingOfferId;
     private Integer activeGuard;

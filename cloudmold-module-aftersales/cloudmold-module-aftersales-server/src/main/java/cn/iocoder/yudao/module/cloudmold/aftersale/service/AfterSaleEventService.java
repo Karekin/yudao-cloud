@@ -49,12 +49,15 @@ public class AfterSaleEventService {
         payload.put("payment_refund_transaction_id", transactionId);
         payload.put("refund_id", sale.getAfterSaleId());
         payload.put("refunded_amount_minor", "SUCCEEDED".equals(current) ? sale.getApprovedAmountMinor() : 0L);
+        payload.put("gross_amount_minor", item.getLineAmountMinor());
+        payload.put("benefit_amount_minor", item.getDiscountAmountMinor());
+        payload.put("net_amount_minor", item.getNetAmountMinor());
         payload.put("provider_code", "INTERNAL_TEST");
         payload.put("resolution_saga_id", sale.getResolutionSagaId());
-        payload.put("step_ordinal", "SUCCEEDED".equals(current) ? 2 : 0);
+        payload.put("step_ordinal", "SUCCEEDED".equals(current) ? 3 : 0);
         payload.put("reason", sale.getReason());
         outboxAppender.append(AppendDomainEventCommand.builder().eventType("after_sale.refund.status.changed")
-                .schemaVersion(1).sourceSystem("cloudmold-aftersales").tenantId(sale.getTenantId())
+                .schemaVersion(2).sourceSystem("cloudmold-aftersales").tenantId(sale.getTenantId())
                 .aggregateType("after_sale_refund").aggregateId(sale.getAfterSaleId())
                 .aggregateVersion(version).eventSequence((short) 1).occurredAt(occurredAt)
                 .correlationId(sale.getCorrelationId()).causationId(sale.getCausationId())
@@ -87,6 +90,9 @@ public class AfterSaleEventService {
                 ? "0" : saga.getQuantity().toPlainString());
         payload.put("uom_code", saga.getUomCode());
         payload.put("approved_amount_minor", saga.getApprovedAmountMinor());
+        payload.put("gross_amount_minor", saga.getGrossAmountMinor());
+        payload.put("benefit_amount_minor", saga.getBenefitAmountMinor());
+        payload.put("net_amount_minor", saga.getNetAmountMinor());
         payload.put("refunded_amount_minor", saga.getPaymentRefundTransactionId() == null
                 ? 0L : saga.getApprovedAmountMinor());
         payload.put("currency_code", saga.getCurrencyCode());
@@ -97,12 +103,17 @@ public class AfterSaleEventService {
         payload.put("attempt", saga.getAttemptCount());
         payload.put("inventory_operation_id", saga.getInventoryOperationId());
         payload.put("inventory_ledger_transaction_id", saga.getInventoryLedgerTransactionId());
+        payload.put("benefit_reversal_status", saga.getBenefitReversalStatus());
+        payload.put("benefit_reversal_batch_id", saga.getBenefitReversalBatchId());
+        payload.put("benefit_reversal_amount_minor", saga.getBenefitReversalAmountMinor());
         payload.put("payment_refund_transaction_id", saga.getPaymentRefundTransactionId());
         payload.put("order_refund_operation_id", saga.getOrderRefundOperationId());
         payload.put("order_return_operation_id", saga.getOrderReturnOperationId());
         payload.put("order_version", saga.getOrderVersion());
         Map<String, Object> checkpoints = new LinkedHashMap<>();
         checkpoints.put("inventory_returned", saga.getInventoryLedgerTransactionId() != null);
+        checkpoints.put("benefit_reversed", "NOT_REQUIRED".equals(saga.getBenefitReversalStatus())
+                || "RECORDED".equals(saga.getBenefitReversalStatus()));
         checkpoints.put("payment_refunded", saga.getPaymentRefundTransactionId() != null);
         checkpoints.put("order_refund_confirmed", saga.getOrderRefundOperationId() != null);
         checkpoints.put("order_returned", saga.getOrderReturnOperationId() != null);
@@ -111,7 +122,7 @@ public class AfterSaleEventService {
         payload.put("error_message", saga.getLastErrorMessage());
         payload.put("next_retry_at", instant(saga.getNextRetryAt()));
         outboxAppender.append(AppendDomainEventCommand.builder()
-                .eventType("after_sale.resolution_saga.status.changed").schemaVersion(1)
+                .eventType("after_sale.resolution_saga.status.changed").schemaVersion(2)
                 .sourceSystem("cloudmold-aftersales").tenantId(saga.getTenantId())
                 .aggregateType("after_sale_resolution_saga").aggregateId(saga.getSagaId())
                 .aggregateVersion(saga.getVersion()).eventSequence((short) 1)
@@ -119,6 +130,48 @@ public class AfterSaleEventService {
                 .causationId(saga.getCausationId())
                 .idempotencyKey("after-sale-saga:" + saga.getSagaId() + ":event:" + saga.getVersion())
                 .payload(payload).headers(Map.of("active_step", saga.getActiveStep()))
+                .destination("lakehouse").build());
+    }
+
+    public void appendBenefitReversal(AfterSaleResolutionSagaDO saga, AfterSaleBenefitReversalDO reversal,
+                                      List<AfterSaleBenefitFundingReversalDO> funding, LocalDateTime now) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("run_id", saga.getRunId());
+        payload.put("reversal_batch_id", reversal.getReversalBatchId());
+        payload.put("benefit_reversal_id", reversal.getBenefitReversalId());
+        payload.put("after_sale_id", reversal.getAfterSaleId());
+        payload.put("after_sale_item_id", reversal.getAfterSaleItemId());
+        payload.put("order_id", reversal.getOrderId());
+        payload.put("order_item_id", reversal.getOrderItemId());
+        payload.put("benefit_application_id", reversal.getBenefitApplicationId());
+        payload.put("benefit_allocation_id", reversal.getBenefitAllocationId());
+        payload.put("benefit_type", reversal.getBenefitType());
+        payload.put("benefit_source_type", reversal.getBenefitSourceType());
+        payload.put("benefit_source_id", reversal.getBenefitSourceId());
+        payload.put("benefit_source_version", reversal.getBenefitSourceVersion());
+        payload.put("entitlement_id", reversal.getEntitlementId());
+        payload.put("entitlement_effect_status", reversal.getEntitlementEffectStatus());
+        payload.put("amount_minor", reversal.getAmountMinor());
+        payload.put("currency_code", reversal.getCurrencyCode());
+        payload.put("funding", funding.stream().map(row -> {
+            Map<String, Object> value = new LinkedHashMap<>();
+            value.put("funding_reversal_id", row.getFundingReversalId());
+            value.put("benefit_funding_id", row.getBenefitFundingId());
+            value.put("funder_type", row.getFunderType());
+            value.put("funder_id", row.getFunderId());
+            value.put("amount_minor", row.getAmountMinor());
+            value.put("currency_code", row.getCurrencyCode());
+            return value;
+        }).toList());
+        outboxAppender.append(AppendDomainEventCommand.builder()
+                .eventType("after_sale.benefit_reversal.recorded").schemaVersion(1)
+                .sourceSystem("cloudmold-aftersales").tenantId(saga.getTenantId())
+                .aggregateType("after_sale_benefit_reversal").aggregateId(reversal.getBenefitReversalId())
+                .aggregateVersion(1L).eventSequence((short) 1)
+                .occurredAt(reversal.getOccurredAt().toInstant(ZoneOffset.UTC))
+                .correlationId(saga.getCorrelationId()).causationId(saga.getCausationId())
+                .idempotencyKey("after-sale-benefit-reversal:" + reversal.getBenefitReversalId())
+                .payload(payload).headers(Map.of("reversal_batch_id", reversal.getReversalBatchId()))
                 .destination("lakehouse").build());
     }
 
@@ -153,12 +206,13 @@ public class AfterSaleEventService {
     }
 
     private static int stepOrdinal(AfterSaleResolutionSagaDO saga) {
-        if ("COMPLETED".equals(saga.getStatus())) return 5;
+        if ("COMPLETED".equals(saga.getStatus())) return 6;
         return switch (saga.getActiveStep()) {
             case "RETURN_INVENTORY" -> 1;
-            case "REFUND_PAYMENT" -> 2;
-            case "CONFIRM_ORDER_REFUND" -> 3;
-            case "RETURN_ORDER" -> 4;
+            case "REVERSE_BENEFITS" -> 2;
+            case "REFUND_PAYMENT" -> 3;
+            case "CONFIRM_ORDER_REFUND" -> 4;
+            case "RETURN_ORDER" -> 5;
             default -> 0;
         };
     }

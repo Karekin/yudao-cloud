@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 @Builder
@@ -26,6 +27,9 @@ public class OrderAfterSaleView {
     private String canonicalSkuId;
     private BigDecimal quantity;
     private Long lineAmountMinor;
+    private Long discountAmountMinor;
+    private Long netAmountMinor;
+    private List<OrderBenefitApplicationView> benefitApplications;
     private String reservationId;
     private String listingId;
     private String listingOfferId;

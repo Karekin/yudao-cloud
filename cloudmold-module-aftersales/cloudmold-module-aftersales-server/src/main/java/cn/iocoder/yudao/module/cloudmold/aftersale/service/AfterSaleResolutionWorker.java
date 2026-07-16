@@ -23,6 +23,7 @@ public class AfterSaleResolutionWorker {
     private final InventoryCommandApi inventoryCommandApi;
     private final PaymentCommandApi paymentCommandApi;
     private final OrderCommandApi orderCommandApi;
+    private final AfterSaleBenefitReversalService benefitReversalService;
     private final AfterSaleResolutionCheckpointService checkpointService;
 
     public AfterSaleResolutionRunResult runBatch(String leaseOwner, int batchSize, LocalDateTime now) {
@@ -68,6 +69,16 @@ public class AfterSaleResolutionWorker {
                         .correlationId(saga.getCorrelationId()).causationId(saga.getCausationId())
                         .occurredAt(saga.getInventoryOccurredAt().toInstant(ZoneOffset.UTC)).build());
                 checkpointService.markInventoryReturned(tenantId, sagaId, leaseOwner, returned,
+                        checkpointNow(floor));
+            }
+            saga = requireSaga(tenantId, sagaId);
+            if ("PENDING".equals(saga.getBenefitReversalStatus())) {
+                checkpointService.markProgress(tenantId, sagaId, leaseOwner,
+                        "REVERSING_BENEFITS", "REVERSE_BENEFITS", checkpointNow(floor));
+                saga = requireSaga(tenantId, sagaId);
+                AfterSaleBenefitReversalResult reversed = benefitReversalService.record(saga,
+                        checkpointNow(floor));
+                checkpointService.markBenefitsReversed(tenantId, sagaId, leaseOwner, reversed,
                         checkpointNow(floor));
             }
             saga = requireSaga(tenantId, sagaId);

@@ -25,7 +25,9 @@ class AfterSaleResolutionCheckpointServiceTest {
         AfterSaleResolutionSagaDO saga = new AfterSaleResolutionSagaDO().setTenantId(1L).setSagaId("saga-1")
                 .setAfterSaleId("after-sale-1").setLeaseOwner("worker-1").setStatus("ORDER_RETURNED")
                 .setActiveStep("COMPLETE").setVersion(9L).setInventoryLedgerTransactionId(101L)
-                .setPaymentRefundTransactionId(201L).setOrderRefundOperationId(301L).setOrderReturnOperationId(401L);
+                .setPaymentRefundTransactionId(201L).setOrderRefundOperationId(301L).setOrderReturnOperationId(401L)
+                .setBenefitAmountMinor(0L).setBenefitReversalStatus("NOT_REQUIRED")
+                .setBenefitReversalAmountMinor(0L);
         AfterSaleCaseDO sale = new AfterSaleCaseDO().setTenantId(1L).setAfterSaleId("after-sale-1")
                 .setResolutionSagaId("saga-1").setStatus("RESOLUTION_PENDING").setRefundStatus("SUCCEEDED")
                 .setVersion(3L);

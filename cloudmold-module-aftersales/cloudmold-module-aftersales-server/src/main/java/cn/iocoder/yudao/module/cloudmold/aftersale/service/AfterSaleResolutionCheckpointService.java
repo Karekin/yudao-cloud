@@ -41,9 +41,27 @@ public class AfterSaleResolutionCheckpointService {
         String previous = saga.getStatus();
         saga.setInventoryOperationId(result.getOperationId())
                 .setInventoryLedgerTransactionId(result.getLedgerTransactionId())
-                .setStatus("INVENTORY_RETURNED").setActiveStep("REFUND_PAYMENT")
+                .setStatus("INVENTORY_RETURNED").setActiveStep(
+                        "PENDING".equals(saga.getBenefitReversalStatus()) ? "REVERSE_BENEFITS" : "REFUND_PAYMENT")
                 .setVersion(saga.getVersion() + 1).setUpdatedAt(now);
         require(sagaMapper.updateById(saga) == 1, "inventory return checkpoint conflict");
+        eventService.appendSaga(saga, previous, now);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void markBenefitsReversed(Long tenantId, String sagaId, String leaseOwner,
+                                     AfterSaleBenefitReversalResult result, LocalDateTime now) {
+        AfterSaleResolutionSagaDO saga = requireLeased(tenantId, sagaId, leaseOwner);
+        require("PENDING".equals(saga.getBenefitReversalStatus())
+                        && result.reversalCount() > 0 && result.fundingReversalCount() > 0
+                        && Objects.equals(result.amountMinor(), saga.getBenefitAmountMinor()),
+                "benefit reversal does not reconcile with after-sale snapshot");
+        String previous = saga.getStatus();
+        saga.setBenefitReversalStatus("RECORDED").setBenefitReversalBatchId(result.batchId())
+                .setBenefitReversalAmountMinor(result.amountMinor())
+                .setStatus("BENEFITS_REVERSED").setActiveStep("REFUND_PAYMENT")
+                .setVersion(saga.getVersion() + 1).setUpdatedAt(now);
+        require(sagaMapper.updateById(saga) == 1, "benefit reversal checkpoint conflict");
         eventService.appendSaga(saga, previous, now);
     }
 
@@ -103,6 +121,11 @@ public class AfterSaleResolutionCheckpointService {
         require(saga.getInventoryLedgerTransactionId() != null && saga.getPaymentRefundTransactionId() != null
                         && saga.getOrderRefundOperationId() != null && saga.getOrderReturnOperationId() != null,
                 "resolution Saga participant checkpoints are incomplete");
+        require("NOT_REQUIRED".equals(saga.getBenefitReversalStatus())
+                        || ("RECORDED".equals(saga.getBenefitReversalStatus())
+                        && saga.getBenefitReversalBatchId() != null
+                        && Objects.equals(saga.getBenefitReversalAmountMinor(), saga.getBenefitAmountMinor())),
+                "resolution Saga benefit reversal checkpoint is incomplete");
         AfterSaleCaseDO sale = caseMapper.selectForUpdate(tenantId, saga.getAfterSaleId());
         require(sale != null && Objects.equals(sale.getResolutionSagaId(), sagaId),
                 "resolution Saga does not own after-sale case");

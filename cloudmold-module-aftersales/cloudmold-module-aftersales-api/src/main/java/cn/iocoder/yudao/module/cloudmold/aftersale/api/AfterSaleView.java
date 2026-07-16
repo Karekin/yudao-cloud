@@ -28,6 +28,9 @@ public class AfterSaleView {
     private Long aggregateVersion;
     private String refundStatus;
     private Long approvedAmountMinor;
+    private Long grossAmountMinor;
+    private Long benefitAmountMinor;
+    private Long netAmountMinor;
     private String currencyCode;
     private String returnFulfillmentId;
     private String returnFulfillmentStatus;
@@ -39,5 +42,8 @@ public class AfterSaleView {
     private Long paymentRefundTransactionId;
     private Long inventoryOperationId;
     private Long inventoryLedgerTransactionId;
+    private String benefitReversalStatus;
+    private String benefitReversalBatchId;
+    private Long benefitReversalAmountMinor;
     private Boolean duplicate;
 }

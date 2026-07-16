@@ -24,9 +24,10 @@ class AfterSaleResolutionWorkerTest {
     private final InventoryCommandApi inventoryApi = mock(InventoryCommandApi.class);
     private final PaymentCommandApi paymentApi = mock(PaymentCommandApi.class);
     private final OrderCommandApi orderApi = mock(OrderCommandApi.class);
+    private final AfterSaleBenefitReversalService benefitReversalService = mock(AfterSaleBenefitReversalService.class);
     private final AfterSaleResolutionCheckpointService checkpoint = mock(AfterSaleResolutionCheckpointService.class);
     private final AfterSaleResolutionWorker worker = new AfterSaleResolutionWorker(sagaMapper, returnQueryApi, inventoryApi,
-            paymentApi, orderApi, checkpoint);
+            paymentApi, orderApi, benefitReversalService, checkpoint);
     private AfterSaleResolutionSagaDO saga;
     private final LocalDateTime now = LocalDateTime.of(2026, 7, 15, 1, 0);
 
@@ -55,6 +56,12 @@ class AfterSaleResolutionWorkerTest {
                     .setInventoryLedgerTransactionId(result.getLedgerTransactionId());
             return null;
         }).when(checkpoint).markInventoryReturned(anyLong(), anyString(), anyString(), any(), any());
+        doAnswer(invocation -> {
+            AfterSaleBenefitReversalResult result = invocation.getArgument(3);
+            saga.setBenefitReversalStatus("RECORDED").setBenefitReversalBatchId(result.batchId())
+                    .setBenefitReversalAmountMinor(result.amountMinor());
+            return null;
+        }).when(checkpoint).markBenefitsReversed(anyLong(), anyString(), anyString(), any(), any());
         doAnswer(invocation -> {
             PaymentCommandResult result = invocation.getArgument(3);
             saga.setPaymentRefundTransactionId(result.getTransactionId());
@@ -91,6 +98,28 @@ class AfterSaleResolutionWorkerTest {
                 && command.getExpectedVersion() == 6L
                 && command.getIdempotencyKey().equals("after-sale-saga:saga-1:order-return")));
         verify(checkpoint).markCompleted(eq(1L), eq("saga-1"), eq("worker-1"), any());
+    }
+
+    @Test
+    void shouldReverseBenefitsBeforeRefundingOnlyTheNetCashAmount() {
+        saga.setApprovedAmountMinor(36000L).setGrossAmountMinor(39800L).setBenefitAmountMinor(3800L)
+                .setNetAmountMinor(36000L).setBenefitReversalStatus("PENDING")
+                .setBenefitReversalOccurredAt(LocalDateTime.of(2026, 7, 15, 1, 0, 2));
+        when(benefitReversalService.record(same(saga), any())).thenReturn(
+                new AfterSaleBenefitReversalResult("batch-1", 1, 2, 3800L));
+        when(paymentApi.execute(any())).thenReturn(PaymentCommandResult.builder()
+                .operationId(201L).transactionId(202L).currentStatus("REFUNDED")
+                .capturedAmountMinor(36000L).refundedAmountMinor(36000L).currencyCode("CNY").build());
+
+        worker.process(1L, "saga-1", "worker-1", now);
+
+        verify(benefitReversalService).record(same(saga), any());
+        verify(checkpoint).markBenefitsReversed(eq(1L), eq("saga-1"), eq("worker-1"),
+                argThat(result -> result.amountMinor() == 3800L), any());
+        verify(paymentApi).execute(argThat(command -> command.getAmountMinor() == 36000L));
+        var ordered = inOrder(benefitReversalService, paymentApi);
+        ordered.verify(benefitReversalService).record(same(saga), any());
+        ordered.verify(paymentApi).execute(any());
     }
 
     @Test
@@ -198,7 +227,9 @@ class AfterSaleResolutionWorkerTest {
                 .setReturnShipmentId("return-shipment-1").setInspectionId("inspection-1")
                 .setCanonicalSkuId("sku-1").setQuantity(new BigDecimal("2.000000"))
                 .setOwnerId("internal-company").setWarehouseId("warehouse-1").setUomCode("PCS")
-                .setApprovedAmountMinor(39800L).setCurrencyCode("CNY").setReason("size not fit")
+                .setApprovedAmountMinor(39800L).setGrossAmountMinor(39800L).setBenefitAmountMinor(0L)
+                .setNetAmountMinor(39800L).setBenefitReversalStatus("NOT_REQUIRED")
+                .setBenefitReversalAmountMinor(0L).setCurrencyCode("CNY").setReason("size not fit")
                 .setStatus("REQUESTED").setActiveStep("RETURN_INVENTORY").setAttemptCount(1).setMaxAttempts(8)
                 .setVersion(1L).setLeaseOwner("worker-1")
                 .setCorrelationId("70000000-0000-4000-8000-000000000001")

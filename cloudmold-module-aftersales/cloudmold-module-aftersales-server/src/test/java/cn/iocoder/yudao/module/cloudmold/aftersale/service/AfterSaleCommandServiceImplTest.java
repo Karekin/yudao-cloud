@@ -134,6 +134,32 @@ class AfterSaleCommandServiceImplTest {
     }
 
     @Test
+    void shouldFreezeGrossBenefitAndNetButApproveOnlyNetCashRefund() {
+        when(orderQueryApi.requireEligible("order-1", "order-item-1")).thenReturn(discountedOrder());
+        when(paymentQueryApi.requireRefundable("order-1", "payment-1", 36000L, "CNY"))
+                .thenReturn(PaymentRefundView.builder().paymentId("payment-1").orderId("order-1")
+                        .status("CAPTURED").aggregateVersion(1L).capturedAmountMinor(36000L)
+                        .refundedAmountMinor(0L).currencyCode("CNY").providerCode("INTERNAL_TEST")
+                        .testMode(true).build());
+
+        service.execute(request("after-sale-benefit-request"));
+        service.execute(command(AfterSaleOperation.APPROVE, "after-sale-benefit-approve", 1L)
+                .reviewerId("reviewer-1").build());
+        service.execute(command(AfterSaleOperation.ACCEPT_INSPECTION,
+                "after-sale-benefit-inspection", 2L).qualityStatus("QUALIFIED")
+                .inspectorId("inspector-1").build());
+
+        assertThat(item.getLineAmountMinor()).isEqualTo(39800L);
+        assertThat(item.getDiscountAmountMinor()).isEqualTo(3800L);
+        assertThat(item.getNetAmountMinor()).isEqualTo(36000L);
+        assertThat(sale.getApprovedAmountMinor()).isEqualTo(36000L);
+        verify(sagaMapper).insert(argThat((AfterSaleResolutionSagaDO value) ->
+                value.getGrossAmountMinor() == 39800L && value.getBenefitAmountMinor() == 3800L
+                        && value.getNetAmountMinor() == 36000L
+                        && "PENDING".equals(value.getBenefitReversalStatus())));
+    }
+
+    @Test
     void shouldReplaySamePayloadRejectDifferentPayloadAndRejectActiveDuplicate() {
         AfterSaleCommand request = request("after-sale-request-replay");
         AfterSaleView first = service.execute(request);
@@ -251,7 +277,17 @@ class AfterSaleCommandServiceImplTest {
                 .status("COMPLETED").aggregateVersion(5L).payableAmountMinor(39800L).currencyCode("CNY")
                 .paymentId("payment-1").fulfillmentId("fulfillment-1").shipmentId("shipment-1")
                 .orderItemId("order-item-1").canonicalSkuId("sku-1").quantity(BigDecimal.ONE)
-                .lineAmountMinor(39800L).listingId("listing-1").listingOfferId("offer-1").build();
+                .lineAmountMinor(39800L).discountAmountMinor(0L).netAmountMinor(39800L)
+                .benefitApplications(List.of()).listingId("listing-1").listingOfferId("offer-1").build();
+    }
+
+    private static OrderAfterSaleView discountedOrder() {
+        return OrderAfterSaleView.builder().orderId("order-1").orderNo("CMO1").buyerId("buyer-1")
+                .status("COMPLETED").aggregateVersion(5L).payableAmountMinor(36000L).currencyCode("CNY")
+                .paymentId("payment-1").fulfillmentId("fulfillment-1").shipmentId("shipment-1")
+                .orderItemId("order-item-1").canonicalSkuId("sku-1").quantity(BigDecimal.ONE)
+                .lineAmountMinor(39800L).discountAmountMinor(3800L).netAmountMinor(36000L)
+                .benefitApplications(List.of()).listingId("listing-1").listingOfferId("offer-1").build();
     }
 
     private static PaymentRefundView refundablePayment() {
