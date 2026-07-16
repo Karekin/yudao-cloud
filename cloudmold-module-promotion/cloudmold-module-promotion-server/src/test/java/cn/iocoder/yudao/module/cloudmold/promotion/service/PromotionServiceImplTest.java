@@ -20,7 +20,7 @@ class PromotionServiceImplTest {
 
     private final PromotionOperationMapper operationMapper = mock(PromotionOperationMapper.class);
     private final PromotionCampaignMapper campaignMapper = mock(PromotionCampaignMapper.class);
-    private final CouponTemplateMapper templateMapper = mock(CouponTemplateMapper.class);
+    private final CanonicalCouponTemplateMapper templateMapper = mock(CanonicalCouponTemplateMapper.class);
     private final CouponEntitlementMapper entitlementMapper = mock(CouponEntitlementMapper.class);
     private final CouponEntitlementLedgerMapper ledgerMapper = mock(CouponEntitlementLedgerMapper.class);
     private final AdvertisingPlacementMapper placementMapper = mock(AdvertisingPlacementMapper.class);

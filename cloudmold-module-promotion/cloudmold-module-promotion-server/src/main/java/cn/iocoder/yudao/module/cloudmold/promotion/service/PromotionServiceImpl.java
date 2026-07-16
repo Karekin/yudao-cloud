@@ -23,7 +23,7 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
 
     private final PromotionOperationMapper operationMapper;
     private final PromotionCampaignMapper campaignMapper;
-    private final CouponTemplateMapper templateMapper;
+    private final CanonicalCouponTemplateMapper templateMapper;
     private final CouponEntitlementMapper entitlementMapper;
     private final CouponEntitlementLedgerMapper ledgerMapper;
     private final AdvertisingPlacementMapper placementMapper;
