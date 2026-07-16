@@ -20,6 +20,7 @@ public class OrderBenefitApplicationView {
     private Long benefitSourceVersion;
     private String entitlementId;
     private Long amountMinor;
+    private Long returnAmountMinor;
     private String currencyCode;
     private String calculationDigest;
     private Long version;

@@ -42,6 +42,9 @@ public class AfterSaleView {
     private Long paymentRefundTransactionId;
     private Long inventoryOperationId;
     private Long inventoryLedgerTransactionId;
+    private String orderSettlementEffectId;
+    private Long orderSettlementVersion;
+    private Boolean orderReturnFull;
     private String benefitReversalStatus;
     private String benefitReversalBatchId;
     private Long benefitReversalAmountMinor;

@@ -28,7 +28,8 @@ public class AfterSaleBenefitReversalService {
                 saga.getTenantId(), saga.getAfterSaleId());
         if (!existing.isEmpty()) return resolveExisting(saga, existing);
 
-        OrderAfterSaleView order = orderQueryApi.requireEligible(saga.getOrderId(), saga.getOrderItemId());
+        OrderAfterSaleView order = orderQueryApi.requireEligible(saga.getOrderId(), saga.getOrderItemId(),
+                saga.getQuantity());
         require(Objects.equals(order.getLineAmountMinor(), saga.getGrossAmountMinor())
                         && Objects.equals(order.getDiscountAmountMinor(), saga.getBenefitAmountMinor())
                         && Objects.equals(order.getNetAmountMinor(), saga.getNetAmountMinor()),
@@ -44,11 +45,19 @@ public class AfterSaleBenefitReversalService {
         int reversalCount = 0;
         int fundingCount = 0;
         for (OrderBenefitApplicationView application : applications) {
-            String entitlementEffectStatus = returnEntitlementIfRequired(saga, application, occurredAt);
+            long applicationReturnAmount = requiredPositive(application.getReturnAmountMinor(),
+                    "benefit application return amount must be positive");
+            long previouslyReversed = Objects.requireNonNullElse(reversalMapper.sumByApplication(
+                    saga.getTenantId(), saga.getOrderId(), application.getBenefitApplicationId()), 0L);
+            long cumulativeReversed = Math.addExact(previouslyReversed, applicationReturnAmount);
+            require(cumulativeReversed <= application.getAmountMinor(),
+                    "benefit application reversal exceeds original amount");
+            String entitlementEffectStatus = returnEntitlementIfRequired(saga, application, occurredAt,
+                    cumulativeReversed == application.getAmountMinor());
             for (OrderBenefitAllocationView allocation : application.getAllocations()) {
                 require(Objects.equals(allocation.getOrderItemId(), saga.getOrderItemId()),
                         "benefit allocation does not belong to after-sale order item");
-                long allocationAmount = requiredPositive(allocation.getAmountMinor(),
+                long allocationAmount = requiredPositive(allocation.getReturnAmountMinor(),
                         "benefit allocation amount must be positive");
                 long fundingTotal = 0;
                 List<OrderBenefitFundingView> fundingViews = allocation.getFunding() == null
@@ -71,7 +80,7 @@ public class AfterSaleBenefitReversalService {
                 require(reversalMapper.insert(reversal) == 1, "failed to record benefit reversal");
                 List<AfterSaleBenefitFundingReversalDO> fundingRows = new ArrayList<>();
                 for (OrderBenefitFundingView funding : fundingViews) {
-                    long amount = requiredPositive(funding.getAmountMinor(),
+                    long amount = requiredPositive(funding.getReturnAmountMinor(),
                             "benefit funding reversal amount must be positive");
                     fundingTotal = Math.addExact(fundingTotal, amount);
                     AfterSaleBenefitFundingReversalDO row = new AfterSaleBenefitFundingReversalDO()
@@ -101,13 +110,15 @@ public class AfterSaleBenefitReversalService {
 
     private String returnEntitlementIfRequired(AfterSaleResolutionSagaDO saga,
                                                OrderBenefitApplicationView application,
-                                               LocalDateTime occurredAt) {
+                                               LocalDateTime occurredAt,
+                                               boolean fullyReversed) {
         if (application.getEntitlementId() == null) return "NOT_REQUIRED";
         require("COUPON_ENTITLEMENT".equals(application.getBenefitSourceType())
                         && Objects.equals(application.getEntitlementId(), application.getBenefitSourceId())
                         && application.getBenefitSourceVersion() != null
                         && application.getBenefitSourceVersion() > 0,
                 "entitlement benefit source snapshot is invalid");
+        if (!fullyReversed) return "RETAINED_PARTIAL";
         PromotionCommandResult result = promotionCommandApi.execute(PromotionCommand.builder()
                 .operation(PromotionOperation.RETURN_COUPON_ENTITLEMENT)
                 .idempotencyKey("after-sale:" + saga.getAfterSaleId() + ":benefit:"
@@ -117,7 +128,7 @@ public class AfterSaleBenefitReversalService {
                 .couponEntitlement(PromotionCommand.CouponEntitlementDefinition.builder()
                         .entitlementId(application.getEntitlementId())
                         .orderRef(saga.getRunId())
-                        .reason("FULL_RETURN:" + saga.getAfterSaleId())
+                        .reason("FULL_BENEFIT_REVERSAL:" + saga.getAfterSaleId())
                         .expectedVersion(application.getBenefitSourceVersion())
                         .build())
                 .build());
@@ -138,7 +149,8 @@ public class AfterSaleBenefitReversalService {
             total = Math.addExact(total, reversal.getAmountMinor());
             require((reversal.getEntitlementId() == null && "NOT_REQUIRED".equals(reversal.getEntitlementEffectStatus()))
                             || (reversal.getEntitlementId() != null
-                            && "RETURNED".equals(reversal.getEntitlementEffectStatus())),
+                            && ("RETAINED_PARTIAL".equals(reversal.getEntitlementEffectStatus())
+                            || "RETURNED".equals(reversal.getEntitlementEffectStatus()))),
                     "existing entitlement reversal evidence is incomplete");
         }
         require(batches.size() == 1 && total == saga.getBenefitAmountMinor(),

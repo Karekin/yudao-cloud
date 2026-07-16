@@ -4,6 +4,7 @@ import cn.iocoder.yudao.module.cloudmold.aftersale.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.aftersale.dal.mysql.*;
 import cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryCommandResult;
 import cn.iocoder.yudao.module.cloudmold.order.api.OrderCommandResult;
+import cn.iocoder.yudao.module.cloudmold.order.api.OrderAfterSaleSettlementResult;
 import cn.iocoder.yudao.module.cloudmold.payment.api.PaymentCommandResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -69,8 +70,8 @@ public class AfterSaleResolutionCheckpointService {
     public void markPaymentRefunded(Long tenantId, String sagaId, String leaseOwner,
                                     PaymentCommandResult result, LocalDateTime now) {
         AfterSaleResolutionSagaDO saga = requireLeased(tenantId, sagaId, leaseOwner);
-        require(Objects.equals(result.getCapturedAmountMinor(), saga.getApprovedAmountMinor())
-                        && Objects.equals(result.getRefundedAmountMinor(), saga.getApprovedAmountMinor())
+        require(Objects.equals(result.getTransactionAmountMinor(), saga.getApprovedAmountMinor())
+                        && result.getRefundedAmountMinor() >= saga.getApprovedAmountMinor()
                         && Objects.equals(result.getCurrencyCode(), saga.getCurrencyCode()),
                 "payment refund does not reconcile with after-sale entitlement");
         AfterSaleCaseDO sale = caseMapper.selectForUpdate(tenantId, saga.getAfterSaleId());
@@ -84,8 +85,28 @@ public class AfterSaleResolutionCheckpointService {
                 result.getTransactionId(), saga.getPaymentOccurredAt().toInstant(ZoneOffset.UTC), now);
         String previous = saga.getStatus();
         saga.setPaymentRefundTransactionId(result.getTransactionId()).setStatus("PAYMENT_REFUNDED")
-                .setActiveStep("CONFIRM_ORDER_REFUND").setVersion(saga.getVersion() + 1).setUpdatedAt(now);
+                .setActiveStep("SETTLE_ORDER").setVersion(saga.getVersion() + 1).setUpdatedAt(now);
         require(sagaMapper.updateById(saga) == 1, "payment refund checkpoint conflict");
+        eventService.appendSaga(saga, previous, now);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void markOrderSettled(Long tenantId, String sagaId, String leaseOwner,
+                                 OrderAfterSaleSettlementResult result, LocalDateTime now) {
+        AfterSaleResolutionSagaDO saga = requireLeased(tenantId, sagaId, leaseOwner);
+        require(result != null && result.getSettlementEffectId() != null
+                        && Objects.equals(result.getOrderId(), saga.getOrderId())
+                        && Objects.equals(result.getOrderItemId(), saga.getOrderItemId())
+                        && result.getOrderSettlementVersion() != null
+                        && result.getOrderSettlementVersion() > 0,
+                "order return settlement does not reconcile with after-sale Saga");
+        String previous = saga.getStatus();
+        boolean full = Boolean.TRUE.equals(result.getFullReturn());
+        saga.setOrderSettlementEffectId(result.getSettlementEffectId())
+                .setOrderSettlementVersion(result.getOrderSettlementVersion()).setOrderReturnFull(full)
+                .setStatus("ORDER_SETTLED").setActiveStep(full ? "CONFIRM_ORDER_REFUND" : "COMPLETE")
+                .setVersion(saga.getVersion() + 1).setUpdatedAt(now);
+        require(sagaMapper.updateById(saga) == 1, "order return settlement checkpoint conflict");
         eventService.appendSaga(saga, previous, now);
     }
 
@@ -119,8 +140,13 @@ public class AfterSaleResolutionCheckpointService {
     public void markCompleted(Long tenantId, String sagaId, String leaseOwner, LocalDateTime now) {
         AfterSaleResolutionSagaDO saga = requireLeased(tenantId, sagaId, leaseOwner);
         require(saga.getInventoryLedgerTransactionId() != null && saga.getPaymentRefundTransactionId() != null
-                        && saga.getOrderRefundOperationId() != null && saga.getOrderReturnOperationId() != null,
+                        && saga.getOrderSettlementEffectId() != null,
                 "resolution Saga participant checkpoints are incomplete");
+        require((Boolean.TRUE.equals(saga.getOrderReturnFull())
+                        && saga.getOrderRefundOperationId() != null && saga.getOrderReturnOperationId() != null)
+                        || (Boolean.FALSE.equals(saga.getOrderReturnFull())
+                        && saga.getOrderRefundOperationId() == null && saga.getOrderReturnOperationId() == null),
+                "order terminalization does not match cumulative return settlement");
         require("NOT_REQUIRED".equals(saga.getBenefitReversalStatus())
                         || ("RECORDED".equals(saga.getBenefitReversalStatus())
                         && saga.getBenefitReversalBatchId() != null

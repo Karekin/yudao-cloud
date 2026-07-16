@@ -15,5 +15,6 @@ public class OrderBenefitFundingView {
     private String funderType;
     private String funderId;
     private Long amountMinor;
+    private Long returnAmountMinor;
     private String currencyCode;
 }

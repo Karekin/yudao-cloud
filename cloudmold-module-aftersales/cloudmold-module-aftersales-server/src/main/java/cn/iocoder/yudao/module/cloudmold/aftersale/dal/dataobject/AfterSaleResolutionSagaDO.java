@@ -52,6 +52,9 @@ public class AfterSaleResolutionSagaDO {
     private Long paymentRefundTransactionId;
     private Long orderRefundOperationId;
     private Long orderReturnOperationId;
+    private String orderSettlementEffectId;
+    private Long orderSettlementVersion;
+    private Boolean orderReturnFull;
     private String leaseOwner;
     private LocalDateTime leaseUntil;
     private LocalDateTime nextRetryAt;

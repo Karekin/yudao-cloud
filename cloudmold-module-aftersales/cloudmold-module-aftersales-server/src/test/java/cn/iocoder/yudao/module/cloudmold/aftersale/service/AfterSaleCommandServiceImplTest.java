@@ -47,7 +47,7 @@ class AfterSaleCommandServiceImplTest {
         TenantContextHolder.setTenantId(1L);
         wireOperationStore();
         wirePersistence();
-        when(orderQueryApi.requireEligible("order-1", "order-item-1")).thenReturn(eligibleOrder());
+        when(orderQueryApi.requireEligible("order-1", "order-item-1", BigDecimal.ONE)).thenReturn(eligibleOrder());
         when(paymentQueryApi.requireRefundable("order-1", "payment-1", 39800L, "CNY"))
                 .thenReturn(refundablePayment());
         when(forwardQueryApi.requireDelivered("order-1", "fulfillment-1", "shipment-1", "order-item-1"))
@@ -74,14 +74,14 @@ class AfterSaleCommandServiceImplTest {
 
     @Test
     void shouldRejectNonCompletedNonCapturedAndNonDeliveredBeforeCreatingCase() {
-        when(orderQueryApi.requireEligible("order-1", "order-item-1"))
+        when(orderQueryApi.requireEligible("order-1", "order-item-1", BigDecimal.ONE))
                 .thenThrow(new IllegalStateException("canonical order must be COMPLETED"));
         assertThatThrownBy(() -> service.execute(request("after-sale-gate-order")))
                 .hasMessage("canonical order must be COMPLETED");
         verifyNoInteractions(paymentQueryApi, forwardQueryApi, returnCommandApi);
 
         reset(orderQueryApi, paymentQueryApi, forwardQueryApi);
-        when(orderQueryApi.requireEligible("order-1", "order-item-1")).thenReturn(eligibleOrder());
+        when(orderQueryApi.requireEligible("order-1", "order-item-1", BigDecimal.ONE)).thenReturn(eligibleOrder());
         when(paymentQueryApi.requireRefundable("order-1", "payment-1", 39800L, "CNY"))
                 .thenThrow(new IllegalStateException("canonical payment must be CAPTURED"));
         assertThatThrownBy(() -> service.execute(request("after-sale-gate-payment")))
@@ -135,7 +135,7 @@ class AfterSaleCommandServiceImplTest {
 
     @Test
     void shouldFreezeGrossBenefitAndNetButApproveOnlyNetCashRefund() {
-        when(orderQueryApi.requireEligible("order-1", "order-item-1")).thenReturn(discountedOrder());
+        when(orderQueryApi.requireEligible("order-1", "order-item-1", BigDecimal.ONE)).thenReturn(discountedOrder());
         when(paymentQueryApi.requireRefundable("order-1", "payment-1", 36000L, "CNY"))
                 .thenReturn(PaymentRefundView.builder().paymentId("payment-1").orderId("order-1")
                         .status("CAPTURED").aggregateVersion(1L).capturedAmountMinor(36000L)
@@ -175,7 +175,7 @@ class AfterSaleCommandServiceImplTest {
         when(caseMapper.selectActiveByOrderItem(1L, "order-1", "order-item-1")).thenReturn(sale);
         assertThatThrownBy(() -> service.execute(request("after-sale-active-duplicate")))
                 .hasMessage("order item already owns an active after-sale case");
-        verify(orderQueryApi, times(1)).requireEligible("order-1", "order-item-1");
+        verify(orderQueryApi, times(1)).requireEligible("order-1", "order-item-1", BigDecimal.ONE);
     }
 
     @Test
@@ -252,6 +252,7 @@ class AfterSaleCommandServiceImplTest {
     private AfterSaleCommand request(String key) {
         return AfterSaleCommand.builder().operation(AfterSaleOperation.REQUEST).idempotencyKey(key).runId("run-1")
                 .orderId("order-1").orderItemId("order-item-1").afterSaleType("RETURN_AND_REFUND")
+                .requestedQuantity(BigDecimal.ONE)
                 .reasonCode("SIZE_NOT_FIT").responsibility("BUYER").reason("size not fit")
                 .correlationId("70000000-0000-4000-8000-000000000001")
                 .occurredAt(Instant.parse("2026-07-15T01:00:00Z")).build();
@@ -276,7 +277,9 @@ class AfterSaleCommandServiceImplTest {
         return OrderAfterSaleView.builder().orderId("order-1").orderNo("CMO1").buyerId("buyer-1")
                 .status("COMPLETED").aggregateVersion(5L).payableAmountMinor(39800L).currencyCode("CNY")
                 .paymentId("payment-1").fulfillmentId("fulfillment-1").shipmentId("shipment-1")
-                .orderItemId("order-item-1").canonicalSkuId("sku-1").quantity(BigDecimal.ONE)
+                .orderItemId("order-item-1").canonicalSkuId("sku-1").orderedQuantity(BigDecimal.ONE)
+                .previouslyReturnedQuantity(BigDecimal.ZERO).remainingReturnableQuantity(BigDecimal.ONE)
+                .quantity(BigDecimal.ONE)
                 .lineAmountMinor(39800L).discountAmountMinor(0L).netAmountMinor(39800L)
                 .benefitApplications(List.of()).listingId("listing-1").listingOfferId("offer-1").build();
     }
@@ -285,7 +288,9 @@ class AfterSaleCommandServiceImplTest {
         return OrderAfterSaleView.builder().orderId("order-1").orderNo("CMO1").buyerId("buyer-1")
                 .status("COMPLETED").aggregateVersion(5L).payableAmountMinor(36000L).currencyCode("CNY")
                 .paymentId("payment-1").fulfillmentId("fulfillment-1").shipmentId("shipment-1")
-                .orderItemId("order-item-1").canonicalSkuId("sku-1").quantity(BigDecimal.ONE)
+                .orderItemId("order-item-1").canonicalSkuId("sku-1").orderedQuantity(BigDecimal.ONE)
+                .previouslyReturnedQuantity(BigDecimal.ZERO).remainingReturnableQuantity(BigDecimal.ONE)
+                .quantity(BigDecimal.ONE)
                 .lineAmountMinor(39800L).discountAmountMinor(3800L).netAmountMinor(36000L)
                 .benefitApplications(List.of()).listingId("listing-1").listingOfferId("offer-1").build();
     }

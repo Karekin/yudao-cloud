@@ -68,7 +68,8 @@ class PaymentCommandServiceImplTest {
         claimNewOperation();
         PaymentDO payment = payment("CAPTURED", 1L);
         when(paymentMapper.selectForUpdate(1L, "payment-1")).thenReturn(payment);
-        when(paymentMapper.refund(eq(1L), eq("payment-1"), eq(1L), eq(530L), any())).thenReturn(1);
+        when(paymentMapper.refund(eq(1L), eq("payment-1"), eq(1L), eq(530L),
+                eq("REFUNDED"), any())).thenReturn(1);
 
         PaymentCommandResult result = service.execute(refundCommand());
 
@@ -78,14 +79,44 @@ class PaymentCommandServiceImplTest {
     }
 
     @Test
-    void shouldRejectPartialRefund() {
+    void shouldAccumulatePartialRefundAndExposeRemainingMoney() {
         claimNewOperation();
         when(paymentMapper.selectForUpdate(1L, "payment-1")).thenReturn(payment("CAPTURED", 1L));
+        when(paymentMapper.refund(eq(1L), eq("payment-1"), eq(1L), eq(100L),
+                eq("PARTIALLY_REFUNDED"), any())).thenReturn(1);
         PaymentCommand command = refundCommand();
         command.setAmountMinor(100L);
 
-        assertThatThrownBy(() -> service.execute(command)).isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("first slice supports full refund only");
+        PaymentCommandResult result = service.execute(command);
+
+        assertThat(result.getPreviousStatus()).isEqualTo("CAPTURED");
+        assertThat(result.getCurrentStatus()).isEqualTo("PARTIALLY_REFUNDED");
+        assertThat(result.getTransactionAmountMinor()).isEqualTo(100L);
+        assertThat(result.getRefundedAmountMinor()).isEqualTo(100L);
+        assertThat(result.getRemainingRefundableAmountMinor()).isEqualTo(430L);
+        verify(outboxAppender).append(argThat(event -> event.getSchemaVersion() == 3
+                && "PARTIALLY_REFUNDED".equals(event.getPayload().get("current_status"))
+                && event.getPayload().get("refund_amount_minor").equals(100L)
+                && event.getPayload().get("remaining_refundable_amount_minor").equals(430L)));
+    }
+
+    @Test
+    void shouldFinishRefundFromPartiallyRefundedState() {
+        claimNewOperation();
+        PaymentDO payment = payment("PARTIALLY_REFUNDED", 2L).setRefundedAmountMinor(100L);
+        when(paymentMapper.selectForUpdate(1L, "payment-1")).thenReturn(payment);
+        when(paymentMapper.refund(eq(1L), eq("payment-1"), eq(2L), eq(430L),
+                eq("REFUNDED"), any())).thenReturn(1);
+        PaymentCommand command = refundCommand();
+        command.setExpectedVersion(2L);
+        command.setAmountMinor(430L);
+
+        PaymentCommandResult result = service.execute(command);
+
+        assertThat(result.getPreviousStatus()).isEqualTo("PARTIALLY_REFUNDED");
+        assertThat(result.getCurrentStatus()).isEqualTo("REFUNDED");
+        assertThat(result.getRefundedAmountMinor()).isEqualTo(530L);
+        assertThat(result.getRemainingRefundableAmountMinor()).isZero();
     }
 
     @Test
@@ -97,7 +128,7 @@ class PaymentCommandServiceImplTest {
 
         assertThatThrownBy(() -> service.execute(command)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("refund provider mismatch");
-        verify(paymentMapper, never()).refund(anyLong(), anyString(), anyLong(), anyLong(), any());
+        verify(paymentMapper, never()).refund(anyLong(), anyString(), anyLong(), anyLong(), anyString(), any());
     }
 
     @Test

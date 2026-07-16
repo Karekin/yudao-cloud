@@ -25,7 +25,13 @@ public class OrderAfterSaleView {
     private String shipmentId;
     private String orderItemId;
     private String canonicalSkuId;
+    private BigDecimal orderedQuantity;
+    private BigDecimal previouslyReturnedQuantity;
+    private BigDecimal remainingReturnableQuantity;
     private BigDecimal quantity;
+    private Long orderedLineAmountMinor;
+    private Long orderedDiscountAmountMinor;
+    private Long orderedNetAmountMinor;
     private Long lineAmountMinor;
     private Long discountAmountMinor;
     private Long netAmountMinor;

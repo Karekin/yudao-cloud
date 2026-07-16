@@ -17,6 +17,7 @@ public class OrderBenefitAllocationView {
     private String orderItemId;
     private String lineKey;
     private Long amountMinor;
+    private Long returnAmountMinor;
     private String currencyCode;
     private List<OrderBenefitFundingView> funding;
 }

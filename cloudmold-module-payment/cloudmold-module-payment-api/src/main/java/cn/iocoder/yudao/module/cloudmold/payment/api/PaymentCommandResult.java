@@ -20,6 +20,8 @@ public class PaymentCommandResult {
     private Long aggregateVersion;
     private Long capturedAmountMinor;
     private Long refundedAmountMinor;
+    private Long transactionAmountMinor;
+    private Long remainingRefundableAmountMinor;
     private String currencyCode;
     private Boolean testMode;
     private Boolean duplicate;

@@ -18,8 +18,11 @@ class OrderAfterSaleQueryServiceImplTest {
     private final OrderBenefitApplicationMapper applicationMapper = mock(OrderBenefitApplicationMapper.class);
     private final OrderBenefitAllocationMapper allocationMapper = mock(OrderBenefitAllocationMapper.class);
     private final OrderBenefitFundingMapper fundingMapper = mock(OrderBenefitFundingMapper.class);
+    private final OrderItemReturnSettlementMapper itemReturnSettlementMapper =
+            mock(OrderItemReturnSettlementMapper.class);
     private final OrderAfterSaleQueryServiceImpl service = new OrderAfterSaleQueryServiceImpl(
-            orderMapper, itemMapper, applicationMapper, allocationMapper, fundingMapper);
+            orderMapper, itemMapper, applicationMapper, allocationMapper, fundingMapper,
+            itemReturnSettlementMapper);
 
     @BeforeEach
     void setUp() {
@@ -36,9 +39,11 @@ class OrderAfterSaleQueryServiceImplTest {
         when(orderMapper.selectForUpdate(1L, "order-1")).thenReturn(new OrderHeaderDO()
                 .setOrderId("order-1").setOrderNo("CMO1").setBuyerId("buyer-1").setStatus("COMPLETED")
                 .setVersion(5L).setPayableAmountMinor(36000L).setCurrencyCode("CNY")
+                .setShippingAmountMinor(0L)
                 .setPaymentId("payment-1").setFulfillmentId("fulfillment-1").setShipmentId("shipment-1"));
         when(itemMapper.selectByOrder(1L, "order-1")).thenReturn(List.of(new OrderItemDO()
                 .setOrderItemId("item-1").setCanonicalSkuId("sku-1").setQuantity(BigDecimal.ONE)
+                .setUnitPriceMinor(39800L)
                 .setLineAmountMinor(39800L).setDiscountAmountMinor(3800L).setNetAmountMinor(36000L)
                 .setReservationId("reservation-1").setListingId("listing-1").setListingOfferId("offer-1")));
         when(applicationMapper.selectByOrder(1L, "order-1")).thenReturn(List.of(
@@ -66,16 +71,61 @@ class OrderAfterSaleQueryServiceImplTest {
     }
 
     @Test
-    void shouldRejectGrossAmountAsCashRefundBasisForDiscountedOrder() {
+    void shouldProrateCumulativeBenefitAndPreserveFinalResidual() {
         when(orderMapper.selectForUpdate(1L, "order-1")).thenReturn(new OrderHeaderDO()
                 .setOrderId("order-1").setStatus("COMPLETED").setPaymentId("payment-1")
                 .setFulfillmentId("fulfillment-1").setShipmentId("shipment-1")
-                .setCurrencyCode("CNY").setPayableAmountMinor(39800L));
+                .setCurrencyCode("CNY").setShippingAmountMinor(0L).setPayableAmountMinor(2900L));
         when(itemMapper.selectByOrder(1L, "order-1")).thenReturn(List.of(new OrderItemDO()
-                .setOrderItemId("item-1").setQuantity(BigDecimal.ONE).setLineAmountMinor(39800L)
-                .setDiscountAmountMinor(3800L).setNetAmountMinor(36000L)));
+                .setOrderItemId("item-1").setCanonicalSkuId("sku-1").setQuantity(new BigDecimal("3"))
+                .setUnitPriceMinor(1000L).setLineAmountMinor(3000L)
+                .setDiscountAmountMinor(100L).setNetAmountMinor(2900L)
+                .setReservationId("reservation-1").setListingId("listing-1")
+                .setListingOfferId("offer-1")));
+        when(itemReturnSettlementMapper.selectTenant(1L, "item-1")).thenReturn(
+                new OrderItemReturnSettlementDO().setOrderItemId("item-1")
+                        .setReturnedQuantity(BigDecimal.ONE));
+        when(applicationMapper.selectByOrder(1L, "order-1")).thenReturn(List.of(
+                new OrderBenefitApplicationDO().setBenefitApplicationId("application-1")
+                        .setBenefitType("PROMOTION").setBenefitSourceType("CONTROLLED_PROMOTION")
+                        .setBenefitSourceId("promotion-1").setBenefitSourceVersion(1L)
+                        .setAmountMinor(100L).setCurrencyCode("CNY").setVersion(1L)));
+        when(allocationMapper.selectByOrder(1L, "order-1")).thenReturn(List.of(
+                new OrderBenefitAllocationDO().setBenefitAllocationId("allocation-1")
+                        .setBenefitApplicationId("application-1").setOrderItemId("item-1")
+                        .setAmountMinor(100L).setCurrencyCode("CNY")));
+        when(fundingMapper.selectByOrder(1L, "order-1")).thenReturn(List.of(
+                new OrderBenefitFundingDO().setBenefitFundingId("funding-1")
+                        .setBenefitAllocationId("allocation-1").setFundingKey("funding-1")
+                        .setFunderType("PLATFORM").setFunderId("platform-1")
+                        .setAmountMinor(100L).setCurrencyCode("CNY")));
 
-        assertThatThrownBy(() -> service.requireEligible("order-1", "item-1"))
-                .hasMessage("after-sale first slice requires full order net amount on one line");
+        OrderAfterSaleView result = service.requireEligible("order-1", "item-1", BigDecimal.ONE);
+
+        assertThat(result.getPreviouslyReturnedQuantity()).isEqualByComparingTo("1");
+        assertThat(result.getRemainingReturnableQuantity()).isEqualByComparingTo("2");
+        assertThat(result.getLineAmountMinor()).isEqualTo(1000L);
+        assertThat(result.getDiscountAmountMinor()).isEqualTo(33L);
+        assertThat(result.getNetAmountMinor()).isEqualTo(967L);
+        assertThat(result.getBenefitApplications().get(0).getReturnAmountMinor()).isEqualTo(33L);
+        assertThat(OrderAfterSaleQueryServiceImpl.proportionalDelta(100L,
+                new BigDecimal("2"), BigDecimal.ONE, new BigDecimal("3"))).isEqualTo(34L);
+    }
+
+    @Test
+    void shouldRejectQuantityBeyondRemainingReturnableQuantity() {
+        when(orderMapper.selectForUpdate(1L, "order-1")).thenReturn(new OrderHeaderDO()
+                .setOrderId("order-1").setStatus("COMPLETED").setPaymentId("payment-1")
+                .setFulfillmentId("fulfillment-1").setShipmentId("shipment-1")
+                .setCurrencyCode("CNY").setShippingAmountMinor(0L));
+        when(itemMapper.selectByOrder(1L, "order-1")).thenReturn(List.of(new OrderItemDO()
+                .setOrderItemId("item-1").setQuantity(new BigDecimal("2"))
+                .setUnitPriceMinor(1000L).setLineAmountMinor(2000L)
+                .setDiscountAmountMinor(0L).setNetAmountMinor(2000L)));
+        when(itemReturnSettlementMapper.selectTenant(1L, "item-1")).thenReturn(
+                new OrderItemReturnSettlementDO().setReturnedQuantity(BigDecimal.ONE));
+
+        assertThatThrownBy(() -> service.requireEligible("order-1", "item-1", new BigDecimal("2")))
+                .hasMessage("requestedQuantity exceeds remaining returnable quantity");
     }
 }

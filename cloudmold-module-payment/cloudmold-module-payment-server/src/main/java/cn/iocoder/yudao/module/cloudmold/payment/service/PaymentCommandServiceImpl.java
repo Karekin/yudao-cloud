@@ -43,8 +43,8 @@ public class PaymentCommandServiceImpl implements PaymentCommandApi {
                     "first slice accepts INTERNAL_TEST provider only");
         } else {
             requireText(command.getPaymentId(), "paymentId", 36);
-            require(command.getExpectedVersion() != null && command.getExpectedVersion() > 0,
-                    "expectedVersion must be positive");
+            require(command.getExpectedVersion() == null || command.getExpectedVersion() > 0,
+                    "expectedVersion must be positive when supplied");
         }
 
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
@@ -90,7 +90,8 @@ public class PaymentCommandServiceImpl implements PaymentCommandApi {
         PaymentTransactionDO transaction = transaction(tenantId, payment, operationId, command, 1L, now);
         transactionMapper.insert(transaction);
         appendEvent(tenantId, payment, null, "CAPTURED", transaction.getTransactionId(), command, 1L);
-        return result(operationId, transaction.getTransactionId(), payment, null, false);
+        return result(operationId, transaction.getTransactionId(), payment, null,
+                command.getAmountMinor(), false);
     }
 
     private PaymentCommandResult refund(Long tenantId, Long operationId, PaymentCommand command,
@@ -99,23 +100,30 @@ public class PaymentCommandServiceImpl implements PaymentCommandApi {
         require(payment != null, "canonical payment does not exist");
         require(Objects.equals(payment.getRunId(), command.getRunId()), "payment runId does not match");
         require(Objects.equals(payment.getOrderId(), command.getOrderId()), "payment orderId does not match");
-        require("CAPTURED".equals(payment.getStatus()), "payment is not refundable");
-        require(Objects.equals(payment.getVersion(), command.getExpectedVersion()), "payment version conflict");
-        require(Objects.equals(payment.getCapturedAmountMinor(), command.getAmountMinor()),
-                "first slice supports full refund only");
+        require("CAPTURED".equals(payment.getStatus()) || "PARTIALLY_REFUNDED".equals(payment.getStatus()),
+                "payment is not refundable");
+        if (command.getExpectedVersion() != null) {
+            require(Objects.equals(payment.getVersion(), command.getExpectedVersion()), "payment version conflict");
+        }
+        long remaining = Math.subtractExact(payment.getCapturedAmountMinor(), payment.getRefundedAmountMinor());
+        require(command.getAmountMinor() > 0 && command.getAmountMinor() <= remaining,
+                "refund amount exceeds remaining captured money");
         require(Objects.equals(payment.getCurrencyCode(), command.getCurrencyCode()), "refund currency mismatch");
         require(Objects.equals(payment.getProviderCode(), command.getProviderCode()), "refund provider mismatch");
+        long refundedTotal = Math.addExact(payment.getRefundedAmountMinor(), command.getAmountMinor());
+        String nextStatus = refundedTotal == payment.getCapturedAmountMinor() ? "REFUNDED" : "PARTIALLY_REFUNDED";
         require(paymentMapper.refund(tenantId, payment.getPaymentId(), payment.getVersion(),
-                command.getAmountMinor(), now) == 1, "payment refund transition conflict");
+                command.getAmountMinor(), nextStatus, now) == 1, "payment refund transition conflict");
         String previous = payment.getStatus();
-        payment.setStatus("REFUNDED").setRefundedAmountMinor(command.getAmountMinor())
+        payment.setStatus(nextStatus).setRefundedAmountMinor(refundedTotal)
                 .setVersion(payment.getVersion() + 1).setRefundedAt(now).setUpdatedAt(now);
         PaymentTransactionDO transaction = transaction(tenantId, payment, operationId, command,
                 payment.getVersion(), now);
         transactionMapper.insert(transaction);
-        appendEvent(tenantId, payment, previous, "REFUNDED", transaction.getTransactionId(), command,
+        appendEvent(tenantId, payment, previous, nextStatus, transaction.getTransactionId(), command,
                 payment.getVersion());
-        return result(operationId, transaction.getTransactionId(), payment, previous, false);
+        return result(operationId, transaction.getTransactionId(), payment, previous,
+                command.getAmountMinor(), false);
     }
 
     private static PaymentTransactionDO transaction(Long tenantId, PaymentDO payment, Long operationId,
@@ -147,10 +155,21 @@ public class PaymentCommandServiceImpl implements PaymentCommandApi {
         payload.put("provider_transaction_id", command.getProviderTransactionId());
         payload.put("test_mode", payment.getTestMode());
         payload.put("reason", command.getReason());
-        payload.put("cancellation_saga_id", command.getCancellationSagaId());
-        payload.put("step_ordinal", command.getCancellationStepOrdinal());
+        int schemaVersion;
+        if (command.getCancellationSagaId() != null) {
+            schemaVersion = 2;
+            payload.put("cancellation_saga_id", command.getCancellationSagaId());
+            payload.put("step_ordinal", command.getCancellationStepOrdinal());
+        } else if (command.getOperation() == PaymentOperation.REFUND) {
+            schemaVersion = 3;
+            payload.put("refund_amount_minor", command.getAmountMinor());
+            payload.put("remaining_refundable_amount_minor",
+                    Math.subtractExact(payment.getCapturedAmountMinor(), payment.getRefundedAmountMinor()));
+        } else {
+            schemaVersion = 1;
+        }
         outboxAppender.append(AppendDomainEventCommand.builder().eventType("payment.status.changed")
-                .schemaVersion(command.getCancellationSagaId() == null ? 1 : 2)
+                .schemaVersion(schemaVersion)
                 .sourceSystem("cloudmold-payment").tenantId(tenantId)
                 .aggregateType("payment").aggregateId(payment.getPaymentId()).aggregateVersion(version)
                 .eventSequence((short) 1).occurredAt(command.getOccurredAt()).correlationId(command.getCorrelationId())
@@ -160,11 +179,15 @@ public class PaymentCommandServiceImpl implements PaymentCommandApi {
     }
 
     private static PaymentCommandResult result(Long operationId, Long transactionId, PaymentDO payment,
-                                               String previous, boolean duplicate) {
+                                               String previous, Long transactionAmountMinor,
+                                               boolean duplicate) {
         return PaymentCommandResult.builder().operationId(operationId).transactionId(transactionId)
                 .paymentId(payment.getPaymentId()).paymentNo(payment.getPaymentNo()).orderId(payment.getOrderId())
                 .previousStatus(previous).currentStatus(payment.getStatus()).aggregateVersion(payment.getVersion())
                 .capturedAmountMinor(payment.getCapturedAmountMinor()).refundedAmountMinor(payment.getRefundedAmountMinor())
+                .transactionAmountMinor(transactionAmountMinor)
+                .remainingRefundableAmountMinor(Math.subtractExact(payment.getCapturedAmountMinor(),
+                        payment.getRefundedAmountMinor()))
                 .currencyCode(payment.getCurrencyCode()).testMode(payment.getTestMode()).duplicate(duplicate).build();
     }
 

@@ -23,6 +23,7 @@ public class AfterSaleResolutionWorker {
     private final InventoryCommandApi inventoryCommandApi;
     private final PaymentCommandApi paymentCommandApi;
     private final OrderCommandApi orderCommandApi;
+    private final OrderAfterSaleSettlementApi orderSettlementApi;
     private final AfterSaleBenefitReversalService benefitReversalService;
     private final AfterSaleResolutionCheckpointService checkpointService;
 
@@ -90,7 +91,7 @@ public class AfterSaleResolutionWorker {
                         .operation(PaymentOperation.REFUND)
                         .idempotencyKey("after-sale-saga:" + sagaId + ":payment-refund")
                         .runId(saga.getRunId()).paymentId(saga.getPaymentId())
-                        .expectedVersion(saga.getPaymentVersionAtRequest()).orderId(saga.getOrderId())
+                        .orderId(saga.getOrderId())
                         .amountMinor(saga.getApprovedAmountMinor()).currencyCode(saga.getCurrencyCode())
                         .providerCode("INTERNAL_TEST")
                         .providerTransactionId("after-sale-saga:" + sagaId + ":refund:" + saga.getPaymentId())
@@ -101,7 +102,28 @@ public class AfterSaleResolutionWorker {
                         checkpointNow(floor));
             }
             saga = requireSaga(tenantId, sagaId);
-            if (saga.getOrderRefundOperationId() == null) {
+            if (saga.getOrderSettlementEffectId() == null) {
+                checkpointService.markProgress(tenantId, sagaId, leaseOwner,
+                        "SETTLING_ORDER", "SETTLE_ORDER", checkpointNow(floor));
+                saga = requireSaga(tenantId, sagaId);
+                OrderAfterSaleSettlementResult settled = orderSettlementApi.record(
+                        OrderAfterSaleSettlementCommand.builder().afterSaleId(saga.getAfterSaleId())
+                                .afterSaleItemId(saga.getAfterSaleItemId()).runId(saga.getRunId())
+                                .orderId(saga.getOrderId()).orderItemId(saga.getOrderItemId())
+                                .quantity(saga.getQuantity()).grossAmountMinor(saga.getGrossAmountMinor())
+                                .benefitAmountMinor(saga.getBenefitAmountMinor())
+                                .netAmountMinor(saga.getNetAmountMinor())
+                                .inventoryOperationId(saga.getInventoryOperationId())
+                                .inventoryLedgerTransactionId(saga.getInventoryLedgerTransactionId())
+                                .paymentRefundTransactionId(saga.getPaymentRefundTransactionId())
+                                .benefitReversalBatchId(saga.getBenefitReversalBatchId())
+                                .correlationId(saga.getCorrelationId()).causationId(saga.getCausationId())
+                                .occurredAt(saga.getOrderRefundOccurredAt().toInstant(ZoneOffset.UTC)).build());
+                checkpointService.markOrderSettled(tenantId, sagaId, leaseOwner, settled,
+                        checkpointNow(floor));
+            }
+            saga = requireSaga(tenantId, sagaId);
+            if (Boolean.TRUE.equals(saga.getOrderReturnFull()) && saga.getOrderRefundOperationId() == null) {
                 checkpointService.markProgress(tenantId, sagaId, leaseOwner,
                         "CONFIRMING_ORDER_REFUND", "CONFIRM_ORDER_REFUND", checkpointNow(floor));
                 saga = requireSaga(tenantId, sagaId);
@@ -117,7 +139,7 @@ public class AfterSaleResolutionWorker {
                         checkpointNow(floor));
             }
             saga = requireSaga(tenantId, sagaId);
-            if (saga.getOrderReturnOperationId() == null) {
+            if (Boolean.TRUE.equals(saga.getOrderReturnFull()) && saga.getOrderReturnOperationId() == null) {
                 checkpointService.markProgress(tenantId, sagaId, leaseOwner,
                         "RETURNING_ORDER", "RETURN_ORDER", checkpointNow(floor));
                 saga = requireSaga(tenantId, sagaId);

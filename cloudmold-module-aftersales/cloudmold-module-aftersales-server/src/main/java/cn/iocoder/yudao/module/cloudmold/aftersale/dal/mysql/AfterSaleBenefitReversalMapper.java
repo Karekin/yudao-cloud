@@ -20,4 +20,14 @@ public interface AfterSaleBenefitReversalMapper extends BaseMapperX<AfterSaleBen
             """)
     List<AfterSaleBenefitReversalDO> selectByAfterSale(@Param("tenantId") Long tenantId,
                                                         @Param("afterSaleId") String afterSaleId);
+
+    @Select("""
+            SELECT COALESCE(SUM(amount_minor),0)
+            FROM cloudmold_after_sale_benefit_reversal
+            WHERE tenant_id=#{tenantId} AND order_id=#{orderId}
+              AND benefit_application_id=#{benefitApplicationId}
+            """)
+    Long sumByApplication(@Param("tenantId") Long tenantId,
+                          @Param("orderId") String orderId,
+                          @Param("benefitApplicationId") String benefitApplicationId);
 }

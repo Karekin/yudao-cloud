@@ -102,13 +102,15 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
         requireText(command.getReason(), "reason", 256);
         require(caseMapper.selectActiveByOrderItem(tenantId, command.getOrderId(), command.getOrderItemId()) == null,
                 "order item already owns an active after-sale case");
-        OrderAfterSaleView order = orderQueryApi.requireEligible(command.getOrderId(), command.getOrderItemId());
+        OrderAfterSaleView order = orderQueryApi.requireEligible(command.getOrderId(), command.getOrderItemId(),
+                command.getRequestedQuantity());
         PaymentRefundView payment = paymentQueryApi.requireRefundable(order.getOrderId(), order.getPaymentId(),
                 order.getNetAmountMinor(), order.getCurrencyCode());
         ForwardFulfillmentAfterSaleView forward = forwardFulfillmentQueryApi.requireDelivered(order.getOrderId(),
                 order.getFulfillmentId(), order.getShipmentId(), order.getOrderItemId());
         require(Objects.equals(order.getCanonicalSkuId(), forward.getCanonicalSkuId())
-                        && order.getQuantity().compareTo(forward.getQuantity()) == 0,
+                        && order.getOrderedQuantity().compareTo(forward.getQuantity()) == 0
+                        && order.getQuantity().compareTo(forward.getQuantity()) <= 0,
                 "forward fulfillment line does not reconcile with order item");
         String id = UUID.randomUUID().toString();
         AfterSaleCaseDO sale = new AfterSaleCaseDO().setAfterSaleId(id).setTenantId(tenantId)
@@ -140,7 +142,12 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
         AfterSaleCaseDO sale = requireCase(tenantId, command, "REQUESTED");
         requireText(command.getReviewerId(), "reviewerId", 128);
         AfterSaleItemDO item = requireSingleItem(tenantId, sale.getAfterSaleId());
-        OrderAfterSaleView order = orderQueryApi.requireEligible(sale.getOrderId(), item.getOrderItemId());
+        OrderAfterSaleView order = orderQueryApi.requireEligible(sale.getOrderId(), item.getOrderItemId(),
+                item.getQuantity());
+        require(Objects.equals(order.getLineAmountMinor(), item.getLineAmountMinor())
+                        && Objects.equals(order.getDiscountAmountMinor(), item.getDiscountAmountMinor())
+                        && Objects.equals(order.getNetAmountMinor(), item.getNetAmountMinor()),
+                "after-sale item money changed between request and approval");
         paymentQueryApi.requireRefundable(order.getOrderId(), sale.getPaymentId(), order.getNetAmountMinor(),
                 sale.getCurrencyCode());
         ForwardFulfillmentAfterSaleView forward = forwardFulfillmentQueryApi.requireDelivered(sale.getOrderId(),
@@ -297,6 +304,9 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
                 .paymentRefundTransactionId(saga == null ? null : saga.getPaymentRefundTransactionId())
                 .inventoryOperationId(saga == null ? null : saga.getInventoryOperationId())
                 .inventoryLedgerTransactionId(saga == null ? null : saga.getInventoryLedgerTransactionId())
+                .orderSettlementEffectId(saga == null ? null : saga.getOrderSettlementEffectId())
+                .orderSettlementVersion(saga == null ? null : saga.getOrderSettlementVersion())
+                .orderReturnFull(saga == null ? null : saga.getOrderReturnFull())
                 .benefitReversalStatus(saga == null
                         ? (item.getDiscountAmountMinor() == 0 ? "NOT_REQUIRED" : "PENDING")
                         : saga.getBenefitReversalStatus())

@@ -107,6 +107,9 @@ public class AfterSaleEventService {
         payload.put("benefit_reversal_batch_id", saga.getBenefitReversalBatchId());
         payload.put("benefit_reversal_amount_minor", saga.getBenefitReversalAmountMinor());
         payload.put("payment_refund_transaction_id", saga.getPaymentRefundTransactionId());
+        payload.put("order_settlement_effect_id", saga.getOrderSettlementEffectId());
+        payload.put("order_settlement_version", saga.getOrderSettlementVersion());
+        payload.put("order_return_full", saga.getOrderReturnFull());
         payload.put("order_refund_operation_id", saga.getOrderRefundOperationId());
         payload.put("order_return_operation_id", saga.getOrderReturnOperationId());
         payload.put("order_version", saga.getOrderVersion());
@@ -115,6 +118,7 @@ public class AfterSaleEventService {
         checkpoints.put("benefit_reversed", "NOT_REQUIRED".equals(saga.getBenefitReversalStatus())
                 || "RECORDED".equals(saga.getBenefitReversalStatus()));
         checkpoints.put("payment_refunded", saga.getPaymentRefundTransactionId() != null);
+        checkpoints.put("order_settled", saga.getOrderSettlementEffectId() != null);
         checkpoints.put("order_refund_confirmed", saga.getOrderRefundOperationId() != null);
         checkpoints.put("order_returned", saga.getOrderReturnOperationId() != null);
         payload.put("checkpoints", checkpoints);
@@ -122,7 +126,7 @@ public class AfterSaleEventService {
         payload.put("error_message", saga.getLastErrorMessage());
         payload.put("next_retry_at", instant(saga.getNextRetryAt()));
         outboxAppender.append(AppendDomainEventCommand.builder()
-                .eventType("after_sale.resolution_saga.status.changed").schemaVersion(2)
+                .eventType("after_sale.resolution_saga.status.changed").schemaVersion(3)
                 .sourceSystem("cloudmold-aftersales").tenantId(saga.getTenantId())
                 .aggregateType("after_sale_resolution_saga").aggregateId(saga.getSagaId())
                 .aggregateVersion(saga.getVersion()).eventSequence((short) 1)
@@ -164,7 +168,7 @@ public class AfterSaleEventService {
             return value;
         }).toList());
         outboxAppender.append(AppendDomainEventCommand.builder()
-                .eventType("after_sale.benefit_reversal.recorded").schemaVersion(1)
+                .eventType("after_sale.benefit_reversal.recorded").schemaVersion(2)
                 .sourceSystem("cloudmold-aftersales").tenantId(saga.getTenantId())
                 .aggregateType("after_sale_benefit_reversal").aggregateId(reversal.getBenefitReversalId())
                 .aggregateVersion(1L).eventSequence((short) 1)
@@ -206,13 +210,14 @@ public class AfterSaleEventService {
     }
 
     private static int stepOrdinal(AfterSaleResolutionSagaDO saga) {
-        if ("COMPLETED".equals(saga.getStatus())) return 6;
+        if ("COMPLETED".equals(saga.getStatus())) return 7;
         return switch (saga.getActiveStep()) {
             case "RETURN_INVENTORY" -> 1;
             case "REVERSE_BENEFITS" -> 2;
             case "REFUND_PAYMENT" -> 3;
-            case "CONFIRM_ORDER_REFUND" -> 4;
-            case "RETURN_ORDER" -> 5;
+            case "SETTLE_ORDER" -> 4;
+            case "CONFIRM_ORDER_REFUND" -> 5;
+            case "RETURN_ORDER" -> 6;
             default -> 0;
         };
     }

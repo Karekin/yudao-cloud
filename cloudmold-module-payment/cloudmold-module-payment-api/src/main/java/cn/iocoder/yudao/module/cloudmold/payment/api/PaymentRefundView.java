@@ -16,6 +16,7 @@ public class PaymentRefundView {
     private Long aggregateVersion;
     private Long capturedAmountMinor;
     private Long refundedAmountMinor;
+    private Long remainingRefundableAmountMinor;
     private String currencyCode;
     private String providerCode;
     private Boolean testMode;

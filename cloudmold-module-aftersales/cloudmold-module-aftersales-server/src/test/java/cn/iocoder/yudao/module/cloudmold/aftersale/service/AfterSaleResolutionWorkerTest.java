@@ -24,10 +24,11 @@ class AfterSaleResolutionWorkerTest {
     private final InventoryCommandApi inventoryApi = mock(InventoryCommandApi.class);
     private final PaymentCommandApi paymentApi = mock(PaymentCommandApi.class);
     private final OrderCommandApi orderApi = mock(OrderCommandApi.class);
+    private final OrderAfterSaleSettlementApi orderSettlementApi = mock(OrderAfterSaleSettlementApi.class);
     private final AfterSaleBenefitReversalService benefitReversalService = mock(AfterSaleBenefitReversalService.class);
     private final AfterSaleResolutionCheckpointService checkpoint = mock(AfterSaleResolutionCheckpointService.class);
     private final AfterSaleResolutionWorker worker = new AfterSaleResolutionWorker(sagaMapper, returnQueryApi, inventoryApi,
-            paymentApi, orderApi, benefitReversalService, checkpoint);
+            paymentApi, orderApi, orderSettlementApi, benefitReversalService, checkpoint);
     private AfterSaleResolutionSagaDO saga;
     private final LocalDateTime now = LocalDateTime.of(2026, 7, 15, 1, 0);
 
@@ -42,7 +43,13 @@ class AfterSaleResolutionWorkerTest {
                 .operationId(101L).ledgerTransactionId(102L).duplicate(false).build());
         when(paymentApi.execute(any())).thenReturn(PaymentCommandResult.builder()
                 .operationId(201L).transactionId(202L).currentStatus("REFUNDED")
-                .capturedAmountMinor(39800L).refundedAmountMinor(39800L).currencyCode("CNY").build());
+                .capturedAmountMinor(39800L).refundedAmountMinor(39800L)
+                .transactionAmountMinor(39800L).remainingRefundableAmountMinor(0L)
+                .currencyCode("CNY").build());
+        when(orderSettlementApi.record(any())).thenReturn(OrderAfterSaleSettlementResult.builder()
+                .settlementEffectId("settlement-effect-1").orderId("order-1")
+                .orderItemId("order-item-1").orderSettlementVersion(1L)
+                .itemSettlementVersion(1L).orderVersion(5L).fullReturn(true).duplicate(false).build());
         when(orderApi.execute(any())).thenAnswer(invocation -> {
             OrderCommand command = invocation.getArgument(0);
             return OrderCommandResult.builder().operationId(command.getOperation() == OrderOperation.CONFIRM_REFUND
@@ -68,6 +75,13 @@ class AfterSaleResolutionWorkerTest {
             return null;
         }).when(checkpoint).markPaymentRefunded(anyLong(), anyString(), anyString(), any(), any());
         doAnswer(invocation -> {
+            OrderAfterSaleSettlementResult result = invocation.getArgument(3);
+            saga.setOrderSettlementEffectId(result.getSettlementEffectId())
+                    .setOrderSettlementVersion(result.getOrderSettlementVersion())
+                    .setOrderReturnFull(result.getFullReturn());
+            return null;
+        }).when(checkpoint).markOrderSettled(anyLong(), anyString(), anyString(), any(), any());
+        doAnswer(invocation -> {
             OrderCommandResult result = invocation.getArgument(3);
             saga.setOrderRefundOperationId(result.getOperationId()).setOrderVersion(result.getAggregateVersion());
             return null;
@@ -90,7 +104,12 @@ class AfterSaleResolutionWorkerTest {
                 && command.getIdempotencyKey().equals("after-sale-saga:saga-1:inventory-return")));
         verify(paymentApi).execute(argThat(command -> command.getOperation() == PaymentOperation.REFUND
                 && command.getAmountMinor() == 39800L
+                && command.getExpectedVersion() == null
                 && command.getIdempotencyKey().equals("after-sale-saga:saga-1:payment-refund")));
+        verify(orderSettlementApi).record(argThat(command -> command.getAfterSaleId().equals("after-sale-1")
+                && command.getQuantity().compareTo(new BigDecimal("2")) == 0
+                && command.getInventoryLedgerTransactionId() == 102L
+                && command.getPaymentRefundTransactionId() == 202L));
         verify(orderApi).execute(argThat(command -> command.getOperation() == OrderOperation.CONFIRM_REFUND
                 && command.getExpectedVersion() == 5L
                 && command.getIdempotencyKey().equals("after-sale-saga:saga-1:order-confirm-refund")));
@@ -109,7 +128,9 @@ class AfterSaleResolutionWorkerTest {
                 new AfterSaleBenefitReversalResult("batch-1", 1, 2, 3800L));
         when(paymentApi.execute(any())).thenReturn(PaymentCommandResult.builder()
                 .operationId(201L).transactionId(202L).currentStatus("REFUNDED")
-                .capturedAmountMinor(36000L).refundedAmountMinor(36000L).currencyCode("CNY").build());
+                .capturedAmountMinor(36000L).refundedAmountMinor(36000L)
+                .transactionAmountMinor(36000L).remainingRefundableAmountMinor(0L)
+                .currencyCode("CNY").build());
 
         worker.process(1L, "saga-1", "worker-1", now);
 
@@ -177,6 +198,46 @@ class AfterSaleResolutionWorkerTest {
                 }).when(checkpoint).markOrderRefunded(anyLong(), anyString(), anyString(), any(), any());
         replayOrderOperation(OrderOperation.CONFIRM_REFUND,
                 "after-sale-saga:saga-1:order-confirm-refund");
+    }
+
+    @Test
+    void shouldReplayOrderSettlementAfterEffectCommittedBeforeCheckpoint() {
+        saga.setInventoryOperationId(101L).setInventoryLedgerTransactionId(102L)
+                .setPaymentRefundTransactionId(202L);
+        doThrow(new IllegalStateException("checkpoint unavailable"))
+                .doAnswer(invocation -> {
+                    OrderAfterSaleSettlementResult result = invocation.getArgument(3);
+                    saga.setOrderSettlementEffectId(result.getSettlementEffectId())
+                            .setOrderSettlementVersion(result.getOrderSettlementVersion())
+                            .setOrderReturnFull(result.getFullReturn());
+                    return null;
+                }).when(checkpoint).markOrderSettled(anyLong(), anyString(), anyString(), any(), any());
+
+        assertThatThrownBy(() -> worker.process(1L, "saga-1", "worker-1", now))
+                .hasMessage("checkpoint unavailable");
+        worker.process(1L, "saga-1", "worker-1", now.plusSeconds(1));
+
+        ArgumentCaptor<OrderAfterSaleSettlementCommand> captor =
+                ArgumentCaptor.forClass(OrderAfterSaleSettlementCommand.class);
+        verify(orderSettlementApi, times(2)).record(captor.capture());
+        assertThat(captor.getAllValues()).extracting(OrderAfterSaleSettlementCommand::getAfterSaleId)
+                .containsOnly("after-sale-1");
+        assertThat(captor.getAllValues()).extracting(OrderAfterSaleSettlementCommand::getPaymentRefundTransactionId)
+                .containsOnly(202L);
+    }
+
+    @Test
+    void shouldCompletePartialReturnWithoutChangingCommercialOrderStatus() {
+        when(orderSettlementApi.record(any())).thenReturn(OrderAfterSaleSettlementResult.builder()
+                .settlementEffectId("settlement-effect-partial").orderId("order-1")
+                .orderItemId("order-item-1").orderSettlementVersion(1L)
+                .itemSettlementVersion(1L).orderVersion(5L).fullReturn(false).duplicate(false).build());
+
+        worker.process(1L, "saga-1", "worker-1", now);
+
+        assertThat(saga.getOrderReturnFull()).isFalse();
+        verifyNoInteractions(orderApi);
+        verify(checkpoint).markCompleted(eq(1L), eq("saga-1"), eq("worker-1"), any());
     }
 
     @Test

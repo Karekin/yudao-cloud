@@ -18,12 +18,14 @@ public interface PaymentMapper extends BaseMapperX<PaymentDO> {
 
     @Update("""
             UPDATE cloudmold_payment
-            SET status='REFUNDED',refunded_amount_minor=#{amountMinor},version=version+1,
+            SET status=#{nextStatus},refunded_amount_minor=refunded_amount_minor+#{amountMinor},version=version+1,
                 refunded_at=#{now},updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND payment_id=#{paymentId}
-              AND version=#{expectedVersion} AND status='CAPTURED' AND refunded_amount_minor=0
+              AND version=#{expectedVersion} AND status IN ('CAPTURED','PARTIALLY_REFUNDED')
+              AND refunded_amount_minor+#{amountMinor} <= captured_amount_minor
             """)
     int refund(@Param("tenantId") Long tenantId, @Param("paymentId") String paymentId,
                @Param("expectedVersion") Long expectedVersion, @Param("amountMinor") Long amountMinor,
+               @Param("nextStatus") String nextStatus,
                @Param("now") LocalDateTime now);
 }

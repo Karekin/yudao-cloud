@@ -28,7 +28,8 @@ class AfterSaleBenefitReversalServiceTest {
     void shouldRecordExactAllocationAndEveryFundingShare() {
         AfterSaleResolutionSagaDO saga = saga();
         when(reversalMapper.selectByAfterSale(1L, "after-sale-1")).thenReturn(List.of());
-        when(orderQueryApi.requireEligible("order-1", "order-item-1")).thenReturn(order(null));
+        when(orderQueryApi.requireEligible("order-1", "order-item-1", java.math.BigDecimal.ONE))
+                .thenReturn(order(null));
         when(reversalMapper.insert(any(AfterSaleBenefitReversalDO.class))).thenReturn(1);
         when(fundingMapper.insert(any(AfterSaleBenefitFundingReversalDO.class))).thenReturn(1);
 
@@ -51,7 +52,7 @@ class AfterSaleBenefitReversalServiceTest {
     @Test
     void shouldReturnPromotionEntitlementBeforeRecordingReversal() {
         when(reversalMapper.selectByAfterSale(1L, "after-sale-1")).thenReturn(List.of());
-        when(orderQueryApi.requireEligible("order-1", "order-item-1"))
+        when(orderQueryApi.requireEligible("order-1", "order-item-1", java.math.BigDecimal.ONE))
                 .thenReturn(order("entitlement-1"));
         when(promotionCommandApi.execute(any())).thenReturn(PromotionCommandResult.builder()
                 .aggregateId("entitlement-1").aggregateVersion(2L).status("RETURNED").build());
@@ -73,9 +74,39 @@ class AfterSaleBenefitReversalServiceTest {
     }
 
     @Test
+    void shouldRetainEntitlementUntilItsCumulativeBenefitIsFullyReversed() {
+        AfterSaleResolutionSagaDO saga = saga().setGrossAmountMinor(10000L)
+                .setBenefitAmountMinor(1000L).setNetAmountMinor(9000L);
+        OrderAfterSaleView partial = order("entitlement-1");
+        partial.setLineAmountMinor(10000L);
+        partial.setDiscountAmountMinor(1000L);
+        partial.setNetAmountMinor(9000L);
+        OrderBenefitApplicationView application = partial.getBenefitApplications().get(0);
+        application.setReturnAmountMinor(1000L);
+        OrderBenefitAllocationView allocation = application.getAllocations().get(0);
+        allocation.setReturnAmountMinor(1000L);
+        allocation.getFunding().get(0).setReturnAmountMinor(500L);
+        allocation.getFunding().get(1).setReturnAmountMinor(500L);
+        when(reversalMapper.selectByAfterSale(1L, "after-sale-1")).thenReturn(List.of());
+        when(reversalMapper.sumByApplication(1L, "order-1", "application-1")).thenReturn(0L);
+        when(orderQueryApi.requireEligible("order-1", "order-item-1", java.math.BigDecimal.ONE))
+                .thenReturn(partial);
+        when(reversalMapper.insert(any(AfterSaleBenefitReversalDO.class))).thenReturn(1);
+        when(fundingMapper.insert(any(AfterSaleBenefitFundingReversalDO.class))).thenReturn(1);
+
+        AfterSaleBenefitReversalResult result = service.record(saga, LocalDateTime.now());
+
+        assertThat(result.amountMinor()).isEqualTo(1000L);
+        verifyNoInteractions(promotionCommandApi);
+        verify(reversalMapper).insert(argThat((AfterSaleBenefitReversalDO row) ->
+                "RETAINED_PARTIAL".equals(row.getEntitlementEffectStatus())
+                        && row.getAmountMinor() == 1000L));
+    }
+
+    @Test
     void shouldReturnEveryDistinctStackedEntitlementAndConserveTheBatch() {
         when(reversalMapper.selectByAfterSale(1L, "after-sale-1")).thenReturn(List.of());
-        when(orderQueryApi.requireEligible("order-1", "order-item-1"))
+        when(orderQueryApi.requireEligible("order-1", "order-item-1", java.math.BigDecimal.ONE))
                 .thenReturn(stackedEntitlementOrder());
         when(promotionCommandApi.execute(any())).thenAnswer(invocation -> {
             PromotionCommand command = invocation.getArgument(0);
@@ -112,7 +143,7 @@ class AfterSaleBenefitReversalServiceTest {
         when(reversalMapper.selectByAfterSale(1L, "after-sale-1")).thenReturn(List.of());
         OrderAfterSaleView order = order("entitlement-1");
         order.getBenefitApplications().get(0).setBenefitSourceId("template-1");
-        when(orderQueryApi.requireEligible("order-1", "order-item-1")).thenReturn(order);
+        when(orderQueryApi.requireEligible("order-1", "order-item-1", java.math.BigDecimal.ONE)).thenReturn(order);
 
         assertThatThrownBy(() -> service.record(saga(), LocalDateTime.now()))
                 .hasMessage("entitlement benefit source snapshot is invalid");
@@ -143,6 +174,7 @@ class AfterSaleBenefitReversalServiceTest {
         return new AfterSaleResolutionSagaDO().setTenantId(1L).setSagaId("saga-1")
                 .setAfterSaleId("after-sale-1").setAfterSaleItemId("after-sale-item-1")
                 .setRunId("run-1").setOrderId("order-1").setOrderItemId("order-item-1")
+                .setQuantity(java.math.BigDecimal.ONE)
                 .setGrossAmountMinor(39800L).setBenefitAmountMinor(3800L).setNetAmountMinor(36000L)
                 .setBenefitReversalOccurredAt(LocalDateTime.of(2026, 7, 16, 11, 0))
                 .setCorrelationId("70000000-0000-4000-8000-000000000001");
@@ -151,18 +183,22 @@ class AfterSaleBenefitReversalServiceTest {
     private static OrderAfterSaleView order(String entitlementId) {
         OrderBenefitFundingView platform = OrderBenefitFundingView.builder()
                 .benefitFundingId("funding-platform").funderType("PLATFORM")
-                .funderId("cloudmold-platform").amountMinor(2000L).currencyCode("CNY").build();
+                .funderId("cloudmold-platform").amountMinor(2000L).returnAmountMinor(2000L)
+                .currencyCode("CNY").build();
         OrderBenefitFundingView merchant = OrderBenefitFundingView.builder()
                 .benefitFundingId("funding-merchant").funderType("MERCHANT")
-                .funderId("merchant-1").amountMinor(1800L).currencyCode("CNY").build();
+                .funderId("merchant-1").amountMinor(1800L).returnAmountMinor(1800L)
+                .currencyCode("CNY").build();
         OrderBenefitAllocationView allocation = OrderBenefitAllocationView.builder()
                 .benefitAllocationId("allocation-1").orderItemId("order-item-1")
-                .amountMinor(3800L).currencyCode("CNY").funding(List.of(platform, merchant)).build();
+                .amountMinor(3800L).returnAmountMinor(3800L).currencyCode("CNY")
+                .funding(List.of(platform, merchant)).build();
         OrderBenefitApplicationView application = OrderBenefitApplicationView.builder()
                 .benefitApplicationId("application-1").benefitType("PROMOTION")
                 .benefitSourceType(entitlementId == null ? "CONTROLLED_PROMOTION" : "COUPON_ENTITLEMENT")
                 .benefitSourceId(entitlementId == null ? "promotion-1" : entitlementId)
                 .benefitSourceVersion(1L).entitlementId(entitlementId).amountMinor(3800L)
+                .returnAmountMinor(3800L)
                 .currencyCode("CNY").allocations(List.of(allocation)).build();
         return OrderAfterSaleView.builder().orderId("order-1").orderItemId("order-item-1")
                 .lineAmountMinor(39800L).discountAmountMinor(3800L).netAmountMinor(36000L)
@@ -186,13 +222,15 @@ class AfterSaleBenefitReversalServiceTest {
             String funderType, String funderId, long amountMinor) {
         OrderBenefitFundingView funding = OrderBenefitFundingView.builder()
                 .benefitFundingId(fundingId).funderType(funderType).funderId(funderId)
-                .amountMinor(amountMinor).currencyCode("CNY").build();
+                .amountMinor(amountMinor).returnAmountMinor(amountMinor).currencyCode("CNY").build();
         OrderBenefitAllocationView allocation = OrderBenefitAllocationView.builder()
                 .benefitAllocationId(allocationId).orderItemId("order-item-1")
-                .amountMinor(amountMinor).currencyCode("CNY").funding(List.of(funding)).build();
+                .amountMinor(amountMinor).returnAmountMinor(amountMinor).currencyCode("CNY")
+                .funding(List.of(funding)).build();
         return OrderBenefitApplicationView.builder().benefitApplicationId(applicationId)
                 .benefitType("COUPON").benefitSourceType("COUPON_ENTITLEMENT")
                 .benefitSourceId(entitlementId).benefitSourceVersion(4L).entitlementId(entitlementId)
-                .amountMinor(amountMinor).currencyCode("CNY").allocations(List.of(allocation)).build();
+                .amountMinor(amountMinor).returnAmountMinor(amountMinor).currencyCode("CNY")
+                .allocations(List.of(allocation)).build();
     }
 }

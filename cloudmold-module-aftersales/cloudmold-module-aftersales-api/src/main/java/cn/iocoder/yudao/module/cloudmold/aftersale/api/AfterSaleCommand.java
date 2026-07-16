@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Data
@@ -19,6 +20,7 @@ public class AfterSaleCommand {
     private Long expectedVersion;
     private String orderId;
     private String orderItemId;
+    private BigDecimal requestedQuantity;
     private String afterSaleType;
     private String reasonCode;
     private String responsibility;

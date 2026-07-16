@@ -20,8 +20,9 @@ public interface AfterSaleResolutionSagaMapper extends BaseMapperX<AfterSaleReso
                                                 @Param("afterSaleId") String afterSaleId);
     @Select("""
             SELECT * FROM cloudmold_after_sale_resolution_saga
-            WHERE status IN ('REQUESTED','RETURNING_INVENTORY','INVENTORY_RETURNED','REFUNDING_PAYMENT',
-              'PAYMENT_REFUNDED','CONFIRMING_ORDER_REFUND','ORDER_REFUNDED','RETURNING_ORDER',
+            WHERE status IN ('REQUESTED','RETURNING_INVENTORY','INVENTORY_RETURNED','REVERSING_BENEFITS',
+              'BENEFITS_REVERSED','REFUNDING_PAYMENT',
+              'PAYMENT_REFUNDED','SETTLING_ORDER','ORDER_SETTLED','CONFIRMING_ORDER_REFUND','ORDER_REFUNDED','RETURNING_ORDER',
               'ORDER_RETURNED','RETRY_SCHEDULED')
               AND (status <> 'RETRY_SCHEDULED' OR next_retry_at <= #{now})
               AND (lease_until IS NULL OR lease_until < #{now})
@@ -32,8 +33,9 @@ public interface AfterSaleResolutionSagaMapper extends BaseMapperX<AfterSaleReso
             UPDATE cloudmold_after_sale_resolution_saga
             SET lease_owner=#{owner},lease_until=#{until},attempt_count=attempt_count+1,updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND saga_id=#{id}
-              AND status IN ('REQUESTED','RETURNING_INVENTORY','INVENTORY_RETURNED','REFUNDING_PAYMENT',
-                'PAYMENT_REFUNDED','CONFIRMING_ORDER_REFUND','ORDER_REFUNDED','RETURNING_ORDER',
+              AND status IN ('REQUESTED','RETURNING_INVENTORY','INVENTORY_RETURNED','REVERSING_BENEFITS',
+                'BENEFITS_REVERSED','REFUNDING_PAYMENT',
+                'PAYMENT_REFUNDED','SETTLING_ORDER','ORDER_SETTLED','CONFIRMING_ORDER_REFUND','ORDER_REFUNDED','RETURNING_ORDER',
                 'ORDER_RETURNED','RETRY_SCHEDULED')
               AND (status <> 'RETRY_SCHEDULED' OR next_retry_at <= #{now})
               AND (lease_until IS NULL OR lease_until < #{now}) AND attempt_count < max_attempts

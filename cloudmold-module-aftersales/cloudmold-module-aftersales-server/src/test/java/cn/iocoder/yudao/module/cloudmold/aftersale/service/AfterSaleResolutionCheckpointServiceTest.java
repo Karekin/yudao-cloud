@@ -26,6 +26,8 @@ class AfterSaleResolutionCheckpointServiceTest {
                 .setAfterSaleId("after-sale-1").setLeaseOwner("worker-1").setStatus("ORDER_RETURNED")
                 .setActiveStep("COMPLETE").setVersion(9L).setInventoryLedgerTransactionId(101L)
                 .setPaymentRefundTransactionId(201L).setOrderRefundOperationId(301L).setOrderReturnOperationId(401L)
+                .setOrderSettlementEffectId("settlement-effect-1").setOrderSettlementVersion(1L)
+                .setOrderReturnFull(true)
                 .setBenefitAmountMinor(0L).setBenefitReversalStatus("NOT_REQUIRED")
                 .setBenefitReversalAmountMinor(0L);
         AfterSaleCaseDO sale = new AfterSaleCaseDO().setTenantId(1L).setAfterSaleId("after-sale-1")
