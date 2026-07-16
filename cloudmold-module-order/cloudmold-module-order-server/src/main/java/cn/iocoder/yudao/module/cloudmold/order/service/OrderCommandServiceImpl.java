@@ -666,6 +666,9 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
             require(sourceVersions.add(sourceVersion), "duplicate benefit source version in one order");
             if (application.getEntitlementId() != null) {
                 requireText(application.getEntitlementId(), "entitlementId", 128);
+                require("COUPON_ENTITLEMENT".equals(application.getBenefitSourceType())
+                                && application.getEntitlementId().equals(application.getBenefitSourceId()),
+                        "entitlement benefit must snapshot its own source ID and version");
             }
             require(application.getAmountMinor() != null && application.getAmountMinor() > 0,
                     "benefit application amountMinor must be positive");

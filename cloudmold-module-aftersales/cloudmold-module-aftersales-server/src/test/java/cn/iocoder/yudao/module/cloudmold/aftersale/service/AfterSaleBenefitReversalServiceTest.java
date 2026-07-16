@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.cloudmold.aftersale.service;
 import cn.iocoder.yudao.module.cloudmold.aftersale.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.aftersale.dal.mysql.*;
 import cn.iocoder.yudao.module.cloudmold.order.api.*;
+import cn.iocoder.yudao.module.cloudmold.promotion.api.*;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -18,9 +19,10 @@ class AfterSaleBenefitReversalServiceTest {
     private final AfterSaleBenefitFundingReversalMapper fundingMapper =
             mock(AfterSaleBenefitFundingReversalMapper.class);
     private final OrderAfterSaleQueryApi orderQueryApi = mock(OrderAfterSaleQueryApi.class);
+    private final PromotionCommandApi promotionCommandApi = mock(PromotionCommandApi.class);
     private final AfterSaleEventService eventService = mock(AfterSaleEventService.class);
     private final AfterSaleBenefitReversalService service = new AfterSaleBenefitReversalService(
-            reversalMapper, fundingMapper, orderQueryApi, eventService);
+            reversalMapper, fundingMapper, orderQueryApi, promotionCommandApi, eventService);
 
     @Test
     void shouldRecordExactAllocationAndEveryFundingShare() {
@@ -47,21 +49,47 @@ class AfterSaleBenefitReversalServiceTest {
     }
 
     @Test
-    void shouldFailClosedWhenPromotionEntitlementReturnIsRequired() {
+    void shouldReturnPromotionEntitlementBeforeRecordingReversal() {
         when(reversalMapper.selectByAfterSale(1L, "after-sale-1")).thenReturn(List.of());
         when(orderQueryApi.requireEligible("order-1", "order-item-1"))
                 .thenReturn(order("entitlement-1"));
+        when(promotionCommandApi.execute(any())).thenReturn(PromotionCommandResult.builder()
+                .aggregateId("entitlement-1").aggregateVersion(2L).status("RETURNED").build());
+        when(reversalMapper.insert(any(AfterSaleBenefitReversalDO.class))).thenReturn(1);
+        when(fundingMapper.insert(any(AfterSaleBenefitFundingReversalDO.class))).thenReturn(1);
+
+        service.record(saga(), LocalDateTime.now());
+
+        verify(promotionCommandApi).execute(argThat(command ->
+                command.getOperation() == PromotionOperation.RETURN_COUPON_ENTITLEMENT
+                        && command.getIdempotencyKey().equals(
+                        "after-sale:after-sale-1:benefit:application-1:return-entitlement")
+                        && command.getCouponEntitlement().getEntitlementId().equals("entitlement-1")
+                        && command.getCouponEntitlement().getOrderRef().equals("run-1")
+                        && command.getCouponEntitlement().getExpectedVersion() == 1L));
+        verify(reversalMapper).insert(argThat((AfterSaleBenefitReversalDO row) ->
+                "entitlement-1".equals(row.getEntitlementId())
+                && "RETURNED".equals(row.getEntitlementEffectStatus())));
+    }
+
+    @Test
+    void shouldFailClosedWhenEntitlementSourceSnapshotIsNotExact() {
+        when(reversalMapper.selectByAfterSale(1L, "after-sale-1")).thenReturn(List.of());
+        OrderAfterSaleView order = order("entitlement-1");
+        order.getBenefitApplications().get(0).setBenefitSourceId("template-1");
+        when(orderQueryApi.requireEligible("order-1", "order-item-1")).thenReturn(order);
 
         assertThatThrownBy(() -> service.record(saga(), LocalDateTime.now()))
-                .hasMessage("coupon entitlement reversal requires the Promotion return adapter");
+                .hasMessage("entitlement benefit source snapshot is invalid");
+        verifyNoInteractions(promotionCommandApi, fundingMapper, eventService);
         verify(reversalMapper, never()).insert(any(AfterSaleBenefitReversalDO.class));
-        verifyNoInteractions(fundingMapper, eventService);
     }
 
     @Test
     void shouldResolveCommittedEffectsWithoutWritingDuplicates() {
         AfterSaleBenefitReversalDO reversal = new AfterSaleBenefitReversalDO()
-                .setReversalBatchId("batch-1").setAmountMinor(3800L);
+                .setReversalBatchId("batch-1").setAmountMinor(3800L)
+                .setEntitlementEffectStatus("NOT_REQUIRED");
         when(reversalMapper.selectByAfterSale(1L, "after-sale-1")).thenReturn(List.of(reversal));
         when(fundingMapper.selectByAfterSale(1L, "after-sale-1")).thenReturn(List.of(
                 new AfterSaleBenefitFundingReversalDO().setAmountMinor(2000L),
@@ -71,7 +99,7 @@ class AfterSaleBenefitReversalServiceTest {
 
         assertThat(result.batchId()).isEqualTo("batch-1");
         assertThat(result.amountMinor()).isEqualTo(3800L);
-        verifyNoInteractions(orderQueryApi, eventService);
+        verifyNoInteractions(orderQueryApi, promotionCommandApi, eventService);
         verify(reversalMapper, never()).insert(any(AfterSaleBenefitReversalDO.class));
         verify(fundingMapper, never()).insert(any(AfterSaleBenefitFundingReversalDO.class));
     }
@@ -97,7 +125,8 @@ class AfterSaleBenefitReversalServiceTest {
                 .amountMinor(3800L).currencyCode("CNY").funding(List.of(platform, merchant)).build();
         OrderBenefitApplicationView application = OrderBenefitApplicationView.builder()
                 .benefitApplicationId("application-1").benefitType("PROMOTION")
-                .benefitSourceType("CONTROLLED_PROMOTION").benefitSourceId("promotion-1")
+                .benefitSourceType(entitlementId == null ? "CONTROLLED_PROMOTION" : "COUPON_ENTITLEMENT")
+                .benefitSourceId(entitlementId == null ? "promotion-1" : entitlementId)
                 .benefitSourceVersion(1L).entitlementId(entitlementId).amountMinor(3800L)
                 .currencyCode("CNY").allocations(List.of(allocation)).build();
         return OrderAfterSaleView.builder().orderId("order-1").orderItemId("order-item-1")

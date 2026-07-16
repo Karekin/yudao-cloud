@@ -90,7 +90,7 @@ class OrderCommandServiceImplTest {
                 .containsExactly(190L, 290L);
         assertThat(result.getBenefitApplications()).singleElement().satisfies(application -> {
             assertThat(application.getBenefitType()).isEqualTo("COUPON");
-            assertThat(application.getBenefitSourceId()).isEqualTo("coupon-template-1");
+            assertThat(application.getBenefitSourceId()).isEqualTo("entitlement-1");
             assertThat(application.getBenefitSourceVersion()).isEqualTo(3L);
             assertThat(application.getAllocations()).hasSize(2);
             assertThat(application.getAllocations()).flatExtracting(OrderBenefitAllocationView::getFunding)
@@ -227,6 +227,18 @@ class OrderCommandServiceImplTest {
 
         assertThatThrownBy(() -> service.execute(command)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("benefit funding must equal allocation amount");
+
+        verifyNoInteractions(operationMapper, orderMapper, itemMapper, benefitApplicationMapper,
+                benefitAllocationMapper, benefitFundingMapper, outboxAppender);
+    }
+
+    @Test
+    void shouldRejectEntitlementWithoutExactSourceSnapshotBeforeAnyWrite() {
+        OrderCommand command = placeCommand();
+        command.getBenefitApplications().get(0).setBenefitSourceId("coupon-template-1");
+
+        assertThatThrownBy(() -> service.execute(command)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("entitlement benefit must snapshot its own source ID and version");
 
         verifyNoInteractions(operationMapper, orderMapper, itemMapper, benefitApplicationMapper,
                 benefitAllocationMapper, benefitFundingMapper, outboxAppender);
@@ -539,7 +551,7 @@ class OrderCommandServiceImplTest {
                                 .quantity(BigDecimal.ONE).unitPriceMinor(300L).build()))
                 .benefitApplications(List.of(OrderBenefitApplicationCommand.builder()
                         .applicationKey("application-1").benefitType("COUPON")
-                        .benefitSourceType("COUPON_TEMPLATE").benefitSourceId("coupon-template-1")
+                        .benefitSourceType("COUPON_ENTITLEMENT").benefitSourceId("entitlement-1")
                         .benefitSourceVersion(3L).entitlementId("entitlement-1").amountMinor(20L)
                         .calculationDigest("a".repeat(64)).allocations(List.of(
                                 OrderBenefitAllocationCommand.builder().allocationKey("allocation-1")

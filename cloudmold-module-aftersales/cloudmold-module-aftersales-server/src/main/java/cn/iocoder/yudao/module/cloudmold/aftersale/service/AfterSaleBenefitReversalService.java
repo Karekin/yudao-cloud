@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.cloudmold.aftersale.service;
 import cn.iocoder.yudao.module.cloudmold.aftersale.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.aftersale.dal.mysql.*;
 import cn.iocoder.yudao.module.cloudmold.order.api.*;
+import cn.iocoder.yudao.module.cloudmold.promotion.api.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,6 +17,7 @@ public class AfterSaleBenefitReversalService {
     private final AfterSaleBenefitReversalMapper reversalMapper;
     private final AfterSaleBenefitFundingReversalMapper fundingReversalMapper;
     private final OrderAfterSaleQueryApi orderQueryApi;
+    private final PromotionCommandApi promotionCommandApi;
     private final AfterSaleEventService eventService;
 
     @Transactional(rollbackFor = Exception.class)
@@ -42,8 +44,7 @@ public class AfterSaleBenefitReversalService {
         int reversalCount = 0;
         int fundingCount = 0;
         for (OrderBenefitApplicationView application : applications) {
-            require(application.getEntitlementId() == null,
-                    "coupon entitlement reversal requires the Promotion return adapter");
+            String entitlementEffectStatus = returnEntitlementIfRequired(saga, application, occurredAt);
             for (OrderBenefitAllocationView allocation : application.getAllocations()) {
                 require(Objects.equals(allocation.getOrderItemId(), saga.getOrderItemId()),
                         "benefit allocation does not belong to after-sale order item");
@@ -64,8 +65,9 @@ public class AfterSaleBenefitReversalService {
                         .setBenefitSourceType(application.getBenefitSourceType())
                         .setBenefitSourceId(application.getBenefitSourceId())
                         .setBenefitSourceVersion(application.getBenefitSourceVersion())
-                        .setEntitlementId(null).setAmountMinor(allocationAmount).setCurrencyCode("CNY")
-                        .setEntitlementEffectStatus("NOT_REQUIRED").setOccurredAt(occurredAt).setCreatedAt(now);
+                        .setEntitlementId(application.getEntitlementId()).setAmountMinor(allocationAmount)
+                        .setCurrencyCode("CNY").setEntitlementEffectStatus(entitlementEffectStatus)
+                        .setOccurredAt(occurredAt).setCreatedAt(now);
                 require(reversalMapper.insert(reversal) == 1, "failed to record benefit reversal");
                 List<AfterSaleBenefitFundingReversalDO> fundingRows = new ArrayList<>();
                 for (OrderBenefitFundingView funding : fundingViews) {
@@ -97,6 +99,36 @@ public class AfterSaleBenefitReversalService {
         return new AfterSaleBenefitReversalResult(batchId, reversalCount, fundingCount, total);
     }
 
+    private String returnEntitlementIfRequired(AfterSaleResolutionSagaDO saga,
+                                               OrderBenefitApplicationView application,
+                                               LocalDateTime occurredAt) {
+        if (application.getEntitlementId() == null) return "NOT_REQUIRED";
+        require("COUPON_ENTITLEMENT".equals(application.getBenefitSourceType())
+                        && Objects.equals(application.getEntitlementId(), application.getBenefitSourceId())
+                        && application.getBenefitSourceVersion() != null
+                        && application.getBenefitSourceVersion() > 0,
+                "entitlement benefit source snapshot is invalid");
+        PromotionCommandResult result = promotionCommandApi.execute(PromotionCommand.builder()
+                .operation(PromotionOperation.RETURN_COUPON_ENTITLEMENT)
+                .idempotencyKey("after-sale:" + saga.getAfterSaleId() + ":benefit:"
+                        + application.getBenefitApplicationId() + ":return-entitlement")
+                .correlationId(saga.getCorrelationId()).causationId(saga.getCausationId())
+                .occurredAt(occurredAt.toInstant(ZoneOffset.UTC))
+                .couponEntitlement(PromotionCommand.CouponEntitlementDefinition.builder()
+                        .entitlementId(application.getEntitlementId())
+                        .orderRef(saga.getRunId())
+                        .reason("FULL_RETURN:" + saga.getAfterSaleId())
+                        .expectedVersion(application.getBenefitSourceVersion())
+                        .build())
+                .build());
+        require(result != null
+                        && Objects.equals(application.getEntitlementId(), result.getAggregateId())
+                        && Objects.equals(application.getBenefitSourceVersion() + 1, result.getAggregateVersion())
+                        && "RETURNED".equals(result.getStatus()),
+                "Promotion entitlement return did not reconcile with Order snapshot");
+        return "RETURNED";
+    }
+
     private AfterSaleBenefitReversalResult resolveExisting(AfterSaleResolutionSagaDO saga,
                                                             List<AfterSaleBenefitReversalDO> reversals) {
         Set<String> batches = new HashSet<>();
@@ -104,6 +136,10 @@ public class AfterSaleBenefitReversalService {
         for (AfterSaleBenefitReversalDO reversal : reversals) {
             batches.add(reversal.getReversalBatchId());
             total = Math.addExact(total, reversal.getAmountMinor());
+            require((reversal.getEntitlementId() == null && "NOT_REQUIRED".equals(reversal.getEntitlementEffectStatus()))
+                            || (reversal.getEntitlementId() != null
+                            && "RETURNED".equals(reversal.getEntitlementEffectStatus())),
+                    "existing entitlement reversal evidence is incomplete");
         }
         require(batches.size() == 1 && total == saga.getBenefitAmountMinor(),
                 "existing benefit reversals conflict with Saga snapshot");

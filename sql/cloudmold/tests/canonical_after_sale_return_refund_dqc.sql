@@ -119,6 +119,27 @@ WHERE a.benefit_application_id IS NULL OR x.benefit_allocation_id IS NULL
    OR NOT (BINARY r.entitlement_id<=>BINARY a.entitlement_id)
    OR r.amount_minor<>x.amount_minor OR BINARY r.currency_code<>BINARY x.currency_code;
 
+SELECT COUNT(*) AS after_sale_benefit_entitlement_reversal_violation
+FROM cloudmold_after_sale_benefit_reversal r
+LEFT JOIN cloudmold_after_sale_resolution_saga s
+  ON s.tenant_id=r.tenant_id AND BINARY s.after_sale_id=BINARY r.after_sale_id
+LEFT JOIN cloudmold_promotion_coupon_entitlement e
+  ON e.tenant_id=r.tenant_id AND BINARY e.entitlement_id=BINARY r.entitlement_id
+LEFT JOIN cloudmold_promotion_coupon_entitlement_ledger l
+  ON l.tenant_id=r.tenant_id AND BINARY l.entitlement_id=BINARY r.entitlement_id
+  AND l.entitlement_version=r.benefit_source_version+1
+WHERE (r.entitlement_id IS NULL AND r.entitlement_effect_status<>'NOT_REQUIRED')
+   OR (r.entitlement_id IS NOT NULL AND (
+        r.entitlement_effect_status<>'RETURNED'
+        OR BINARY r.benefit_source_type<>BINARY 'COUPON_ENTITLEMENT'
+        OR BINARY r.benefit_source_id<>BINARY r.entitlement_id
+        OR s.saga_id IS NULL OR e.entitlement_id IS NULL OR l.ledger_entry_id IS NULL
+        OR e.status<>'RETURNED' OR e.version<>r.benefit_source_version+1
+        OR BINARY e.order_ref<>BINARY s.run_id
+        OR l.operation_type<>'RETURN_COUPON_ENTITLEMENT'
+        OR l.previous_status NOT IN ('RESERVED','USED') OR l.current_status<>'RETURNED'
+        OR BINARY l.order_ref<>BINARY s.run_id));
+
 SELECT COUNT(*) AS after_sale_benefit_funding_reversal_violation
 FROM cloudmold_after_sale_benefit_funding_reversal r
 LEFT JOIN cloudmold_after_sale_benefit_reversal p
