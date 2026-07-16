@@ -95,3 +95,13 @@ Every event also carries the common CloudMold envelope. Payload fields are exact
 
 Headers explicitly state `pii_safe=true`, `raw_sql_stored=false` and
 `raw_connection_stored=false`.
+
+## OLTP verification
+
+`sql/cloudmold/tests/canonical_metadata_first_slice_dqc.sql` is the fail-closed operational
+check set for the canonical tables. It checks operation completion shape, definition/current
+version and typed-subtype cardinality, contiguous field/dependency/run/history sequences,
+dependency cycles, run-status monotonicity, DQC task-run reference shape, definition/history
+agreement and accepted-operation Outbox coverage. A zero result on empty tables is structural
+safety only; it must never be reported as source coverage, non-empty runtime reconciliation or
+production readiness.
