@@ -30,5 +30,6 @@ public class OrderCommandResult {
     private String preCancellationStatus;
     private String refundId;
     private List<OrderLineView> items;
+    private List<OrderBenefitApplicationView> benefitApplications;
     private Boolean duplicate;
 }

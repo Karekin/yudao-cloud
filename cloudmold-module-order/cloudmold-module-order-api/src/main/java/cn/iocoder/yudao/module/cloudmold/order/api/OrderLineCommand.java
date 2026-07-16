@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 @AllArgsConstructor
 public class OrderLineCommand {
+    private String lineKey;
     private String canonicalSkuId;
     private BigDecimal quantity;
     private Long unitPriceMinor;

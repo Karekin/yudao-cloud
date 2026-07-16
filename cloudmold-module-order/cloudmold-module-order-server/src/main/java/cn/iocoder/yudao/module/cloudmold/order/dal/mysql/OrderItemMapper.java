@@ -10,8 +10,9 @@ import java.util.List;
 @Mapper
 public interface OrderItemMapper extends BaseMapperX<OrderItemDO> {
     @Select("""
-            SELECT order_item_id,tenant_id,order_id,canonical_sku_id,quantity,unit_price_minor,
-                   line_amount_minor,reservation_id,listing_id,listing_offer_id,listing_revision,listing_version,
+            SELECT order_item_id,tenant_id,order_id,line_key,canonical_sku_id,quantity,unit_price_minor,
+                   line_amount_minor,discount_amount_minor,net_amount_minor,
+                   reservation_id,listing_id,listing_offer_id,listing_revision,listing_version,
                    channel_code,shop_id,created_at,updated_at
             FROM cloudmold_order_item
             WHERE tenant_id=#{tenantId} AND order_id=#{orderId}

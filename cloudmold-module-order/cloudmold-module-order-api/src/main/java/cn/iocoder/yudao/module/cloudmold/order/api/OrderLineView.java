@@ -13,10 +13,13 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 public class OrderLineView {
     private String orderItemId;
+    private String lineKey;
     private String canonicalSkuId;
     private BigDecimal quantity;
     private Long unitPriceMinor;
     private Long lineAmountMinor;
+    private Long discountAmountMinor;
+    private Long netAmountMinor;
     private String reservationId;
     private String listingId;
     private String listingOfferId;

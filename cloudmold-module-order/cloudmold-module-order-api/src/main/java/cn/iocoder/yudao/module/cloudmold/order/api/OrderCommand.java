@@ -20,6 +20,7 @@ public class OrderCommand {
     private Long expectedVersion;
     private String buyerId;
     private List<OrderLineCommand> items;
+    private List<OrderBenefitApplicationCommand> benefitApplications;
     private Long shippingAmountMinor;
     private Long discountAmountMinor;
     private String currencyCode;

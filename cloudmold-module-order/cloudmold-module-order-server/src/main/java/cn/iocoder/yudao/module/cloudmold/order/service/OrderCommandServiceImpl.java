@@ -33,6 +33,9 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
     private final OrderOperationMapper operationMapper;
     private final OrderHeaderMapper orderMapper;
     private final OrderItemMapper itemMapper;
+    private final OrderBenefitApplicationMapper benefitApplicationMapper;
+    private final OrderBenefitAllocationMapper benefitAllocationMapper;
+    private final OrderBenefitFundingMapper benefitFundingMapper;
     private final OrderStatusHistoryMapper historyMapper;
     private final CatalogSkuValidationApi catalogSkuValidationApi;
     private final FulfillmentShipmentValidationApi fulfillmentValidationApi;
@@ -119,9 +122,12 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         String orderId = UUID.randomUUID().toString();
         String orderNo = "CMO" + orderId.replace("-", "").substring(0, 20).toUpperCase(Locale.ROOT);
         List<OrderItemDO> items = new ArrayList<>();
+        Map<String, Long> lineDiscounts = calculateLineDiscounts(command);
         long productAmount = 0;
         BigDecimal totalQuantity = BigDecimal.ZERO;
-        for (OrderLineCommand line : command.getItems()) {
+        for (int index = 0; index < command.getItems().size(); index++) {
+            OrderLineCommand line = command.getItems().get(index);
+            String lineKey = resolveLineKey(line, index);
             PublishedListingOfferView offer = null;
             if (command.getOperation() == OrderOperation.PLACE_FROM_LISTING) {
                 offer = listingQueryApi.requirePublishedOffer(PublishedOfferValidationCommand.builder()
@@ -130,11 +136,14 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
                         .currencyCode(command.getCurrencyCode()).build());
             }
             long lineAmount = Math.multiplyExact(line.getUnitPriceMinor(), line.getQuantity().longValueExact());
+            long lineDiscount = lineDiscounts.getOrDefault(lineKey, 0L);
+            long lineNet = Math.subtractExact(lineAmount, lineDiscount);
             productAmount = Math.addExact(productAmount, lineAmount);
             totalQuantity = totalQuantity.add(line.getQuantity());
             items.add(new OrderItemDO().setOrderItemId(UUID.randomUUID().toString()).setTenantId(tenantId)
-                    .setOrderId(orderId).setCanonicalSkuId(line.getCanonicalSkuId()).setQuantity(line.getQuantity())
-                    .setUnitPriceMinor(line.getUnitPriceMinor()).setLineAmountMinor(lineAmount)
+                    .setOrderId(orderId).setLineKey(lineKey).setCanonicalSkuId(line.getCanonicalSkuId())
+                    .setQuantity(line.getQuantity()).setUnitPriceMinor(line.getUnitPriceMinor())
+                    .setLineAmountMinor(lineAmount).setDiscountAmountMinor(lineDiscount).setNetAmountMinor(lineNet)
                     .setListingId(offer == null ? null : offer.getListingId())
                     .setListingOfferId(offer == null ? null : offer.getListingOfferId())
                     .setListingRevision(offer == null ? null : offer.getListingRevision())
@@ -154,9 +163,63 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
                 .setCurrencyCode(command.getCurrencyCode()).setVersion(1L).setCreatedAt(now).setUpdatedAt(now);
         orderMapper.insert(order);
         items.forEach(itemMapper::insert);
+        List<BenefitEventFact> benefitFacts = persistBenefits(tenantId, operationId, orderId, command, items, now);
         appendHistory(tenantId, operationId, orderId, 1L, null, "PLACED", command, now);
         appendEvent(tenantId, order, items, null, "PLACED", command, 1L);
-        return result(operationId, order, items, null, false);
+        appendBenefitEvents(tenantId, order, command, benefitFacts);
+        return result(operationId, order, items, benefitViews(benefitFacts), null, false);
+    }
+
+    private List<BenefitEventFact> persistBenefits(Long tenantId, Long operationId, String orderId,
+                                                   OrderCommand command, List<OrderItemDO> items,
+                                                   LocalDateTime now) {
+        if (benefitApplications(command).isEmpty()) return List.of();
+        Map<String, OrderItemDO> itemByLineKey = new HashMap<>();
+        items.forEach(item -> itemByLineKey.put(item.getLineKey(), item));
+        List<BenefitEventFact> facts = new ArrayList<>();
+        LocalDateTime occurredAt = LocalDateTime.ofInstant(command.getOccurredAt(), ZoneOffset.UTC);
+        for (OrderBenefitApplicationCommand requested : command.getBenefitApplications()) {
+            OrderBenefitApplicationDO application = new OrderBenefitApplicationDO()
+                    .setBenefitApplicationId(UUID.randomUUID().toString()).setTenantId(tenantId).setOrderId(orderId)
+                    .setApplicationKey(requested.getApplicationKey()).setBenefitType(requested.getBenefitType())
+                    .setBenefitSourceType(requested.getBenefitSourceType())
+                    .setBenefitSourceId(requested.getBenefitSourceId())
+                    .setBenefitSourceVersion(requested.getBenefitSourceVersion())
+                    .setEntitlementId(requested.getEntitlementId()).setAmountMinor(requested.getAmountMinor())
+                    .setCurrencyCode(CURRENCY_CNY)
+                    .setCalculationDigest(requested.getCalculationDigest().toLowerCase(Locale.ROOT))
+                    .setOperationId(operationId).setVersion(1L).setOccurredAt(occurredAt).setCreatedAt(now);
+            require(benefitApplicationMapper.insert(application) == 1, "failed to persist order benefit application");
+            List<BenefitAllocationEventFact> allocationFacts = new ArrayList<>();
+            for (OrderBenefitAllocationCommand requestedAllocation : requested.getAllocations()) {
+                OrderItemDO item = itemByLineKey.get(requestedAllocation.getLineKey());
+                OrderBenefitAllocationDO allocation = new OrderBenefitAllocationDO()
+                        .setBenefitAllocationId(UUID.randomUUID().toString()).setTenantId(tenantId).setOrderId(orderId)
+                        .setBenefitApplicationId(application.getBenefitApplicationId())
+                        .setAllocationKey(requestedAllocation.getAllocationKey()).setOrderItemId(item.getOrderItemId())
+                        .setLineKey(item.getLineKey()).setAmountMinor(requestedAllocation.getAmountMinor())
+                        .setCurrencyCode(CURRENCY_CNY).setCreatedAt(now);
+                require(benefitAllocationMapper.insert(allocation) == 1,
+                        "failed to persist order benefit allocation");
+                List<OrderBenefitFundingDO> fundingFacts = new ArrayList<>();
+                for (OrderBenefitFundingCommand requestedFunding : requestedAllocation.getFunding()) {
+                    OrderBenefitFundingDO funding = new OrderBenefitFundingDO()
+                            .setBenefitFundingId(UUID.randomUUID().toString()).setTenantId(tenantId).setOrderId(orderId)
+                            .setBenefitApplicationId(application.getBenefitApplicationId())
+                            .setBenefitAllocationId(allocation.getBenefitAllocationId())
+                            .setFundingKey(requestedFunding.getFundingKey())
+                            .setFunderType(requestedFunding.getFunderType())
+                            .setFunderId(requestedFunding.getFunderId()).setAmountMinor(requestedFunding.getAmountMinor())
+                            .setCurrencyCode(CURRENCY_CNY).setCreatedAt(now);
+                    require(benefitFundingMapper.insert(funding) == 1,
+                            "failed to persist order benefit funding");
+                    fundingFacts.add(funding);
+                }
+                allocationFacts.add(new BenefitAllocationEventFact(allocation, fundingFacts));
+            }
+            facts.add(new BenefitEventFact(application, allocationFacts));
+        }
+        return facts;
     }
 
     private OrderCommandResult transition(Long tenantId, Long operationId, OrderCommand command, LocalDateTime now) {
@@ -269,7 +332,7 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         appendHistory(tenantId, operationId, order.getOrderId(), order.getVersion(), previous,
                 transition.nextStatus(), command, now);
         appendEvent(tenantId, order, items, previous, transition.nextStatus(), command, order.getVersion());
-        return result(operationId, order, items, previous, false);
+        return result(operationId, order, items, loadBenefitViews(tenantId, order.getOrderId()), previous, false);
     }
 
     private void bindReservations(Long tenantId, String orderId, List<OrderItemDO> items,
@@ -351,7 +414,127 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
                 .destination("lakehouse").build());
     }
 
+    private void appendBenefitEvents(Long tenantId, OrderHeaderDO order, OrderCommand command,
+                                     List<BenefitEventFact> facts) {
+        for (int index = 0; index < facts.size(); index++) {
+            BenefitEventFact fact = facts.get(index);
+            OrderBenefitApplicationDO application = fact.application();
+            List<Map<String, Object>> allocations = fact.allocations().stream().map(allocationFact -> {
+                OrderBenefitAllocationDO allocation = allocationFact.allocation();
+                Map<String, Object> value = new LinkedHashMap<>();
+                value.put("benefit_allocation_id", allocation.getBenefitAllocationId());
+                value.put("allocation_key", allocation.getAllocationKey());
+                value.put("order_item_id", allocation.getOrderItemId());
+                value.put("line_key", allocation.getLineKey());
+                value.put("amount_minor", allocation.getAmountMinor());
+                value.put("currency_code", allocation.getCurrencyCode());
+                value.put("funding", allocationFact.funding().stream().map(funding -> {
+                    Map<String, Object> fundingValue = new LinkedHashMap<>();
+                    fundingValue.put("benefit_funding_id", funding.getBenefitFundingId());
+                    fundingValue.put("funding_key", funding.getFundingKey());
+                    fundingValue.put("funder_type", funding.getFunderType());
+                    fundingValue.put("funder_id", funding.getFunderId());
+                    fundingValue.put("amount_minor", funding.getAmountMinor());
+                    fundingValue.put("currency_code", funding.getCurrencyCode());
+                    return fundingValue;
+                }).toList());
+                return value;
+            }).toList();
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("run_id", command.getRunId());
+            payload.put("order_id", order.getOrderId());
+            payload.put("order_no", order.getOrderNo());
+            payload.put("benefit_application_id", application.getBenefitApplicationId());
+            payload.put("application_key", application.getApplicationKey());
+            payload.put("benefit_type", application.getBenefitType());
+            payload.put("benefit_source_type", application.getBenefitSourceType());
+            payload.put("benefit_source_id", application.getBenefitSourceId());
+            payload.put("benefit_source_version", application.getBenefitSourceVersion());
+            payload.put("entitlement_id", application.getEntitlementId());
+            payload.put("amount_minor", application.getAmountMinor());
+            payload.put("currency_code", application.getCurrencyCode());
+            payload.put("calculation_digest", application.getCalculationDigest());
+            payload.put("allocations", allocations);
+            String eventIdempotency = "order-benefit-" + DigestUtil.sha256Hex(
+                    tenantId + ":" + order.getOrderId() + ":" + application.getApplicationKey()).substring(0, 48);
+            outboxAppender.append(AppendDomainEventCommand.builder()
+                    .eventType("order.benefit_application.recorded").schemaVersion(1)
+                    .sourceSystem("cloudmold-order").tenantId(tenantId)
+                    .aggregateType("order").aggregateId(order.getOrderId()).aggregateVersion(1L)
+                    .eventSequence((short) (index + 2)).occurredAt(command.getOccurredAt())
+                    .correlationId(command.getCorrelationId()).causationId(command.getCausationId())
+                    .idempotencyKey(eventIdempotency).payload(payload)
+                    .headers(Map.of("operation", command.getOperation().name(), "immutable", true))
+                    .destination("lakehouse").build());
+        }
+    }
+
+    private static List<OrderBenefitApplicationView> benefitViews(List<BenefitEventFact> facts) {
+        return facts.stream().map(fact -> OrderBenefitApplicationView.builder()
+                .benefitApplicationId(fact.application().getBenefitApplicationId())
+                .applicationKey(fact.application().getApplicationKey())
+                .benefitType(fact.application().getBenefitType())
+                .benefitSourceType(fact.application().getBenefitSourceType())
+                .benefitSourceId(fact.application().getBenefitSourceId())
+                .benefitSourceVersion(fact.application().getBenefitSourceVersion())
+                .entitlementId(fact.application().getEntitlementId())
+                .amountMinor(fact.application().getAmountMinor()).currencyCode(fact.application().getCurrencyCode())
+                .calculationDigest(fact.application().getCalculationDigest()).version(fact.application().getVersion())
+                .allocations(fact.allocations().stream().map(allocationFact -> OrderBenefitAllocationView.builder()
+                        .benefitAllocationId(allocationFact.allocation().getBenefitAllocationId())
+                        .allocationKey(allocationFact.allocation().getAllocationKey())
+                        .orderItemId(allocationFact.allocation().getOrderItemId())
+                        .lineKey(allocationFact.allocation().getLineKey())
+                        .amountMinor(allocationFact.allocation().getAmountMinor())
+                        .currencyCode(allocationFact.allocation().getCurrencyCode())
+                        .funding(allocationFact.funding().stream().map(funding -> OrderBenefitFundingView.builder()
+                                .benefitFundingId(funding.getBenefitFundingId()).fundingKey(funding.getFundingKey())
+                                .funderType(funding.getFunderType()).funderId(funding.getFunderId())
+                                .amountMinor(funding.getAmountMinor()).currencyCode(funding.getCurrencyCode()).build())
+                                .toList())
+                        .build()).toList())
+                .build()).toList();
+    }
+
+    private List<OrderBenefitApplicationView> loadBenefitViews(Long tenantId, String orderId) {
+        List<OrderBenefitApplicationDO> applications = benefitApplicationMapper.selectByOrder(tenantId, orderId);
+        if (applications.isEmpty()) return List.of();
+        Map<String, List<OrderBenefitFundingDO>> fundingByAllocation = benefitFundingMapper
+                .selectByOrder(tenantId, orderId).stream()
+                .collect(java.util.stream.Collectors.groupingBy(OrderBenefitFundingDO::getBenefitAllocationId,
+                        LinkedHashMap::new, java.util.stream.Collectors.toList()));
+        Map<String, List<OrderBenefitAllocationDO>> allocationsByApplication = benefitAllocationMapper
+                .selectByOrder(tenantId, orderId).stream()
+                .collect(java.util.stream.Collectors.groupingBy(OrderBenefitAllocationDO::getBenefitApplicationId,
+                        LinkedHashMap::new, java.util.stream.Collectors.toList()));
+        return applications.stream().map(application -> OrderBenefitApplicationView.builder()
+                .benefitApplicationId(application.getBenefitApplicationId())
+                .applicationKey(application.getApplicationKey()).benefitType(application.getBenefitType())
+                .benefitSourceType(application.getBenefitSourceType())
+                .benefitSourceId(application.getBenefitSourceId())
+                .benefitSourceVersion(application.getBenefitSourceVersion())
+                .entitlementId(application.getEntitlementId()).amountMinor(application.getAmountMinor())
+                .currencyCode(application.getCurrencyCode()).calculationDigest(application.getCalculationDigest())
+                .version(application.getVersion())
+                .allocations(allocationsByApplication.getOrDefault(application.getBenefitApplicationId(), List.of())
+                        .stream().map(allocation -> OrderBenefitAllocationView.builder()
+                                .benefitAllocationId(allocation.getBenefitAllocationId())
+                                .allocationKey(allocation.getAllocationKey()).orderItemId(allocation.getOrderItemId())
+                                .lineKey(allocation.getLineKey()).amountMinor(allocation.getAmountMinor())
+                                .currencyCode(allocation.getCurrencyCode())
+                                .funding(fundingByAllocation.getOrDefault(allocation.getBenefitAllocationId(), List.of())
+                                        .stream().map(funding -> OrderBenefitFundingView.builder()
+                                                .benefitFundingId(funding.getBenefitFundingId())
+                                                .fundingKey(funding.getFundingKey())
+                                                .funderType(funding.getFunderType()).funderId(funding.getFunderId())
+                                                .amountMinor(funding.getAmountMinor())
+                                                .currencyCode(funding.getCurrencyCode()).build()).toList())
+                                .build()).toList())
+                .build()).toList();
+    }
+
     private static OrderCommandResult result(Long operationId, OrderHeaderDO order, List<OrderItemDO> items,
+                                             List<OrderBenefitApplicationView> benefitApplications,
                                              String previous, boolean duplicate) {
         return OrderCommandResult.builder().operationId(operationId).orderId(order.getOrderId())
                 .orderNo(order.getOrderNo()).previousStatus(previous).currentStatus(order.getStatus())
@@ -362,13 +545,16 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
                 .fulfillmentId(order.getFulfillmentId()).shipmentId(order.getShipmentId())
                 .cancellationSagaId(order.getCancellationSagaId())
                 .preCancellationStatus(order.getPreCancellationStatus())
-                .items(items.stream().map(OrderCommandServiceImpl::lineView).toList()).duplicate(duplicate).build();
+                .items(items.stream().map(OrderCommandServiceImpl::lineView).toList())
+                .benefitApplications(benefitApplications).duplicate(duplicate).build();
     }
 
     private static OrderLineView lineView(OrderItemDO item) {
-        return OrderLineView.builder().orderItemId(item.getOrderItemId()).canonicalSkuId(item.getCanonicalSkuId())
+        return OrderLineView.builder().orderItemId(item.getOrderItemId()).lineKey(item.getLineKey())
+                .canonicalSkuId(item.getCanonicalSkuId())
                 .quantity(item.getQuantity()).unitPriceMinor(item.getUnitPriceMinor())
-                .lineAmountMinor(item.getLineAmountMinor()).reservationId(item.getReservationId())
+                .lineAmountMinor(item.getLineAmountMinor()).discountAmountMinor(item.getDiscountAmountMinor())
+                .netAmountMinor(item.getNetAmountMinor()).reservationId(item.getReservationId())
                 .listingId(item.getListingId()).listingOfferId(item.getListingOfferId())
                 .listingRevision(item.getListingRevision()).listingVersion(item.getListingVersion())
                 .channelCode(item.getChannelCode()).shopId(item.getShopId()).build();
@@ -423,7 +609,10 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         require(command.getDiscountAmountMinor() != null && command.getDiscountAmountMinor() >= 0,
                 "discountAmountMinor must be nonnegative");
         Set<String> skuIds = new HashSet<>();
-        for (OrderLineCommand item : command.getItems()) {
+        Set<String> lineKeys = new HashSet<>();
+        boolean hasBenefits = !benefitApplications(command).isEmpty();
+        for (int index = 0; index < command.getItems().size(); index++) {
+            OrderLineCommand item = command.getItems().get(index);
             require(item != null, "order item is required");
             requireText(item.getCanonicalSkuId(), "canonicalSkuId", 128);
             require(skuIds.add(item.getCanonicalSkuId()), "duplicate canonical SKU in one order");
@@ -432,11 +621,107 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
                     "first slice requires positive whole-piece quantity");
             require(item.getUnitPriceMinor() != null && item.getUnitPriceMinor() >= 0,
                     "unitPriceMinor must be nonnegative");
+            if (hasBenefits) requireText(item.getLineKey(), "lineKey", 128);
+            if (item.getLineKey() != null) requireText(item.getLineKey(), "lineKey", 128);
+            require(lineKeys.add(resolveLineKey(item, index)), "duplicate lineKey in one order");
             if (command.getOperation() == OrderOperation.PLACE_FROM_LISTING) {
                 requireText(item.getListingId(), "listingId", 36);
                 requireText(item.getListingOfferId(), "listingOfferId", 36);
             }
         }
+        calculateLineDiscounts(command);
+    }
+
+    private static Map<String, Long> calculateLineDiscounts(OrderCommand command) {
+        List<OrderBenefitApplicationCommand> applications = benefitApplications(command);
+        if (command.getDiscountAmountMinor() == 0) {
+            require(applications.isEmpty(), "zero order discount cannot have benefit applications");
+            return Map.of();
+        }
+        require(!applications.isEmpty() && applications.size() <= 100,
+                "positive order discount requires 1 to 100 benefit applications");
+        Map<String, Long> grossByLine = new HashMap<>();
+        for (OrderLineCommand line : command.getItems()) {
+            long gross = Math.multiplyExact(line.getUnitPriceMinor(), line.getQuantity().longValueExact());
+            grossByLine.put(line.getLineKey(), gross);
+        }
+        Set<String> applicationKeys = new HashSet<>();
+        Set<String> sourceVersions = new HashSet<>();
+        Set<String> allocationKeys = new HashSet<>();
+        Set<String> fundingKeys = new HashSet<>();
+        Map<String, Long> discountByLine = new HashMap<>();
+        long applicationTotal = 0;
+        for (OrderBenefitApplicationCommand application : applications) {
+            require(application != null, "benefit application is required");
+            requireText(application.getApplicationKey(), "applicationKey", 128);
+            require(applicationKeys.add(application.getApplicationKey()), "duplicate benefit applicationKey");
+            require(Set.of("COUPON", "PROMOTION", "ALLOWANCE", "CAMPAIGN")
+                    .contains(application.getBenefitType()), "unsupported benefitType");
+            requireCode(application.getBenefitSourceType(), "benefitSourceType", 32);
+            requireText(application.getBenefitSourceId(), "benefitSourceId", 128);
+            require(application.getBenefitSourceVersion() != null && application.getBenefitSourceVersion() > 0,
+                    "benefitSourceVersion must be positive");
+            String sourceVersion = application.getBenefitSourceType() + ":" + application.getBenefitSourceId()
+                    + ":" + application.getBenefitSourceVersion();
+            require(sourceVersions.add(sourceVersion), "duplicate benefit source version in one order");
+            if (application.getEntitlementId() != null) {
+                requireText(application.getEntitlementId(), "entitlementId", 128);
+            }
+            require(application.getAmountMinor() != null && application.getAmountMinor() > 0,
+                    "benefit application amountMinor must be positive");
+            require(application.getCalculationDigest() != null
+                            && application.getCalculationDigest().matches("[0-9a-fA-F]{64}"),
+                    "calculationDigest must be a SHA-256 hex digest");
+            require(application.getAllocations() != null && !application.getAllocations().isEmpty()
+                            && application.getAllocations().size() <= 100,
+                    "benefit application requires 1 to 100 allocations");
+            long allocationTotal = 0;
+            for (OrderBenefitAllocationCommand allocation : application.getAllocations()) {
+                require(allocation != null, "benefit allocation is required");
+                requireText(allocation.getAllocationKey(), "allocationKey", 128);
+                require(allocationKeys.add(allocation.getAllocationKey()), "duplicate benefit allocationKey");
+                requireText(allocation.getLineKey(), "allocation lineKey", 128);
+                require(grossByLine.containsKey(allocation.getLineKey()),
+                        "benefit allocation lineKey does not match an order line");
+                require(allocation.getAmountMinor() != null && allocation.getAmountMinor() > 0,
+                        "benefit allocation amountMinor must be positive");
+                require(allocation.getFunding() != null && !allocation.getFunding().isEmpty()
+                                && allocation.getFunding().size() <= 10,
+                        "benefit allocation requires 1 to 10 funding shares");
+                long fundingTotal = 0;
+                for (OrderBenefitFundingCommand funding : allocation.getFunding()) {
+                    require(funding != null, "benefit funding is required");
+                    requireText(funding.getFundingKey(), "fundingKey", 128);
+                    require(fundingKeys.add(funding.getFundingKey()), "duplicate benefit fundingKey");
+                    require(Set.of("PLATFORM", "MERCHANT", "PARTNER").contains(funding.getFunderType()),
+                            "unsupported funderType");
+                    requireText(funding.getFunderId(), "funderId", 128);
+                    require(funding.getAmountMinor() != null && funding.getAmountMinor() > 0,
+                            "benefit funding amountMinor must be positive");
+                    fundingTotal = Math.addExact(fundingTotal, funding.getAmountMinor());
+                }
+                require(fundingTotal == allocation.getAmountMinor(),
+                        "benefit funding must equal allocation amount");
+                allocationTotal = Math.addExact(allocationTotal, allocation.getAmountMinor());
+                discountByLine.merge(allocation.getLineKey(), allocation.getAmountMinor(), Math::addExact);
+            }
+            require(allocationTotal == application.getAmountMinor(),
+                    "benefit allocations must equal application amount");
+            applicationTotal = Math.addExact(applicationTotal, application.getAmountMinor());
+        }
+        require(applicationTotal == command.getDiscountAmountMinor(),
+                "benefit applications must equal order discount amount");
+        discountByLine.forEach((lineKey, discount) -> require(discount <= grossByLine.get(lineKey),
+                "order line discount cannot exceed gross amount"));
+        return discountByLine;
+    }
+
+    private static List<OrderBenefitApplicationCommand> benefitApplications(OrderCommand command) {
+        return command.getBenefitApplications() == null ? List.of() : command.getBenefitApplications();
+    }
+
+    private static String resolveLineKey(OrderLineCommand line, int index) {
+        return line.getLineKey() == null ? "legacy-" + (index + 1) : line.getLineKey();
     }
 
     private static boolean isPlace(OrderOperation operation) {
@@ -450,6 +735,7 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         value.put("expected_version", command.getExpectedVersion()); value.put("buyer_id", command.getBuyerId());
         value.put("items", command.getItems()); value.put("shipping", command.getShippingAmountMinor());
         value.put("discount", command.getDiscountAmountMinor()); value.put("currency", command.getCurrencyCode());
+        value.put("benefit_applications", command.getBenefitApplications());
         value.put("reservations", command.getReservationReferences()); value.put("payment_id", command.getPaymentId());
         value.put("fulfillment_id", command.getFulfillmentId()); value.put("shipment_id", command.getShipmentId());
         value.put("refund_id", command.getRefundId()); value.put("reason", command.getReason());
@@ -471,9 +757,20 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         require(value != null && !value.isBlank() && value.length() <= maxLength, field + " is required");
     }
 
+    private static void requireCode(String value, String field, int maxLength) {
+        requireText(value, field, maxLength);
+        require(value.matches("[A-Z][A-Z0-9_]*"), field + " must be an uppercase code");
+    }
+
     private static void require(boolean condition, String message) {
         if (!condition) throw new IllegalArgumentException(message);
     }
 
     private record Transition(String expectedStatus, String nextStatus) {}
+
+    private record BenefitEventFact(OrderBenefitApplicationDO application,
+                                    List<BenefitAllocationEventFact> allocations) {}
+
+    private record BenefitAllocationEventFact(OrderBenefitAllocationDO allocation,
+                                              List<OrderBenefitFundingDO> funding) {}
 }

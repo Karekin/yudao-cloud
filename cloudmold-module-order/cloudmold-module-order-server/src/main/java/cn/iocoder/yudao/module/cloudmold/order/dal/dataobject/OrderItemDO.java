@@ -15,10 +15,13 @@ public class OrderItemDO {
     private String orderItemId;
     private Long tenantId;
     private String orderId;
+    private String lineKey;
     private String canonicalSkuId;
     private BigDecimal quantity;
     private Long unitPriceMinor;
     private Long lineAmountMinor;
+    private Long discountAmountMinor;
+    private Long netAmountMinor;
     private String reservationId;
     private String listingId;
     private String listingOfferId;
