@@ -374,3 +374,111 @@ JOIN cloudmold_order_benefit_migration_run run
   ON run.tenant_id=item.tenant_id AND BINARY run.migration_run_id=BINARY item.migration_run_id
 WHERE run.policy_version='legacy-trade-benefit-v4'
   AND (item.legacy_buyer_id IS NULL OR item.legacy_buyer_id<>candidate.legacy_buyer_id);
+
+SELECT 'legacy_trade_target_mapping_registry_shape' AS check_name, COUNT(*) AS violation_count
+FROM (
+  SELECT mapping_id,tenant_id,source_system,source_type,source_id,status,version,
+         source_snapshot_hash,qualification_ref,qualified_by
+  FROM cloudmold_catalog_migration_source_mapping
+  UNION ALL
+  SELECT mapping_plan_id,tenant_id,source_system,source_type,source_id,status,version,
+         source_snapshot_hash,qualification_ref,qualified_by
+  FROM cloudmold_order_migration_mapping_plan
+) mapping
+WHERE mapping.status NOT IN ('QUALIFIED','REVOKED') OR mapping.version<1
+   OR mapping.source_snapshot_hash NOT REGEXP '^[0-9a-f]{64}$'
+   OR mapping.source_system<>UPPER(TRIM(mapping.source_system))
+   OR mapping.source_id<>TRIM(mapping.source_id)
+   OR CHAR_LENGTH(TRIM(mapping.qualification_ref))=0 OR CHAR_LENGTH(TRIM(mapping.qualified_by))=0;
+
+SELECT 'legacy_trade_target_readiness_run_denominator_mismatch' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_target_readiness_run run
+LEFT JOIN (
+  SELECT tenant_id,target_readiness_run_id,COUNT(*) source_order_count,
+         SUM(mapping_readiness_status<>'EXCLUDED') active_order_count,
+         SUM(mapping_readiness_status='EXCLUDED') excluded_order_count,
+         SUM(buyer_identity_status='RESOLVED' AND mapping_readiness_status<>'EXCLUDED') buyer_resolved_count,
+         SUM(order_mapping_status='QUALIFIED' AND mapping_readiness_status<>'EXCLUDED') order_mapping_count,
+         SUM(lifecycle_mapping_status='QUALIFIED' AND mapping_readiness_status<>'EXCLUDED') lifecycle_mapping_count,
+         SUM(mapping_admission_allowed=1) admitted_order_count
+  FROM cloudmold_order_target_readiness_order GROUP BY tenant_id,target_readiness_run_id
+) orders ON orders.tenant_id=run.tenant_id
+ AND BINARY orders.target_readiness_run_id=BINARY run.target_readiness_run_id
+LEFT JOIN (
+  SELECT tenant_id,target_readiness_run_id,COUNT(*) source_item_count,
+         SUM(mapping_readiness_status<>'EXCLUDED') active_item_count,
+         SUM(mapping_readiness_status='EXCLUDED') excluded_item_count,
+         SUM(mapping_readiness_status='READY') fully_mapped_item_count
+  FROM cloudmold_order_target_readiness_item GROUP BY tenant_id,target_readiness_run_id
+) items ON items.tenant_id=run.tenant_id
+ AND BINARY items.target_readiness_run_id=BINARY run.target_readiness_run_id
+WHERE orders.target_readiness_run_id IS NULL OR items.target_readiness_run_id IS NULL
+   OR run.source_order_count<>orders.source_order_count
+   OR run.active_order_count<>orders.active_order_count
+   OR run.excluded_order_count<>orders.excluded_order_count
+   OR run.source_item_count<>items.source_item_count
+   OR run.active_item_count<>items.active_item_count
+   OR run.excluded_item_count<>items.excluded_item_count
+   OR run.buyer_resolved_order_count<>orders.buyer_resolved_count
+   OR run.order_mapping_qualified_count<>orders.order_mapping_count
+   OR run.lifecycle_mapping_qualified_count<>orders.lifecycle_mapping_count
+   OR run.fully_mapped_item_count<>items.fully_mapped_item_count
+   OR run.mapping_admitted_order_count<>orders.admitted_order_count
+   OR run.mapping_blocked_order_count<>run.active_order_count-run.mapping_admitted_order_count;
+
+SELECT 'legacy_trade_target_readiness_order_shape' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_target_readiness_order readiness
+WHERE readiness.evidence_hash NOT REGEXP '^[0-9a-f]{64}$' OR JSON_TYPE(readiness.blocker_codes)<>'ARRAY'
+   OR readiness.canonical_import_allowed<>0 OR readiness.version<>1
+   OR (readiness.mapping_readiness_status='READY'
+       AND (readiness.mapping_admission_allowed<>1 OR JSON_LENGTH(readiness.blocker_codes)<>0
+         OR readiness.buyer_identity_status<>'RESOLVED' OR readiness.order_mapping_status<>'QUALIFIED'
+         OR readiness.lifecycle_mapping_status<>'QUALIFIED'
+         OR readiness.money_reconciliation_status<>'EXACT'
+         OR readiness.active_item_count=0
+         OR readiness.active_item_count<>readiness.fully_mapped_item_count))
+   OR (readiness.mapping_readiness_status<>'READY' AND readiness.mapping_admission_allowed<>0);
+
+SELECT 'legacy_trade_target_readiness_item_shape' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_target_readiness_item readiness
+LEFT JOIN cloudmold_catalog_sku sku
+  ON sku.tenant_id=readiness.tenant_id AND BINARY sku.sku_id=BINARY readiness.canonical_sku_id
+WHERE readiness.evidence_hash NOT REGEXP '^[0-9a-f]{64}$' OR JSON_TYPE(readiness.blocker_codes)<>'ARRAY'
+   OR readiness.canonical_import_allowed<>0 OR readiness.version<>1
+   OR (readiness.mapping_readiness_status='READY'
+       AND (readiness.mapping_admission_allowed<>1 OR JSON_LENGTH(readiness.blocker_codes)<>0
+         OR readiness.spu_mapping_status<>'QUALIFIED' OR readiness.sku_mapping_status<>'QUALIFIED'
+         OR readiness.order_item_mapping_status<>'QUALIFIED'
+         OR readiness.money_reconciliation_status<>'EXACT'
+         OR sku.sku_id IS NULL OR BINARY sku.spu_id<>BINARY readiness.canonical_spu_id))
+   OR (readiness.mapping_readiness_status<>'READY' AND readiness.mapping_admission_allowed<>0);
+
+SELECT 'legacy_trade_target_readiness_illegally_open' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_target_readiness_run run
+WHERE run.status<>'BLOCKED_REQUIRES_EXPLICIT_TARGET_MAPPINGS'
+   OR run.canonical_import_allowed_order_count<>0 OR run.production_migration_enabled<>0;
+
+SELECT 'legacy_trade_target_readiness_event_mismatch' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_target_readiness_order readiness
+LEFT JOIN cloudmold_event_outbox event
+  ON event.tenant_id=readiness.tenant_id
+ AND event.event_type='order.migration.legacy_trade_target_readiness_assessed'
+ AND event.aggregate_type='legacy_trade_target_readiness'
+ AND BINARY event.aggregate_id=BINARY readiness.order_readiness_id
+ AND event.aggregate_version=readiness.version
+WHERE event.event_id IS NULL OR event.schema_version<>1
+   OR BINARY JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.target_readiness_run_id'))
+        <>BINARY readiness.target_readiness_run_id
+   OR CAST(JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.legacy_order_id')) AS UNSIGNED)
+        <>readiness.legacy_order_id
+   OR BINARY JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.evidence_hash'))<>BINARY readiness.evidence_hash
+   OR BINARY JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.mapping_readiness_status'))
+        <>BINARY readiness.mapping_readiness_status
+   OR JSON_EXTRACT(event.payload,'$.mapping_admission_allowed')
+        <>CAST(IF(readiness.mapping_admission_allowed=1,'true','false') AS JSON)
+   OR JSON_EXTRACT(event.payload,'$.canonical_import_allowed')<>CAST('false' AS JSON)
+   OR JSON_LENGTH(JSON_EXTRACT(event.payload,'$.items'))<>(
+     SELECT COUNT(*) FROM cloudmold_order_target_readiness_item item
+     WHERE item.tenant_id=readiness.tenant_id
+       AND BINARY item.target_readiness_run_id=BINARY readiness.target_readiness_run_id
+       AND BINARY item.order_readiness_id=BINARY readiness.order_readiness_id);
