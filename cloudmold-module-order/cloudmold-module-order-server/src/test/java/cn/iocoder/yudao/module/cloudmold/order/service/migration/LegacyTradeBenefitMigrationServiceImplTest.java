@@ -197,6 +197,34 @@ class LegacyTradeBenefitMigrationServiceImplTest {
     }
 
     @Test
+    void readsDeterministicItemComponentReconciliationWithoutOpeningImport() {
+        when(mapper.selectComponentReconciliations(1L, RUN)).thenReturn(List.of(
+                new LegacyTradeBenefitComponentReconciliationDO()
+                        .setReconciliationId("a".repeat(64)).setTenantId(1L).setMigrationRunId(RUN)
+                        .setCandidateId("38000000-0000-4000-8000-000000000003")
+                        .setLegacyOrderId(31L).setLegacyOrderNo("T31").setComponentType("VIP")
+                        .setSourceItemComponentRowCount(1).setSourceItemComponentAmountMinor(106L)
+                        .setItemComponentRowCount(1).setItemComponentAmountMinor(106L)
+                        .setExcludedItemComponentRowCount(0).setExcludedItemComponentAmountMinor(0L)
+                        .setHeaderComponentCount(1).setHeaderComponentAmountMinor(100L)
+                        .setAmountGapMinor(6L).setOrderAssessmentStatus("QUARANTINED_HEADER_ITEM")
+                        .setReconciliationStatus("AMOUNT_MISMATCH").setReconciliationHash("b".repeat(64))
+                        .setCanonicalImportAllowed(false)));
+
+        assertThat(service.listComponentReconciliations(RUN)).singleElement().satisfies(value -> {
+            assertThat(value.getLegacyOrderId()).isEqualTo(31L);
+            assertThat(value.getComponentType()).isEqualTo("VIP");
+            assertThat(value.getSourceItemComponentRowCount()).isEqualTo(1);
+            assertThat(value.getItemComponentAmountMinor()).isEqualTo(106L);
+            assertThat(value.getExcludedItemComponentRowCount()).isZero();
+            assertThat(value.getHeaderComponentAmountMinor()).isEqualTo(100L);
+            assertThat(value.getAmountGapMinor()).isEqualTo(6L);
+            assertThat(value.getReconciliationStatus()).isEqualTo("AMOUNT_MISMATCH");
+            assertThat(value.getCanonicalImportAllowed()).isFalse();
+        });
+    }
+
+    @Test
     void snapshotHashChangesWithMoneyOrBenefitIdentityEvidence() {
         LegacyTradeOrderAssessmentSourceDO source = source(40L, 100, 0, 0, 0);
         String baseline = LegacyTradeBenefitMigrationServiceImpl.sourceSnapshotHash(source);

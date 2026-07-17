@@ -199,6 +199,17 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
         return rows.stream().map(LegacyTradeBenefitMigrationServiceImpl::toItemView).toList();
     }
 
+    @Override
+    public List<LegacyTradeBenefitComponentReconciliationView> listComponentReconciliations(
+            String migrationRunId) {
+        String runId = requireUuid(migrationRunId, "migrationRunId");
+        List<LegacyTradeBenefitComponentReconciliationDO> rows = mapper.selectComponentReconciliations(
+                TenantContextHolder.getRequiredTenantId(), runId);
+        require(rows != null && !rows.isEmpty(),
+                "legacy Trade item-component reconciliation evidence does not exist");
+        return rows.stream().map(LegacyTradeBenefitMigrationServiceImpl::toComponentReconciliationView).toList();
+    }
+
     static LegacyTradeBenefitMigrationCandidateDO assessCandidate(Long tenantId, String runId,
                                                                    LegacyTradeOrderAssessmentSourceDO source,
                                                                    LocalDateTime now) {
@@ -521,6 +532,28 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
                 .setUsedPointQuantity(value.getUsedPointQuantity())
                 .setCanonicalImportAllowed(value.getCanonicalImportAllowed())
                 .setSourceUpdatedAt(value.getSourceUpdatedAt().toInstant(ZoneOffset.UTC));
+    }
+
+    private static LegacyTradeBenefitComponentReconciliationView toComponentReconciliationView(
+            LegacyTradeBenefitComponentReconciliationDO value) {
+        return new LegacyTradeBenefitComponentReconciliationView()
+                .setReconciliationId(value.getReconciliationId())
+                .setMigrationRunId(value.getMigrationRunId()).setCandidateId(value.getCandidateId())
+                .setLegacyOrderId(value.getLegacyOrderId()).setLegacyOrderNo(value.getLegacyOrderNo())
+                .setComponentType(value.getComponentType())
+                .setSourceItemComponentRowCount(value.getSourceItemComponentRowCount())
+                .setSourceItemComponentAmountMinor(value.getSourceItemComponentAmountMinor())
+                .setItemComponentRowCount(value.getItemComponentRowCount())
+                .setItemComponentAmountMinor(value.getItemComponentAmountMinor())
+                .setExcludedItemComponentRowCount(value.getExcludedItemComponentRowCount())
+                .setExcludedItemComponentAmountMinor(value.getExcludedItemComponentAmountMinor())
+                .setHeaderComponentCount(value.getHeaderComponentCount())
+                .setHeaderComponentAmountMinor(value.getHeaderComponentAmountMinor())
+                .setAmountGapMinor(value.getAmountGapMinor())
+                .setOrderAssessmentStatus(value.getOrderAssessmentStatus())
+                .setReconciliationStatus(value.getReconciliationStatus())
+                .setReconciliationHash(value.getReconciliationHash())
+                .setCanonicalImportAllowed(value.getCanonicalImportAllowed());
     }
 
     static String sourceSnapshotHash(LegacyTradeOrderAssessmentSourceDO source) {

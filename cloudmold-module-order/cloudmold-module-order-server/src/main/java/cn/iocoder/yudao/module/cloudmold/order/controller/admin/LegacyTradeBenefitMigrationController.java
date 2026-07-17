@@ -55,4 +55,12 @@ public class LegacyTradeBenefitMigrationController {
     public CommonResult<List<LegacyTradeBenefitItemView>> listItems(@PathVariable String migrationRunId) {
         return success(migrationApi.listItems(migrationRunId));
     }
+
+    @GetMapping("/{migrationRunId}/component-reconciliations")
+    @Operation(summary = "Compare exact legacy Trade item benefit components with Order-header components")
+    @PreAuthorize("@ss.hasPermission('cloudmold:order:migration-query')")
+    public CommonResult<List<LegacyTradeBenefitComponentReconciliationView>> listComponentReconciliations(
+            @PathVariable String migrationRunId) {
+        return success(migrationApi.listComponentReconciliations(migrationRunId));
+    }
 }

@@ -212,4 +212,12 @@ public interface LegacyTradeBenefitMigrationMapper {
             """)
     List<LegacyTradeBenefitMigrationItemDO> selectItems(@Param("tenantId") Long tenantId,
                                                          @Param("runId") String runId);
+
+    @Select("""
+            SELECT * FROM cloudmold_order_benefit_migration_component_reconciliation
+            WHERE tenant_id=#{tenantId} AND migration_run_id=#{runId}
+            ORDER BY legacy_order_id,component_type
+            """)
+    List<LegacyTradeBenefitComponentReconciliationDO> selectComponentReconciliations(
+            @Param("tenantId") Long tenantId, @Param("runId") String runId);
 }

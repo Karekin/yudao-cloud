@@ -254,3 +254,67 @@ WHERE run.policy_version='legacy-trade-benefit-v3'
           OR event_item.legacy_order_item_id<>item.legacy_order_item_id
           OR BINARY event_item.legacy_item_snapshot_hash<>BINARY item.legacy_item_snapshot_hash
           OR event_item.canonical_import_allowed<>0)));
+
+SELECT 'legacy_trade_benefit_item_component_reconciliation_shape' AS check_name,
+       COUNT(*) AS violation_count
+FROM cloudmold_order_benefit_migration_component_reconciliation
+WHERE reconciliation_id NOT REGEXP '^[0-9a-f]{64}$'
+   OR reconciliation_hash NOT REGEXP '^[0-9a-f]{64}$'
+   OR component_type NOT IN ('GENERIC_DISCOUNT','COUPON','POINT','VIP')
+   OR source_item_component_row_count<0 OR item_component_row_count<0
+   OR excluded_item_component_row_count<0
+   OR source_item_component_row_count<>item_component_row_count+excluded_item_component_row_count
+   OR source_item_component_amount_minor
+        <>item_component_amount_minor+excluded_item_component_amount_minor
+   OR header_component_count NOT IN (0,1)
+   OR reconciliation_status NOT IN ('MATCHED','MISSING_ITEM_COMPONENT','MISSING_HEADER_COMPONENT',
+                                     'AMOUNT_MISMATCH','EXCLUDED_SOURCE_ORDER_DELETED',
+                                     'EXCLUDED_SOURCE_ITEM_DELETED')
+   OR canonical_import_allowed<>0;
+
+SELECT 'legacy_trade_benefit_item_component_reconciliation_missing' AS check_name,
+       COUNT(*) AS violation_count
+FROM (
+  SELECT expected.tenant_id,expected.migration_run_id,expected.candidate_id,expected.component_type
+  FROM (
+    SELECT tenant_id,migration_run_id,candidate_id,'GENERIC_DISCOUNT' component_type
+    FROM cloudmold_order_benefit_migration_item WHERE generic_discount_amount_minor<>0
+    UNION SELECT tenant_id,migration_run_id,candidate_id,'COUPON'
+    FROM cloudmold_order_benefit_migration_item WHERE coupon_amount_minor<>0
+    UNION SELECT tenant_id,migration_run_id,candidate_id,'POINT'
+    FROM cloudmold_order_benefit_migration_item WHERE point_amount_minor<>0
+    UNION SELECT tenant_id,migration_run_id,candidate_id,'VIP'
+    FROM cloudmold_order_benefit_migration_item WHERE vip_amount_minor<>0
+    UNION SELECT tenant_id,migration_run_id,candidate_id,component_type
+    FROM cloudmold_order_benefit_migration_component
+  ) expected
+  JOIN cloudmold_order_benefit_migration_run run
+    ON run.tenant_id=expected.tenant_id
+   AND BINARY run.migration_run_id=BINARY expected.migration_run_id
+   AND run.policy_version='legacy-trade-benefit-v3'
+  LEFT JOIN cloudmold_order_benefit_migration_component_reconciliation actual
+    ON actual.tenant_id=expected.tenant_id
+   AND BINARY actual.migration_run_id=BINARY expected.migration_run_id
+   AND BINARY actual.candidate_id=BINARY expected.candidate_id
+   AND BINARY actual.component_type=BINARY expected.component_type
+  WHERE actual.reconciliation_id IS NULL
+) missing;
+
+SELECT 'legacy_trade_benefit_unquarantined_item_component_difference' AS check_name,
+       COUNT(*) AS violation_count
+FROM cloudmold_order_benefit_migration_component_reconciliation
+WHERE reconciliation_status NOT IN ('MATCHED','EXCLUDED_SOURCE_ORDER_DELETED',
+                                     'EXCLUDED_SOURCE_ITEM_DELETED')
+  AND order_assessment_status NOT LIKE 'QUARANTINED_%';
+
+SELECT 'legacy_trade_benefit_item_component_gap_mismatch' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_benefit_migration_run run
+LEFT JOIN (
+  SELECT tenant_id,migration_run_id,SUM(amount_gap_minor) amount_gap_minor
+  FROM cloudmold_order_benefit_migration_component_reconciliation
+  WHERE reconciliation_status<>'EXCLUDED_SOURCE_ORDER_DELETED'
+  GROUP BY tenant_id,migration_run_id
+) gap ON gap.tenant_id=run.tenant_id AND BINARY gap.migration_run_id=BINARY run.migration_run_id
+WHERE run.policy_version='legacy-trade-benefit-v3'
+  AND COALESCE(gap.amount_gap_minor,0)
+      <>run.item_evidence_benefit_amount_minor-run.component_amount_minor;
