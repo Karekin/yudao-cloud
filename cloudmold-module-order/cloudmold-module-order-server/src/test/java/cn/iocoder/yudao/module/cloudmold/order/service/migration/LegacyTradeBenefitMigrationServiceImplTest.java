@@ -36,6 +36,7 @@ class LegacyTradeBenefitMigrationServiceImplTest {
     private final AtomicReference<LegacyTradeBenefitMigrationRunDO> savedRun = new AtomicReference<>();
     private final List<LegacyTradeBenefitMigrationCandidateDO> savedCandidates = new ArrayList<>();
     private final List<LegacyTradeBenefitMigrationComponentDO> savedComponents = new ArrayList<>();
+    private final List<LegacyTradeBenefitMigrationItemDO> savedItems = new ArrayList<>();
     private final List<AppendDomainEventCommand> events = new ArrayList<>();
     private LegacyTradeBenefitMigrationOperationDO operation;
 
@@ -64,6 +65,8 @@ class LegacyTradeBenefitMigrationServiceImplTest {
                 .when(mapper).insertCandidate(any());
         doAnswer(invocation -> { savedComponents.add(invocation.getArgument(0)); return 1; })
                 .when(mapper).insertComponent(any());
+        doAnswer(invocation -> { savedItems.add(invocation.getArgument(0)); return 1; })
+                .when(mapper).insertItem(any());
         doAnswer(invocation -> { events.add(invocation.getArgument(0)); return null; })
                 .when(outboxAppender).append(any());
     }
@@ -83,7 +86,7 @@ class LegacyTradeBenefitMigrationServiceImplTest {
         LegacyTradeOrderAssessmentSourceDO headerItem = source(13L, 10, 0, 0, 0)
                 .setItemGenericDiscountAmountMinor(0L).setItemPayAmountMinor(1_000L);
         LegacyTradeOrderAssessmentSourceDO deleted = source(14L, 10, 0, 0, 0).setDeleted(true);
-        when(mapper.selectSourceOrders(1L)).thenReturn(List.of(noBenefit, pending, negative, headerItem, deleted));
+        whenSourceRows(List.of(noBenefit, pending, negative, headerItem, deleted));
 
         LegacyTradeBenefitAssessmentResult result = service.assess(command());
 
@@ -96,6 +99,11 @@ class LegacyTradeBenefitMigrationServiceImplTest {
         assertThat(result.getBenefitComponentCount()).isEqualTo(6);
         assertThat(result.getSourceBenefitAmountMinor()).isEqualTo(100L);
         assertThat(result.getComponentAmountMinor()).isEqualTo(100L);
+        assertThat(result.getSourceItemCount()).isEqualTo(5);
+        assertThat(result.getActiveItemCount()).isEqualTo(4);
+        assertThat(result.getExcludedItemCount()).isEqualTo(1);
+        assertThat(result.getItemEvidenceHash()).matches("[0-9a-f]{64}");
+        assertThat(result.getItemEvidenceComplete()).isTrue();
         assertThat(result.getUnresolvedIdentityCount()).isEqualTo(6);
         assertThat(result.getUnresolvedFundingCount()).isEqualTo(6);
         assertThat(result.getImportAllowedComponentCount()).isZero();
@@ -111,6 +119,11 @@ class LegacyTradeBenefitMigrationServiceImplTest {
             assertThat(component.getFundingResolutionStatus()).isEqualTo("MISSING_NAMED_FUNDER_BREAKDOWN");
             assertThat(component.getCanonicalImportAllowed()).isFalse();
         });
+        assertThat(savedItems).hasSize(5).allSatisfy(item -> {
+            assertThat(item.getLegacyOrderItemId()).isPositive();
+            assertThat(item.getLegacyItemSnapshotHash()).matches("[0-9a-f]{64}");
+            assertThat(item.getCanonicalImportAllowed()).isFalse();
+        });
         assertThat(savedComponents).filteredOn(value -> value.getLegacyOrderId().equals(11L))
                 .extracting(LegacyTradeBenefitMigrationComponentDO::getComponentType,
                         LegacyTradeBenefitMigrationComponentDO::getIdentityResolutionStatus,
@@ -122,9 +135,16 @@ class LegacyTradeBenefitMigrationServiceImplTest {
                         tuple("VIP", "MISSING_BENEFIT_VERSION", null));
         assertThat(events).hasSize(5).allSatisfy(event -> {
             assertThat(event.getEventType()).isEqualTo(LegacyTradeBenefitMigrationServiceImpl.ASSESSMENT_EVENT);
-            assertThat(event.getSchemaVersion()).isEqualTo(1);
+            assertThat(event.getSchemaVersion()).isEqualTo(2);
             assertThat(event.getPayload()).containsEntry("migration_run_id", RUN)
-                    .containsEntry("canonical_import_allowed", false);
+                    .containsEntry("canonical_import_allowed", false)
+                    .containsEntry("item_evidence_complete", true)
+                    .containsEntry("run_source_item_count", 5)
+                    .containsEntry("run_active_item_count", 4)
+                    .containsEntry("run_excluded_item_count", 1)
+                    .containsEntry("run_item_evidence_benefit_amount_minor", 90L);
+            assertThat(event.getPayload().get("run_item_evidence_hash")).asString().matches("[0-9a-f]{64}");
+            assertThat(event.getPayload().get("items")).asList().hasSize(1);
             Long legacyOrderId = (Long) event.getPayload().get("legacy_order_id");
             LegacyTradeBenefitMigrationCandidateDO candidate = savedCandidates.stream()
                     .filter(value -> value.getLegacyOrderId().equals(legacyOrderId)).findFirst().orElseThrow();
@@ -158,7 +178,7 @@ class LegacyTradeBenefitMigrationServiceImplTest {
 
     @Test
     void immutableReplayDoesNotReadSourceOrAppendEvents() {
-        when(mapper.selectSourceOrders(1L)).thenReturn(List.of(source(30L, 100, 0, 0, 0)));
+        whenSourceRows(List.of(source(30L, 100, 0, 0, 0)));
         LegacyTradeBenefitAssessmentCommand command = command();
         LegacyTradeBenefitAssessmentResult first = service.assess(command);
         clearInvocations(mapper, outboxAppender);
@@ -191,8 +211,7 @@ class LegacyTradeBenefitMigrationServiceImplTest {
 
     @Test
     void rejectsIncompleteSourceEvidenceBeforePersistingRun() {
-        when(mapper.selectSourceOrders(1L)).thenReturn(List.of(source(50L, 100, 0, 0, 0)
-                .setItemPayAmountMinor(null)));
+        whenSourceRows(List.of(source(50L, 100, 0, 0, 0).setItemPayAmountMinor(null)));
 
         assertThatThrownBy(() -> service.assess(command())).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("source money evidence is incomplete");
@@ -202,8 +221,7 @@ class LegacyTradeBenefitMigrationServiceImplTest {
 
     @Test
     void rejectsCrossTenantSourceRowsBeforePersistingAssessmentEvidence() {
-        when(mapper.selectSourceOrders(1L)).thenReturn(List.of(source(60L, 100, 0, 0, 0)
-                .setTenantId(2L)));
+        whenSourceRows(List.of(source(60L, 100, 0, 0, 0).setTenantId(2L)));
 
         assertThatThrownBy(() -> service.assess(command())).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("source tenant does not match assessment tenant");
@@ -215,7 +233,7 @@ class LegacyTradeBenefitMigrationServiceImplTest {
 
     private static LegacyTradeBenefitAssessmentCommand command() {
         return new LegacyTradeBenefitAssessmentCommand().setIdempotencyKey("legacy-trade-benefit-assessment-v1")
-                .setMigrationRunId(RUN).setPolicyVersion("legacy-trade-benefit-v2")
+                .setMigrationRunId(RUN).setPolicyVersion("legacy-trade-benefit-v3")
                 .setEvidenceRef("evidence:local-yudao-trade-current")
                 .setCorrelationId(CORRELATION).setOccurredAt(OCCURRED_AT);
     }
@@ -237,5 +255,30 @@ class LegacyTradeBenefitMigrationServiceImplTest {
                 .setItemVipAmountMinor(vip).setItemDeliveryAmountMinor(0L)
                 .setItemAdjustAmountMinor(0L).setItemPayAmountMinor(pay)
                 .setInvalidItemMoneyCount(0);
+    }
+
+    private void whenSourceRows(List<LegacyTradeOrderAssessmentSourceDO> sources) {
+        when(mapper.selectSourceOrders(1L)).thenReturn(sources);
+        List<LegacyTradeOrderItemAssessmentSourceDO> items = new ArrayList<>();
+        for (LegacyTradeOrderAssessmentSourceDO source : sources) {
+            items.add(item(source, source.getLegacyOrderId() * 10));
+        }
+        when(mapper.selectSourceOrderItems(1L)).thenReturn(items);
+    }
+
+    private static LegacyTradeOrderItemAssessmentSourceDO item(LegacyTradeOrderAssessmentSourceDO source,
+                                                                 long itemId) {
+        return new LegacyTradeOrderItemAssessmentSourceDO().setTenantId(source.getTenantId())
+                .setLegacyOrderItemId(itemId).setLegacyOrderId(source.getLegacyOrderId())
+                .setSourceUpdatedAt(source.getSourceUpdatedAt()).setDeleted(false)
+                .setLegacySpuId(100L + itemId).setLegacySkuId(200L + itemId)
+                .setItemQuantity(source.getItemQuantity()).setUnitPriceMinor(source.getItemGrossAmountMinor())
+                .setGrossAmountMinor(source.getItemGrossAmountMinor())
+                .setGenericDiscountAmountMinor(source.getItemGenericDiscountAmountMinor())
+                .setCouponAmountMinor(source.getItemCouponAmountMinor())
+                .setPointAmountMinor(source.getItemPointAmountMinor()).setVipAmountMinor(source.getItemVipAmountMinor())
+                .setDeliveryAmountMinor(source.getItemDeliveryAmountMinor())
+                .setAdjustAmountMinor(source.getItemAdjustAmountMinor()).setPayAmountMinor(source.getItemPayAmountMinor())
+                .setUsedPointQuantity(source.getLegacyUsedPointQuantity() == null ? 0 : source.getLegacyUsedPointQuantity());
     }
 }

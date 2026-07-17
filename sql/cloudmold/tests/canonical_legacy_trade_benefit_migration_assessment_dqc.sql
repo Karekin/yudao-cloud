@@ -160,3 +160,97 @@ WHERE component.tenant_id<>candidate.tenant_id
    OR component.tenant_id<>run.tenant_id
    OR BINARY component.migration_run_id<>BINARY candidate.migration_run_id
    OR component.legacy_order_id<>candidate.legacy_order_id;
+
+SELECT 'legacy_trade_benefit_item_denominator_mismatch' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_benefit_migration_run run
+LEFT JOIN (
+  SELECT item.tenant_id,item.migration_run_id,COUNT(*) source_item_count,
+         SUM(item.is_deleted=0 AND candidate.is_deleted=0) active_item_count,
+         SUM(item.is_deleted=1 OR candidate.is_deleted=1) excluded_item_count,
+         SUM(CASE WHEN item.is_deleted=0 AND candidate.is_deleted=0
+             THEN item.generic_discount_amount_minor+item.coupon_amount_minor
+                 +item.point_amount_minor+item.vip_amount_minor ELSE 0 END) item_benefit_amount_minor
+  FROM cloudmold_order_benefit_migration_item item
+  JOIN cloudmold_order_benefit_migration_candidate candidate
+    ON candidate.tenant_id=item.tenant_id
+   AND BINARY candidate.migration_run_id=BINARY item.migration_run_id
+   AND BINARY candidate.candidate_id=BINARY item.candidate_id
+  GROUP BY item.tenant_id,item.migration_run_id
+) item_rollup ON item_rollup.tenant_id=run.tenant_id
+ AND BINARY item_rollup.migration_run_id=BINARY run.migration_run_id
+WHERE (run.policy_version IN ('legacy-trade-benefit-v1','legacy-trade-benefit-v2')
+       AND run.item_evidence_complete<>0)
+   OR (run.policy_version='legacy-trade-benefit-v3' AND (
+       run.item_evidence_complete<>1 OR item_rollup.migration_run_id IS NULL
+       OR run.source_item_count<>item_rollup.source_item_count
+       OR run.active_item_count<>item_rollup.active_item_count
+       OR run.excluded_item_count<>item_rollup.excluded_item_count
+       OR run.item_evidence_benefit_amount_minor<>item_rollup.item_benefit_amount_minor));
+
+SELECT 'legacy_trade_benefit_item_rollup_mismatch' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_benefit_migration_candidate candidate
+LEFT JOIN (
+  SELECT tenant_id,migration_run_id,candidate_id,COUNT(*) item_row_count,SUM(item_quantity) item_quantity,
+         SUM(gross_amount_minor) gross_amount_minor,
+         SUM(generic_discount_amount_minor) generic_discount_amount_minor,
+         SUM(coupon_amount_minor) coupon_amount_minor,SUM(point_amount_minor) point_amount_minor,
+         SUM(vip_amount_minor) vip_amount_minor,SUM(delivery_amount_minor) delivery_amount_minor,
+         SUM(adjust_amount_minor) adjust_amount_minor,SUM(pay_amount_minor) pay_amount_minor
+  FROM cloudmold_order_benefit_migration_item WHERE is_deleted=0
+  GROUP BY tenant_id,migration_run_id,candidate_id
+) item_rollup ON item_rollup.tenant_id=candidate.tenant_id
+ AND BINARY item_rollup.migration_run_id=BINARY candidate.migration_run_id
+ AND BINARY item_rollup.candidate_id=BINARY candidate.candidate_id
+JOIN cloudmold_order_benefit_migration_run run
+  ON run.tenant_id=candidate.tenant_id AND BINARY run.migration_run_id=BINARY candidate.migration_run_id
+WHERE run.policy_version='legacy-trade-benefit-v3'
+  AND (candidate.item_row_count<>COALESCE(item_rollup.item_row_count,0)
+    OR candidate.item_quantity<>COALESCE(item_rollup.item_quantity,0)
+    OR candidate.item_gross_amount_minor<>COALESCE(item_rollup.gross_amount_minor,0)
+    OR candidate.item_generic_discount_amount_minor<>COALESCE(item_rollup.generic_discount_amount_minor,0)
+    OR candidate.item_coupon_amount_minor<>COALESCE(item_rollup.coupon_amount_minor,0)
+    OR candidate.item_point_amount_minor<>COALESCE(item_rollup.point_amount_minor,0)
+    OR candidate.item_vip_amount_minor<>COALESCE(item_rollup.vip_amount_minor,0)
+    OR candidate.item_delivery_amount_minor<>COALESCE(item_rollup.delivery_amount_minor,0)
+    OR candidate.item_adjust_amount_minor<>COALESCE(item_rollup.adjust_amount_minor,0)
+    OR candidate.item_pay_amount_minor<>COALESCE(item_rollup.pay_amount_minor,0));
+
+SELECT 'legacy_trade_benefit_item_governance_open' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_benefit_migration_item
+WHERE canonical_import_allowed<>0 OR version<>1
+   OR legacy_item_snapshot_hash NOT REGEXP '^[0-9a-f]{64}$'
+   OR source_product_identity_status NOT IN ('SOURCE_IDS_PRESENT','MISSING_SOURCE_IDS')
+   OR (source_product_identity_status='SOURCE_IDS_PRESENT'
+       AND (legacy_spu_id IS NULL OR legacy_spu_id<=0 OR legacy_sku_id IS NULL OR legacy_sku_id<=0));
+
+SELECT 'legacy_trade_benefit_item_event_mismatch' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_benefit_migration_candidate candidate
+JOIN cloudmold_order_benefit_migration_run run
+  ON run.tenant_id=candidate.tenant_id AND BINARY run.migration_run_id=BINARY candidate.migration_run_id
+JOIN cloudmold_event_outbox event
+  ON event.tenant_id=candidate.tenant_id
+ AND event.event_type='order.migration.legacy_trade_benefit_assessed'
+ AND BINARY event.aggregate_id=BINARY candidate.candidate_id
+WHERE run.policy_version='legacy-trade-benefit-v3'
+  AND (event.schema_version<>2
+    OR JSON_EXTRACT(event.payload,'$.item_evidence_complete')<>CAST('true' AS JSON)
+    OR JSON_LENGTH(JSON_EXTRACT(event.payload,'$.items'))<>(
+      SELECT COUNT(*) FROM cloudmold_order_benefit_migration_item item
+      WHERE item.tenant_id=candidate.tenant_id
+        AND BINARY item.migration_run_id=BINARY candidate.migration_run_id
+        AND BINARY item.candidate_id=BINARY candidate.candidate_id)
+    OR EXISTS (
+      SELECT 1 FROM cloudmold_order_benefit_migration_item item
+      LEFT JOIN JSON_TABLE(event.payload,'$.items[*]' COLUMNS (
+        item_evidence_id varchar(36) PATH '$.item_evidence_id',
+        legacy_order_item_id bigint PATH '$.legacy_order_item_id',
+        legacy_item_snapshot_hash char(64) PATH '$.legacy_item_snapshot_hash',
+        canonical_import_allowed tinyint PATH '$.canonical_import_allowed'
+      )) event_item ON BINARY event_item.item_evidence_id=BINARY item.item_evidence_id
+      WHERE item.tenant_id=candidate.tenant_id
+        AND BINARY item.migration_run_id=BINARY candidate.migration_run_id
+        AND BINARY item.candidate_id=BINARY candidate.candidate_id
+        AND (event_item.item_evidence_id IS NULL
+          OR event_item.legacy_order_item_id<>item.legacy_order_item_id
+          OR BINARY event_item.legacy_item_snapshot_hash<>BINARY item.legacy_item_snapshot_hash
+          OR event_item.canonical_import_allowed<>0)));

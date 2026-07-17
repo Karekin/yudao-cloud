@@ -48,4 +48,11 @@ public class LegacyTradeBenefitMigrationController {
     public CommonResult<List<LegacyTradeBenefitComponentView>> listComponents(@PathVariable String migrationRunId) {
         return success(migrationApi.listComponents(migrationRunId));
     }
+
+    @GetMapping("/{migrationRunId}/items")
+    @Operation(summary = "Read the immutable legacy Trade Order Item denominator for exact mapping review")
+    @PreAuthorize("@ss.hasPermission('cloudmold:order:migration-query')")
+    public CommonResult<List<LegacyTradeBenefitItemView>> listItems(@PathVariable String migrationRunId) {
+        return success(migrationApi.listItems(migrationRunId));
+    }
 }

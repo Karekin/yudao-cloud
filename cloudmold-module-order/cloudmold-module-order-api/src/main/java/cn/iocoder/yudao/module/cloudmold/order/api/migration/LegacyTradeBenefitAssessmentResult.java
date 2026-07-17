@@ -16,6 +16,12 @@ public class LegacyTradeBenefitAssessmentResult {
     private Integer benefitComponentCount;
     private Long sourceBenefitAmountMinor;
     private Long componentAmountMinor;
+    private Integer sourceItemCount;
+    private Integer activeItemCount;
+    private Integer excludedItemCount;
+    private String itemEvidenceHash;
+    private Long itemEvidenceBenefitAmountMinor;
+    private Boolean itemEvidenceComplete;
     private Integer unresolvedIdentityCount;
     private Integer unresolvedFundingCount;
     private Integer importAllowedComponentCount;

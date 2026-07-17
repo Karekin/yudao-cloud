@@ -60,6 +60,22 @@ public interface LegacyTradeBenefitMigrationMapper {
             """)
     List<LegacyTradeOrderAssessmentSourceDO> selectSourceOrders(@Param("tenantId") Long tenantId);
 
+    @Select("""
+            SELECT tenant_id,id legacy_order_item_id,order_id legacy_order_id,update_time source_updated_at,
+                   deleted,spu_id legacy_spu_id,sku_id legacy_sku_id,`count` item_quantity,
+                   CAST(price AS SIGNED) unit_price_minor,CAST(price*`count` AS SIGNED) gross_amount_minor,
+                   CAST(discount_price AS SIGNED) generic_discount_amount_minor,
+                   CAST(coupon_price AS SIGNED) coupon_amount_minor,
+                   CAST(point_price AS SIGNED) point_amount_minor,CAST(vip_price AS SIGNED) vip_amount_minor,
+                   CAST(delivery_price AS SIGNED) delivery_amount_minor,
+                   CAST(adjust_price AS SIGNED) adjust_amount_minor,CAST(pay_price AS SIGNED) pay_amount_minor,
+                   CAST(COALESCE(use_point,0) AS SIGNED) used_point_quantity
+            FROM trade_order_item
+            WHERE tenant_id=#{tenantId}
+            ORDER BY order_id,id
+            """)
+    List<LegacyTradeOrderItemAssessmentSourceDO> selectSourceOrderItems(@Param("tenantId") Long tenantId);
+
     @Insert("""
             INSERT INTO cloudmold_order_benefit_migration_operation
               (tenant_id,idempotency_key,source_event_id,command_type,request_hash,attempt_token,status,created_at,updated_at)
@@ -101,6 +117,8 @@ public interface LegacyTradeBenefitMigrationMapper {
                source_watermark,source_order_count,non_deleted_order_count,deleted_excluded_count,
                no_benefit_order_count,benefit_evidence_pending_order_count,quarantined_order_count,
                benefit_component_count,source_benefit_amount_minor,component_amount_minor,
+               source_item_count,active_item_count,excluded_item_count,item_evidence_hash,
+               item_evidence_benefit_amount_minor,item_evidence_complete,
                unresolved_identity_count,unresolved_funding_count,import_allowed_component_count,
                production_migration_enabled,status,version,assessed_at,created_at,updated_at)
             VALUES
@@ -108,6 +126,8 @@ public interface LegacyTradeBenefitMigrationMapper {
                #{sourceWatermark},#{sourceOrderCount},#{nonDeletedOrderCount},#{deletedExcludedCount},
                #{noBenefitOrderCount},#{benefitEvidencePendingOrderCount},#{quarantinedOrderCount},
                #{benefitComponentCount},#{sourceBenefitAmountMinor},#{componentAmountMinor},
+               #{sourceItemCount},#{activeItemCount},#{excludedItemCount},#{itemEvidenceHash},
+               #{itemEvidenceBenefitAmountMinor},#{itemEvidenceComplete},
                #{unresolvedIdentityCount},#{unresolvedFundingCount},#{importAllowedComponentCount},
                #{productionMigrationEnabled},#{status},#{version},#{assessedAt},#{createdAt},#{updatedAt})
             """)
@@ -150,6 +170,24 @@ public interface LegacyTradeBenefitMigrationMapper {
             """)
     int insertComponent(LegacyTradeBenefitMigrationComponentDO value);
 
+    @Insert("""
+            INSERT INTO cloudmold_order_benefit_migration_item
+              (item_evidence_id,tenant_id,migration_run_id,candidate_id,legacy_order_id,legacy_order_item_id,
+               legacy_item_snapshot_hash,source_updated_at,is_deleted,legacy_spu_id,legacy_sku_id,
+               source_product_identity_status,item_quantity,unit_price_minor,gross_amount_minor,
+               generic_discount_amount_minor,coupon_amount_minor,point_amount_minor,vip_amount_minor,
+               delivery_amount_minor,adjust_amount_minor,pay_amount_minor,used_point_quantity,
+               canonical_import_allowed,version,created_at,updated_at)
+            VALUES
+              (#{itemEvidenceId},#{tenantId},#{migrationRunId},#{candidateId},#{legacyOrderId},#{legacyOrderItemId},
+               #{legacyItemSnapshotHash},#{sourceUpdatedAt},#{deleted},#{legacySpuId},#{legacySkuId},
+               #{sourceProductIdentityStatus},#{itemQuantity},#{unitPriceMinor},#{grossAmountMinor},
+               #{genericDiscountAmountMinor},#{couponAmountMinor},#{pointAmountMinor},#{vipAmountMinor},
+               #{deliveryAmountMinor},#{adjustAmountMinor},#{payAmountMinor},#{usedPointQuantity},
+               #{canonicalImportAllowed},#{version},#{createdAt},#{updatedAt})
+            """)
+    int insertItem(LegacyTradeBenefitMigrationItemDO value);
+
     @Select("SELECT * FROM cloudmold_order_benefit_migration_run WHERE tenant_id=#{tenantId} AND migration_run_id=#{runId}")
     LegacyTradeBenefitMigrationRunDO selectRun(@Param("tenantId") Long tenantId, @Param("runId") String runId);
 
@@ -166,4 +204,12 @@ public interface LegacyTradeBenefitMigrationMapper {
             """)
     List<LegacyTradeBenefitMigrationComponentDO> selectComponents(@Param("tenantId") Long tenantId,
                                                                    @Param("runId") String runId);
+
+    @Select("""
+            SELECT * FROM cloudmold_order_benefit_migration_item
+            WHERE tenant_id=#{tenantId} AND migration_run_id=#{runId}
+            ORDER BY legacy_order_id,legacy_order_item_id
+            """)
+    List<LegacyTradeBenefitMigrationItemDO> selectItems(@Param("tenantId") Long tenantId,
+                                                         @Param("runId") String runId);
 }

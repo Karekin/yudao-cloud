@@ -7,4 +7,5 @@ public interface LegacyTradeBenefitMigrationApi {
     LegacyTradeBenefitAssessmentResult requireRun(String migrationRunId);
     List<LegacyTradeBenefitCandidateView> listCandidates(String migrationRunId);
     List<LegacyTradeBenefitComponentView> listComponents(String migrationRunId);
+    List<LegacyTradeBenefitItemView> listItems(String migrationRunId);
 }
