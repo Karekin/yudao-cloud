@@ -99,6 +99,11 @@
         </dependency>
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-operations-intelligence-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
             <artifactId>cloudmold-module-token-platform-server</artifactId>
             <version>${revision}</version>
         </dependency>

@@ -45,6 +45,7 @@
         <module>cloudmold-module-engagement</module>
         <module>cloudmold-module-customer-service</module>
         <module>cloudmold-module-ai-operations</module>
+        <module>cloudmold-module-operations-intelligence</module>
         <module>cloudmold-module-token-platform</module>
         <module>cloudmold-module-risk</module>
         <module>cloudmold-module-gamification</module>
