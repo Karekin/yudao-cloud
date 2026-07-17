@@ -10,10 +10,14 @@ public class LegacyTradeOrderItemAssessmentSourceDO {
     private Long legacyOrderItemId;
     private Long legacyOrderId;
     private Long legacyBuyerId;
+    private LocalDateTime sourceCreatedAt;
     private LocalDateTime sourceUpdatedAt;
     private Boolean deleted;
     private Long legacySpuId;
+    private String legacySpuName;
     private Long legacySkuId;
+    private String legacySkuPropertiesJson;
+    private String legacySkuPicUrl;
     private Integer itemQuantity;
     private Long unitPriceMinor;
     private Long grossAmountMinor;

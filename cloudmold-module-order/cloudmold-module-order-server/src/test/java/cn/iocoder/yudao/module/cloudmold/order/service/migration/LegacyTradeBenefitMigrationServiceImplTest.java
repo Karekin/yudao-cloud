@@ -104,6 +104,10 @@ class LegacyTradeBenefitMigrationServiceImplTest {
         assertThat(result.getExcludedItemCount()).isEqualTo(1);
         assertThat(result.getItemEvidenceHash()).matches("[0-9a-f]{64}");
         assertThat(result.getItemEvidenceComplete()).isTrue();
+        assertThat(result.getProductSnapshotCapturedItemCount()).isEqualTo(5);
+        assertThat(result.getProductSnapshotIncompleteItemCount()).isZero();
+        assertThat(result.getProductSnapshotEvidenceHash()).matches("[0-9a-f]{64}");
+        assertThat(result.getProductSnapshotEvidenceComplete()).isTrue();
         assertThat(result.getUnresolvedIdentityCount()).isEqualTo(6);
         assertThat(result.getUnresolvedFundingCount()).isEqualTo(6);
         assertThat(result.getImportAllowedComponentCount()).isZero();
@@ -128,6 +132,9 @@ class LegacyTradeBenefitMigrationServiceImplTest {
             assertThat(item.getLegacyOrderItemId()).isPositive();
             assertThat(item.getLegacyBuyerId()).isPositive();
             assertThat(item.getLegacyItemSnapshotHash()).matches("[0-9a-f]{64}");
+            assertThat(item.getHistoricalProductSnapshotHash()).matches("[0-9a-f]{64}");
+            assertThat(item.getProductSnapshotStatus()).isEqualTo("CAPTURED");
+            assertThat(item.getLegacySpuName()).isNotBlank();
             assertThat(item.getCanonicalImportAllowed()).isFalse();
         });
         assertThat(savedComponents).filteredOn(value -> value.getLegacyOrderId().equals(11L))
@@ -141,7 +148,7 @@ class LegacyTradeBenefitMigrationServiceImplTest {
                         tuple("VIP", "MISSING_BENEFIT_VERSION", null));
         assertThat(events).hasSize(5).allSatisfy(event -> {
             assertThat(event.getEventType()).isEqualTo(LegacyTradeBenefitMigrationServiceImpl.ASSESSMENT_EVENT);
-            assertThat(event.getSchemaVersion()).isEqualTo(3);
+            assertThat(event.getSchemaVersion()).isEqualTo(4);
             assertThat(event.getPayload()).containsEntry("migration_run_id", RUN)
                     .containsEntry("buyer_identity_status", "MISSING")
                     .containsEntry("canonical_import_allowed", false)
@@ -149,6 +156,9 @@ class LegacyTradeBenefitMigrationServiceImplTest {
                     .containsEntry("run_source_item_count", 5)
                     .containsEntry("run_active_item_count", 4)
                     .containsEntry("run_excluded_item_count", 1)
+                    .containsEntry("run_product_snapshot_captured_item_count", 5)
+                    .containsEntry("run_product_snapshot_incomplete_item_count", 0)
+                    .containsEntry("run_product_snapshot_evidence_complete", true)
                     .containsEntry("run_item_evidence_benefit_amount_minor", 90L);
             assertThat(event.getPayload().get("run_item_evidence_hash")).asString().matches("[0-9a-f]{64}");
             assertThat(event.getPayload().get("items")).asList().hasSize(1);
@@ -245,6 +255,19 @@ class LegacyTradeBenefitMigrationServiceImplTest {
     }
 
     @Test
+    void historicalProductSnapshotHashChangesWithAcceptedOrderItemProjection() {
+        LegacyTradeOrderItemAssessmentSourceDO source = item(source(41L, 100, 0, 0, 0), 410L);
+        String baseline = LegacyTradeBenefitMigrationServiceImpl.historicalProductSnapshotHash(source);
+        source.setLegacySpuName("changed accepted name");
+        String nameChanged = LegacyTradeBenefitMigrationServiceImpl.historicalProductSnapshotHash(source);
+        source.setLegacySpuName("accepted product 410").setLegacySkuPropertiesJson("[{\"valueId\":2}]");
+        String propertyChanged = LegacyTradeBenefitMigrationServiceImpl.historicalProductSnapshotHash(source);
+
+        assertThat(nameChanged).isNotEqualTo(baseline);
+        assertThat(propertyChanged).isNotEqualTo(baseline);
+    }
+
+    @Test
     void rejectsIncompleteSourceEvidenceBeforePersistingRun() {
         whenSourceRows(List.of(source(50L, 100, 0, 0, 0).setItemPayAmountMinor(null)));
 
@@ -268,7 +291,7 @@ class LegacyTradeBenefitMigrationServiceImplTest {
 
     private static LegacyTradeBenefitAssessmentCommand command() {
         return new LegacyTradeBenefitAssessmentCommand().setIdempotencyKey("legacy-trade-benefit-assessment-v1")
-                .setMigrationRunId(RUN).setPolicyVersion("legacy-trade-benefit-v4")
+                .setMigrationRunId(RUN).setPolicyVersion("legacy-trade-benefit-v5")
                 .setEvidenceRef("evidence:local-yudao-trade-current")
                 .setCorrelationId(CORRELATION).setOccurredAt(OCCURRED_AT);
     }
@@ -308,8 +331,11 @@ class LegacyTradeBenefitMigrationServiceImplTest {
         return new LegacyTradeOrderItemAssessmentSourceDO().setTenantId(source.getTenantId())
                 .setLegacyOrderItemId(itemId).setLegacyOrderId(source.getLegacyOrderId())
                 .setLegacyBuyerId(source.getLegacyBuyerId())
-                .setSourceUpdatedAt(source.getSourceUpdatedAt()).setDeleted(false)
-                .setLegacySpuId(100L + itemId).setLegacySkuId(200L + itemId)
+                .setSourceCreatedAt(source.getSourceCreatedAt()).setSourceUpdatedAt(source.getSourceUpdatedAt())
+                .setDeleted(false).setLegacySpuId(100L + itemId)
+                .setLegacySpuName("accepted product " + itemId).setLegacySkuId(200L + itemId)
+                .setLegacySkuPropertiesJson("[{\"valueId\":1}]")
+                .setLegacySkuPicUrl("https://example.invalid/product/" + itemId + ".png")
                 .setItemQuantity(source.getItemQuantity()).setUnitPriceMinor(source.getItemGrossAmountMinor())
                 .setGrossAmountMinor(source.getItemGrossAmountMinor())
                 .setGenericDiscountAmountMinor(source.getItemGenericDiscountAmountMinor())

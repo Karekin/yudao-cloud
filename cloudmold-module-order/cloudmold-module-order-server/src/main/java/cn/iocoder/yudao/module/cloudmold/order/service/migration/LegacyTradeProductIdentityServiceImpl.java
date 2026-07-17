@@ -57,9 +57,10 @@ public class LegacyTradeProductIdentityServiceImpl implements LegacyTradeProduct
         LegacyTradeBenefitMigrationRunDO sourceRun = mapper.selectSourceRun(
                 tenantId, command.getSourceMigrationRunId());
         require(sourceRun != null, "source legacy Trade assessment run does not exist");
-        require("legacy-trade-benefit-v4".equals(sourceRun.getPolicyVersion())
-                        && Boolean.TRUE.equals(sourceRun.getItemEvidenceComplete()),
-                "product identity requires a complete immutable item-evidence v4 source assessment");
+        require("legacy-trade-benefit-v5".equals(sourceRun.getPolicyVersion())
+                        && Boolean.TRUE.equals(sourceRun.getItemEvidenceComplete())
+                        && Boolean.TRUE.equals(sourceRun.getProductSnapshotEvidenceComplete()),
+                "product identity requires complete immutable server-captured product snapshots from v5");
         List<LegacyTradeProductIdentityItemSourceDO> sourceItems = mapper.selectSourceItems(
                 tenantId, command.getSourceMigrationRunId());
         require(sourceItems != null && !sourceItems.isEmpty(),

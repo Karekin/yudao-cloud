@@ -17,8 +17,10 @@ FROM cloudmold_order_benefit_governance_run run
 JOIN cloudmold_order_benefit_migration_run source_run
   ON source_run.tenant_id=run.tenant_id
  AND BINARY source_run.migration_run_id=BINARY run.source_migration_run_id
-WHERE source_run.policy_version<>'legacy-trade-benefit-v4'
+WHERE source_run.policy_version NOT IN ('legacy-trade-benefit-v4','legacy-trade-benefit-v5')
    OR source_run.item_evidence_complete<>1
+   OR (source_run.policy_version='legacy-trade-benefit-v5'
+       AND source_run.product_snapshot_evidence_complete<>1)
    OR run.source_component_count<>source_run.benefit_component_count
    OR run.source_quarantine_count<>source_run.quarantined_order_count;
 

@@ -10,11 +10,14 @@ public class LegacyTradeProductIdentityQualificationSourceDO {
     private String sourceMigrationRunId;
     private String policyVersion;
     private Boolean itemEvidenceComplete;
+    private Boolean productSnapshotEvidenceComplete;
     private String itemEvidenceId;
     private Long legacyOrderItemId;
     private Long legacySpuId;
     private Long legacySkuId;
     private String sourceItemEvidenceHash;
+    private String historicalProductSnapshotHash;
+    private String productSnapshotStatus;
     private Boolean deleted;
     private Boolean orderDeleted;
 }

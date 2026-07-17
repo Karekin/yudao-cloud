@@ -60,9 +60,9 @@ public class LegacyTradeBenefitGovernanceServiceImpl implements LegacyTradeBenef
         LegacyTradeBenefitMigrationRunDO sourceRun = mapper.selectSourceRun(tenantId,
                 command.getSourceMigrationRunId());
         require(sourceRun != null, "source legacy Trade assessment run does not exist");
-        require("legacy-trade-benefit-v4".equals(sourceRun.getPolicyVersion())
+        require("legacy-trade-benefit-v5".equals(sourceRun.getPolicyVersion())
                         && Boolean.TRUE.equals(sourceRun.getItemEvidenceComplete()),
-                "benefit governance requires a complete immutable buyer-lineage v4 source assessment");
+                "benefit governance requires a complete immutable product-snapshot v5 source assessment");
         List<LegacyTradeBenefitGovernanceComponentSourceDO> componentSources =
                 mapper.selectSourceComponents(tenantId, command.getSourceMigrationRunId());
         List<LegacyTradeBenefitGovernanceQuarantineSourceDO> quarantineSources =

@@ -64,6 +64,9 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
                     "historical product identity must equal the immutable source Order Item identity");
             require(Objects.equals(source.getSourceItemEvidenceHash(), command.getSourceItemEvidenceHash()),
                     "qualification source item evidence hash mismatch");
+            require(Objects.equals(source.getHistoricalProductSnapshotHash(),
+                            command.getHistoricalProductSnapshotHash()),
+                    "historical product snapshot hash must equal the server-captured source Order Item snapshot");
             require(mapper.selectActiveQualificationForUpdate(tenantId, command.getSourceMigrationRunId(),
                     command.getItemEvidenceId()) == null,
                     "an active historical product qualification already exists for this source item");
@@ -241,10 +244,14 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
                                                                           String itemEvidenceId) {
         LegacyTradeProductIdentityQualificationSourceDO source =
                 mapper.selectSourceItem(tenantId, sourceRunId, itemEvidenceId);
-        require(source != null, "immutable v4 source Order Item evidence does not exist");
-        require("legacy-trade-benefit-v4".equals(source.getPolicyVersion())
-                        && Boolean.TRUE.equals(source.getItemEvidenceComplete()),
-                "qualification requires a complete immutable v4 source assessment");
+        require(source != null, "immutable v5 source Order Item evidence does not exist");
+        require("legacy-trade-benefit-v5".equals(source.getPolicyVersion())
+                        && Boolean.TRUE.equals(source.getItemEvidenceComplete())
+                        && Boolean.TRUE.equals(source.getProductSnapshotEvidenceComplete())
+                        && "CAPTURED".equals(source.getProductSnapshotStatus())
+                        && source.getHistoricalProductSnapshotHash() != null
+                        && source.getHistoricalProductSnapshotHash().matches("[0-9a-f]{64}"),
+                "qualification requires a complete server-captured immutable v5 product snapshot");
         return source;
     }
 
@@ -335,7 +342,9 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
         require(Objects.equals(request.getLegacyOrderItemId(), source.getLegacyOrderItemId())
                         && Objects.equals(request.getHistoricalSpuId(), source.getLegacySpuId())
                         && Objects.equals(request.getHistoricalSkuId(), source.getLegacySkuId())
-                        && Objects.equals(request.getSourceItemEvidenceHash(), source.getSourceItemEvidenceHash()),
+                        && Objects.equals(request.getSourceItemEvidenceHash(), source.getSourceItemEvidenceHash())
+                        && Objects.equals(request.getHistoricalProductSnapshotHash(),
+                        source.getHistoricalProductSnapshotHash()),
                 "immutable source Order Item evidence changed before final approval");
     }
 
@@ -344,7 +353,9 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
         require(Objects.equals(target.getLegacyOrderItemId(), source.getLegacyOrderItemId())
                         && Objects.equals(target.getHistoricalSpuId(), source.getLegacySpuId())
                         && Objects.equals(target.getHistoricalSkuId(), source.getLegacySkuId())
-                        && Objects.equals(target.getSourceItemEvidenceHash(), source.getSourceItemEvidenceHash()),
+                        && Objects.equals(target.getSourceItemEvidenceHash(), source.getSourceItemEvidenceHash())
+                        && Objects.equals(target.getHistoricalProductSnapshotHash(),
+                        source.getHistoricalProductSnapshotHash()),
                 "active qualification no longer matches immutable source Order Item evidence");
     }
 

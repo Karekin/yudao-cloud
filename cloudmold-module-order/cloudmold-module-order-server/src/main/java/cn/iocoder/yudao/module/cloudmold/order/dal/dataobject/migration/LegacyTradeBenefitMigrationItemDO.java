@@ -14,10 +14,16 @@ public class LegacyTradeBenefitMigrationItemDO {
     private Long legacyOrderItemId;
     private Long legacyBuyerId;
     private String legacyItemSnapshotHash;
+    private LocalDateTime sourceCreatedAt;
     private LocalDateTime sourceUpdatedAt;
     private Boolean deleted;
     private Long legacySpuId;
+    private String legacySpuName;
     private Long legacySkuId;
+    private String legacySkuPropertiesJson;
+    private String legacySkuPicUrl;
+    private String historicalProductSnapshotHash;
+    private String productSnapshotStatus;
     private String sourceProductIdentityStatus;
     private Integer itemQuantity;
     private Long unitPriceMinor;

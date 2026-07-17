@@ -1,5 +1,4 @@
 -- Every result column must be zero. Assessment is immutable evidence and cannot authorize import.
-
 SELECT 'legacy_trade_benefit_operation_incomplete_success' AS check_name, COUNT(*) AS violation_count
 FROM cloudmold_order_benefit_migration_operation operation_row
 LEFT JOIN cloudmold_order_benefit_migration_run run
@@ -180,7 +179,7 @@ LEFT JOIN (
  AND BINARY item_rollup.migration_run_id=BINARY run.migration_run_id
 WHERE (run.policy_version IN ('legacy-trade-benefit-v1','legacy-trade-benefit-v2')
        AND run.item_evidence_complete<>0)
-   OR (run.policy_version IN ('legacy-trade-benefit-v3','legacy-trade-benefit-v4') AND (
+   OR (run.policy_version IN ('legacy-trade-benefit-v3','legacy-trade-benefit-v4','legacy-trade-benefit-v5') AND (
        run.item_evidence_complete<>1 OR item_rollup.migration_run_id IS NULL
        OR run.source_item_count<>item_rollup.source_item_count
        OR run.active_item_count<>item_rollup.active_item_count
@@ -203,7 +202,7 @@ LEFT JOIN (
  AND BINARY item_rollup.candidate_id=BINARY candidate.candidate_id
 JOIN cloudmold_order_benefit_migration_run run
   ON run.tenant_id=candidate.tenant_id AND BINARY run.migration_run_id=BINARY candidate.migration_run_id
-WHERE run.policy_version IN ('legacy-trade-benefit-v3','legacy-trade-benefit-v4')
+WHERE run.policy_version IN ('legacy-trade-benefit-v3','legacy-trade-benefit-v4','legacy-trade-benefit-v5')
   AND (candidate.item_row_count<>COALESCE(item_rollup.item_row_count,0)
     OR candidate.item_quantity<>COALESCE(item_rollup.item_quantity,0)
     OR candidate.item_gross_amount_minor<>COALESCE(item_rollup.gross_amount_minor,0)
@@ -223,6 +222,60 @@ WHERE canonical_import_allowed<>0 OR version<>1
    OR (source_product_identity_status='SOURCE_IDS_PRESENT'
        AND (legacy_spu_id IS NULL OR legacy_spu_id<=0 OR legacy_sku_id IS NULL OR legacy_sku_id<=0));
 
+SELECT 'legacy_trade_product_snapshot_run_rollup_mismatch' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_benefit_migration_run run
+LEFT JOIN (
+  SELECT tenant_id,migration_run_id,COUNT(*) source_item_count,
+         SUM(product_snapshot_status='CAPTURED') captured_item_count,
+         SUM(product_snapshot_status='INCOMPLETE') incomplete_item_count
+  FROM cloudmold_order_benefit_migration_item
+  GROUP BY tenant_id,migration_run_id
+) item ON item.tenant_id=run.tenant_id
+ AND BINARY item.migration_run_id=BINARY run.migration_run_id
+WHERE run.policy_version='legacy-trade-benefit-v5'
+  AND (item.migration_run_id IS NULL OR item.source_item_count<>run.source_item_count
+    OR item.captured_item_count<>run.product_snapshot_captured_item_count
+    OR item.incomplete_item_count<>run.product_snapshot_incomplete_item_count
+    OR run.product_snapshot_captured_item_count+run.product_snapshot_incomplete_item_count
+        <>run.source_item_count
+    OR run.product_snapshot_evidence_hash NOT REGEXP '^[0-9a-f]{64}$'
+    OR run.product_snapshot_evidence_complete
+        <>(run.product_snapshot_incomplete_item_count=0));
+
+SELECT 'legacy_trade_product_snapshot_item_hash_mismatch' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_benefit_migration_item item
+JOIN cloudmold_order_benefit_migration_run run
+  ON run.tenant_id=item.tenant_id
+ AND BINARY run.migration_run_id=BINARY item.migration_run_id
+WHERE run.policy_version='legacy-trade-benefit-v5'
+  AND (item.source_created_at IS NULL
+    OR item.product_snapshot_status NOT IN ('CAPTURED','INCOMPLETE')
+    OR (item.product_snapshot_status='CAPTURED' AND (
+      item.historical_product_snapshot_hash<>SHA2(CONCAT_WS(0x1F,
+        CAST('ORDER_ITEM_ACCEPTED_PRODUCT_SNAPSHOT_V1' AS BINARY),CAST(item.tenant_id AS BINARY),
+        CAST(item.legacy_order_item_id AS BINARY),CAST(item.legacy_order_id AS BINARY),
+        CAST(CASE
+          WHEN MICROSECOND(item.source_created_at)=0 AND SECOND(item.source_created_at)=0
+            THEN DATE_FORMAT(item.source_created_at,'%Y-%m-%dT%H:%i')
+          WHEN MICROSECOND(item.source_created_at)=0
+            THEN DATE_FORMAT(item.source_created_at,'%Y-%m-%dT%H:%i:%s')
+          WHEN MOD(MICROSECOND(item.source_created_at),1000)=0
+            THEN CONCAT(DATE_FORMAT(item.source_created_at,'%Y-%m-%dT%H:%i:%s.'),
+                        LEFT(DATE_FORMAT(item.source_created_at,'%f'),3))
+          ELSE CONCAT(DATE_FORMAT(item.source_created_at,'%Y-%m-%dT%H:%i:%s.'),
+                      DATE_FORMAT(item.source_created_at,'%f'))
+        END AS BINARY),
+        CAST(item.legacy_spu_id AS BINARY),
+        COALESCE(CAST(item.legacy_spu_name AS BINARY),CAST('' AS BINARY)),
+        CAST(item.legacy_sku_id AS BINARY),
+        COALESCE(CAST(item.legacy_sku_properties_json AS BINARY),CAST('' AS BINARY)),
+        COALESCE(CAST(item.legacy_sku_pic_url AS BINARY),CAST('' AS BINARY)),
+        CAST(item.unit_price_minor AS BINARY)),256)
+      OR item.legacy_spu_id<=0 OR item.legacy_sku_id<=0
+      OR CHAR_LENGTH(TRIM(item.legacy_spu_name))=0 OR item.unit_price_minor<0))
+    OR (item.product_snapshot_status='INCOMPLETE'
+      AND item.historical_product_snapshot_hash IS NOT NULL));
+
 SELECT 'legacy_trade_benefit_item_event_mismatch' AS check_name, COUNT(*) AS violation_count
 FROM cloudmold_order_benefit_migration_candidate candidate
 JOIN cloudmold_order_benefit_migration_run run
@@ -231,9 +284,10 @@ JOIN cloudmold_event_outbox event
   ON event.tenant_id=candidate.tenant_id
  AND event.event_type='order.migration.legacy_trade_benefit_assessed'
  AND BINARY event.aggregate_id=BINARY candidate.candidate_id
-WHERE run.policy_version IN ('legacy-trade-benefit-v3','legacy-trade-benefit-v4')
-  AND (event.schema_version<>CASE WHEN run.policy_version='legacy-trade-benefit-v4' THEN 3 ELSE 2 END
-    OR (run.policy_version='legacy-trade-benefit-v4' AND (
+WHERE run.policy_version IN ('legacy-trade-benefit-v3','legacy-trade-benefit-v4','legacy-trade-benefit-v5')
+  AND (event.schema_version<>CASE run.policy_version
+        WHEN 'legacy-trade-benefit-v5' THEN 4 WHEN 'legacy-trade-benefit-v4' THEN 3 ELSE 2 END
+    OR (run.policy_version IN ('legacy-trade-benefit-v4','legacy-trade-benefit-v5') AND (
       CAST(JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.legacy_buyer_id')) AS UNSIGNED)
         <>candidate.legacy_buyer_id
       OR JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.buyer_identity_status'))
@@ -258,7 +312,7 @@ WHERE run.policy_version IN ('legacy-trade-benefit-v3','legacy-trade-benefit-v4'
         AND BINARY item.candidate_id=BINARY candidate.candidate_id
         AND (event_item.item_evidence_id IS NULL
           OR event_item.legacy_order_item_id<>item.legacy_order_item_id
-          OR (run.policy_version='legacy-trade-benefit-v4'
+          OR (run.policy_version IN ('legacy-trade-benefit-v4','legacy-trade-benefit-v5')
             AND event_item.legacy_buyer_id<>item.legacy_buyer_id)
           OR BINARY event_item.legacy_item_snapshot_hash<>BINARY item.legacy_item_snapshot_hash
           OR event_item.canonical_import_allowed<>0)));
@@ -299,7 +353,7 @@ FROM (
   JOIN cloudmold_order_benefit_migration_run run
     ON run.tenant_id=expected.tenant_id
    AND BINARY run.migration_run_id=BINARY expected.migration_run_id
-   AND run.policy_version IN ('legacy-trade-benefit-v3','legacy-trade-benefit-v4')
+   AND run.policy_version IN ('legacy-trade-benefit-v3','legacy-trade-benefit-v4','legacy-trade-benefit-v5')
   LEFT JOIN cloudmold_order_benefit_migration_component_reconciliation actual
     ON actual.tenant_id=expected.tenant_id
    AND BINARY actual.migration_run_id=BINARY expected.migration_run_id
@@ -323,7 +377,7 @@ LEFT JOIN (
   WHERE reconciliation_status<>'EXCLUDED_SOURCE_ORDER_DELETED'
   GROUP BY tenant_id,migration_run_id
 ) gap ON gap.tenant_id=run.tenant_id AND BINARY gap.migration_run_id=BINARY run.migration_run_id
-WHERE run.policy_version IN ('legacy-trade-benefit-v3','legacy-trade-benefit-v4')
+WHERE run.policy_version IN ('legacy-trade-benefit-v3','legacy-trade-benefit-v4','legacy-trade-benefit-v5')
   AND COALESCE(gap.amount_gap_minor,0)
       <>run.item_evidence_benefit_amount_minor-run.component_amount_minor;
 
@@ -332,7 +386,7 @@ FROM cloudmold_order_benefit_migration_candidate candidate
 JOIN cloudmold_order_benefit_migration_run run
   ON run.tenant_id=candidate.tenant_id
  AND BINARY run.migration_run_id=BINARY candidate.migration_run_id
-WHERE run.policy_version='legacy-trade-benefit-v4'
+WHERE run.policy_version IN ('legacy-trade-benefit-v4','legacy-trade-benefit-v5')
   AND (candidate.source_created_at IS NULL OR candidate.legacy_buyer_id IS NULL
     OR candidate.legacy_buyer_id<=0 OR candidate.legacy_order_status IS NULL
     OR candidate.buyer_identity_status NOT IN ('RESOLVED','MISSING','AMBIGUOUS')
@@ -354,7 +408,7 @@ LEFT JOIN cloudmold_identity_source_identity source_identity
 LEFT JOIN cloudmold_identity_principal principal
   ON principal.tenant_id=candidate.tenant_id
  AND BINARY principal.principal_id=BINARY candidate.buyer_principal_id
-WHERE run.policy_version='legacy-trade-benefit-v4'
+WHERE run.policy_version IN ('legacy-trade-benefit-v4','legacy-trade-benefit-v5')
   AND candidate.buyer_identity_status='RESOLVED'
   AND (source_identity.source_identity_id IS NULL OR principal.principal_id IS NULL
     OR source_identity.status<>'ACTIVE' OR source_identity.source_system<>'MEMBER'
@@ -372,7 +426,7 @@ JOIN cloudmold_order_benefit_migration_candidate candidate
  AND candidate.legacy_order_id=item.legacy_order_id
 JOIN cloudmold_order_benefit_migration_run run
   ON run.tenant_id=item.tenant_id AND BINARY run.migration_run_id=BINARY item.migration_run_id
-WHERE run.policy_version='legacy-trade-benefit-v4'
+WHERE run.policy_version IN ('legacy-trade-benefit-v4','legacy-trade-benefit-v5')
   AND (item.legacy_buyer_id IS NULL OR item.legacy_buyer_id<>candidate.legacy_buyer_id);
 
 SELECT 'legacy_trade_target_mapping_registry_shape' AS check_name, COUNT(*) AS violation_count

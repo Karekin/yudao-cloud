@@ -79,6 +79,17 @@ class LegacyTradeProductIdentityQualificationServiceImplTest {
     }
 
     @Test
+    void rejectsCallerSuppliedSnapshotDigestThatDiffersFromServerCapture() {
+        when(mapper.selectSourceItem(1L, SOURCE_RUN, ITEM_EVIDENCE)).thenReturn(
+                source().setHistoricalProductSnapshotHash("e".repeat(64)));
+
+        assertThatThrownBy(() -> service.request(requestCommand(), 10L))
+                .isInstanceOf(ServiceException.class).hasMessageContaining("server-captured");
+        verify(mapper, never()).insertRequest(any());
+        verifyNoInteractions(outboxAppender);
+    }
+
+    @Test
     void oneActorCannotSatisfyBothApprovalRoles() {
         LegacyTradeProductIdentityQualificationRequestDO request = pendingRequest(2L, 10L)
                 .setStatus("PARTIALLY_APPROVED").setApprovalCount(1);
@@ -170,9 +181,11 @@ class LegacyTradeProductIdentityQualificationServiceImplTest {
 
     private static LegacyTradeProductIdentityQualificationSourceDO source() {
         return new LegacyTradeProductIdentityQualificationSourceDO().setTenantId(1L)
-                .setSourceMigrationRunId(SOURCE_RUN).setPolicyVersion("legacy-trade-benefit-v4")
-                .setItemEvidenceComplete(true).setItemEvidenceId(ITEM_EVIDENCE).setLegacyOrderItemId(111L)
+                .setSourceMigrationRunId(SOURCE_RUN).setPolicyVersion("legacy-trade-benefit-v5")
+                .setItemEvidenceComplete(true).setProductSnapshotEvidenceComplete(true)
+                .setItemEvidenceId(ITEM_EVIDENCE).setLegacyOrderItemId(111L)
                 .setLegacySpuId(633L).setLegacySkuId(1L).setSourceItemEvidenceHash("a".repeat(64))
+                .setHistoricalProductSnapshotHash("b".repeat(64)).setProductSnapshotStatus("CAPTURED")
                 .setDeleted(false).setOrderDeleted(false);
     }
 

@@ -59,8 +59,9 @@ class LegacyTradeTargetReadinessServiceImplTest {
             return 1;
         }).when(mapper).markOperationSucceeded(eq(1L), eq(1L), anyString(), anyString(), any());
         when(mapper.selectSourceRun(1L, SOURCE_RUN)).thenReturn(new LegacyTradeBenefitMigrationRunDO()
-                .setMigrationRunId(SOURCE_RUN).setTenantId(1L).setPolicyVersion("legacy-trade-benefit-v4")
-                .setSourceOrderCount(2).setSourceItemCount(2).setItemEvidenceComplete(true));
+                .setMigrationRunId(SOURCE_RUN).setTenantId(1L).setPolicyVersion("legacy-trade-benefit-v5")
+                .setSourceOrderCount(2).setSourceItemCount(2).setItemEvidenceComplete(true)
+                .setProductSnapshotEvidenceComplete(true));
         doAnswer(invocation -> { savedRun.set(invocation.getArgument(0)); return 1; })
                 .when(mapper).insertRun(any());
         doAnswer(invocation -> { savedOrders.add(invocation.getArgument(0)); return 1; })

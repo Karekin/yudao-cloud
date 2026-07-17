@@ -225,7 +225,7 @@ class LegacyTradeBenefitGovernanceServiceImplTest {
 
     private static LegacyTradeBenefitMigrationRunDO sourceRun(int components, int quarantines) {
         return new LegacyTradeBenefitMigrationRunDO().setMigrationRunId(SOURCE_RUN).setTenantId(1L)
-                .setPolicyVersion("legacy-trade-benefit-v4").setItemEvidenceComplete(true)
+                .setPolicyVersion("legacy-trade-benefit-v5").setItemEvidenceComplete(true)
                 .setBenefitComponentCount(components).setQuarantinedOrderCount(quarantines);
     }
 

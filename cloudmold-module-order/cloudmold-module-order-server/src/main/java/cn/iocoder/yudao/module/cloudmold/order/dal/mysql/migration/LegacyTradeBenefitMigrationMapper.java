@@ -77,8 +77,10 @@ public interface LegacyTradeBenefitMigrationMapper {
 
     @Select("""
             SELECT tenant_id,id legacy_order_item_id,order_id legacy_order_id,user_id legacy_buyer_id,
-                   update_time source_updated_at,
-                   deleted,spu_id legacy_spu_id,sku_id legacy_sku_id,`count` item_quantity,
+                   create_time source_created_at,update_time source_updated_at,
+                   deleted,spu_id legacy_spu_id,spu_name legacy_spu_name,sku_id legacy_sku_id,
+                   CAST(properties AS CHAR) legacy_sku_properties_json,pic_url legacy_sku_pic_url,
+                   `count` item_quantity,
                    CAST(price AS SIGNED) unit_price_minor,CAST(price*`count` AS SIGNED) gross_amount_minor,
                    CAST(discount_price AS SIGNED) generic_discount_amount_minor,
                    CAST(coupon_price AS SIGNED) coupon_amount_minor,
@@ -135,6 +137,8 @@ public interface LegacyTradeBenefitMigrationMapper {
                benefit_component_count,source_benefit_amount_minor,component_amount_minor,
                source_item_count,active_item_count,excluded_item_count,item_evidence_hash,
                item_evidence_benefit_amount_minor,item_evidence_complete,
+               product_snapshot_captured_item_count,product_snapshot_incomplete_item_count,
+               product_snapshot_evidence_hash,product_snapshot_evidence_complete,
                unresolved_identity_count,unresolved_funding_count,import_allowed_component_count,
                production_migration_enabled,status,version,assessed_at,created_at,updated_at)
             VALUES
@@ -144,6 +148,8 @@ public interface LegacyTradeBenefitMigrationMapper {
                #{benefitComponentCount},#{sourceBenefitAmountMinor},#{componentAmountMinor},
                #{sourceItemCount},#{activeItemCount},#{excludedItemCount},#{itemEvidenceHash},
                #{itemEvidenceBenefitAmountMinor},#{itemEvidenceComplete},
+               #{productSnapshotCapturedItemCount},#{productSnapshotIncompleteItemCount},
+               #{productSnapshotEvidenceHash},#{productSnapshotEvidenceComplete},
                #{unresolvedIdentityCount},#{unresolvedFundingCount},#{importAllowedComponentCount},
                #{productionMigrationEnabled},#{status},#{version},#{assessedAt},#{createdAt},#{updatedAt})
             """)
@@ -194,7 +200,9 @@ public interface LegacyTradeBenefitMigrationMapper {
             INSERT INTO cloudmold_order_benefit_migration_item
               (item_evidence_id,tenant_id,migration_run_id,candidate_id,legacy_order_id,legacy_order_item_id,
                legacy_buyer_id,
-               legacy_item_snapshot_hash,source_updated_at,is_deleted,legacy_spu_id,legacy_sku_id,
+               legacy_item_snapshot_hash,source_created_at,source_updated_at,is_deleted,
+               legacy_spu_id,legacy_spu_name,legacy_sku_id,legacy_sku_properties_json,legacy_sku_pic_url,
+               historical_product_snapshot_hash,product_snapshot_status,
                source_product_identity_status,item_quantity,unit_price_minor,gross_amount_minor,
                generic_discount_amount_minor,coupon_amount_minor,point_amount_minor,vip_amount_minor,
                delivery_amount_minor,adjust_amount_minor,pay_amount_minor,used_point_quantity,
@@ -202,7 +210,9 @@ public interface LegacyTradeBenefitMigrationMapper {
             VALUES
               (#{itemEvidenceId},#{tenantId},#{migrationRunId},#{candidateId},#{legacyOrderId},#{legacyOrderItemId},
                #{legacyBuyerId},
-               #{legacyItemSnapshotHash},#{sourceUpdatedAt},#{deleted},#{legacySpuId},#{legacySkuId},
+               #{legacyItemSnapshotHash},#{sourceCreatedAt},#{sourceUpdatedAt},#{deleted},
+               #{legacySpuId},#{legacySpuName},#{legacySkuId},CAST(#{legacySkuPropertiesJson} AS JSON),
+               #{legacySkuPicUrl},#{historicalProductSnapshotHash},#{productSnapshotStatus},
                #{sourceProductIdentityStatus},#{itemQuantity},#{unitPriceMinor},#{grossAmountMinor},
                #{genericDiscountAmountMinor},#{couponAmountMinor},#{pointAmountMinor},#{vipAmountMinor},
                #{deliveryAmountMinor},#{adjustAmountMinor},#{payAmountMinor},#{usedPointQuantity},
@@ -228,7 +238,8 @@ public interface LegacyTradeBenefitMigrationMapper {
                                                                    @Param("runId") String runId);
 
     @Select("""
-            SELECT * FROM cloudmold_order_benefit_migration_item
+            SELECT item.*,item.is_deleted AS deleted
+            FROM cloudmold_order_benefit_migration_item item
             WHERE tenant_id=#{tenantId} AND migration_run_id=#{runId}
             ORDER BY legacy_order_id,legacy_order_item_id
             """)

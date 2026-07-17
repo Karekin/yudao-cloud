@@ -22,6 +22,10 @@ public class LegacyTradeBenefitAssessmentResult {
     private String itemEvidenceHash;
     private Long itemEvidenceBenefitAmountMinor;
     private Boolean itemEvidenceComplete;
+    private Integer productSnapshotCapturedItemCount;
+    private Integer productSnapshotIncompleteItemCount;
+    private String productSnapshotEvidenceHash;
+    private Boolean productSnapshotEvidenceComplete;
     private Integer unresolvedIdentityCount;
     private Integer unresolvedFundingCount;
     private Integer importAllowedComponentCount;

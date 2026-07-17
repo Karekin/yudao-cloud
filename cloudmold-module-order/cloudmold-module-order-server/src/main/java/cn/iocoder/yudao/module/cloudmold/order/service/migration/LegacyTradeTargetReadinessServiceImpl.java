@@ -59,9 +59,10 @@ public class LegacyTradeTargetReadinessServiceImpl implements LegacyTradeTargetR
         LegacyTradeBenefitMigrationRunDO sourceRun = mapper.selectSourceRun(tenantId,
                 command.getSourceMigrationRunId());
         require(sourceRun != null, "source legacy Trade assessment run does not exist");
-        require("legacy-trade-benefit-v4".equals(sourceRun.getPolicyVersion())
-                        && Boolean.TRUE.equals(sourceRun.getItemEvidenceComplete()),
-                "target readiness requires a complete immutable buyer-lineage v4 source assessment");
+        require("legacy-trade-benefit-v5".equals(sourceRun.getPolicyVersion())
+                        && Boolean.TRUE.equals(sourceRun.getItemEvidenceComplete())
+                        && Boolean.TRUE.equals(sourceRun.getProductSnapshotEvidenceComplete()),
+                "target readiness requires complete immutable server-captured product snapshots from v5");
         List<LegacyTradeTargetReadinessOrderSourceDO> sourceOrders = mapper.selectSourceOrders(
                 tenantId, command.getSourceMigrationRunId());
         List<LegacyTradeTargetReadinessItemSourceDO> sourceItems = mapper.selectSourceItems(

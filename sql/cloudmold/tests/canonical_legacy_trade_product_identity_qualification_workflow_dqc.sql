@@ -11,7 +11,11 @@ LEFT JOIN cloudmold_order_benefit_migration_run source_run
   ON source_run.tenant_id=request.tenant_id
  AND BINARY source_run.migration_run_id=BINARY request.source_migration_run_id
 WHERE source_item.item_evidence_id IS NULL OR source_run.migration_run_id IS NULL
-   OR source_run.policy_version<>'legacy-trade-benefit-v4' OR source_run.item_evidence_complete<>1
+   OR source_run.policy_version<>'legacy-trade-benefit-v5' OR source_run.item_evidence_complete<>1
+   OR source_run.product_snapshot_evidence_complete<>1
+   OR source_item.product_snapshot_status<>'CAPTURED'
+   OR BINARY request.historical_product_snapshot_hash
+        <>BINARY source_item.historical_product_snapshot_hash
    OR source_item.legacy_order_item_id<>request.legacy_order_item_id
    OR source_item.legacy_spu_id<>request.historical_spu_id
    OR source_item.legacy_sku_id<>request.historical_sku_id

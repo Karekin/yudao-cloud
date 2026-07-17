@@ -23,7 +23,10 @@ LEFT JOIN (
          SUM(identity_admission_allowed=1) admitted_count
   FROM cloudmold_order_product_identity_item GROUP BY tenant_id,identity_run_id
 ) item ON item.tenant_id=run.tenant_id AND BINARY item.identity_run_id=BINARY run.identity_run_id
-WHERE source_run.policy_version<>'legacy-trade-benefit-v4' OR source_run.item_evidence_complete<>1
+WHERE source_run.policy_version NOT IN ('legacy-trade-benefit-v4','legacy-trade-benefit-v5')
+   OR source_run.item_evidence_complete<>1
+   OR (source_run.policy_version='legacy-trade-benefit-v5'
+       AND source_run.product_snapshot_evidence_complete<>1)
    OR item.identity_run_id IS NULL OR run.source_item_count<>source_run.source_item_count
    OR run.source_item_count<>item.source_item_count OR run.active_item_count<>item.active_item_count
    OR run.excluded_item_count<>item.excluded_item_count

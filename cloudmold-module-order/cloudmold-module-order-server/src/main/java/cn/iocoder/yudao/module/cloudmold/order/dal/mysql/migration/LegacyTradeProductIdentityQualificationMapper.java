@@ -13,9 +13,11 @@ public interface LegacyTradeProductIdentityQualificationMapper {
 
     @Select("""
             SELECT item.tenant_id,item.migration_run_id source_migration_run_id,
-                   run.policy_version,run.item_evidence_complete,item.item_evidence_id,
+                   run.policy_version,run.item_evidence_complete,run.product_snapshot_evidence_complete,
+                   item.item_evidence_id,
                    item.legacy_order_item_id,item.legacy_spu_id,item.legacy_sku_id,
                    item.legacy_item_snapshot_hash source_item_evidence_hash,
+                   item.historical_product_snapshot_hash,item.product_snapshot_status,
                    item.is_deleted deleted,candidate.is_deleted order_deleted
             FROM cloudmold_order_benefit_migration_item item
             JOIN cloudmold_order_benefit_migration_run run
