@@ -91,4 +91,64 @@ class RiskEventServiceTest {
                 "signal_id", "subject_principal_id", "policy_id", "policy_version", "signal_type", "severity",
                 "evidence_ref", "occurred_at");
     }
+
+    @Test
+    void shouldEmitVersionedSourceBackedIntelligenceTaxonomyWithoutInventingSeveritySemantics() {
+        Instant occurredAt = Instant.parse("2026-07-17T10:00:00Z");
+        LocalDateTime now = LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC);
+        RiskCommand publish = RiskCommand.builder()
+                .operation(RiskOperation.PUBLISH_INTELLIGENCE_EVENT_TAXONOMY_VERSION)
+                .idempotencyKey("taxonomy-publish-event-01").runId("taxonomy-run-01")
+                .correlationId("taxonomy-correlation-01").build();
+        IntelligenceTaxonomy taxonomy = new IntelligenceTaxonomy().setTaxonomyId("taxonomy-01")
+                .setTenantId(1L).setEventCode("event_new_001").setStatus("PUBLISHED")
+                .setCurrentDefinitionVersion(1L).setVersion(2L);
+        IntelligenceTaxonomyVersion version = new IntelligenceTaxonomyVersion()
+                .setTaxonomyVersionId("taxonomy-version-01").setTenantId(1L).setTaxonomyId("taxonomy-01")
+                .setDefinitionVersion(1L).setLevelsSha256("a".repeat(64))
+                .setApprovedByPrincipalId("principal-data-owner-1").setEffectiveFrom(now)
+                .setSourceSystem("YSHOPPING").setSourceTable("ods_intelligence_event_code_level_df")
+                .setSourceRecordKey("19").setSourceVersion("source-v1").setSourceObservedAt(now.minusSeconds(1))
+                .setSourceEvidenceRef("restricted:taxonomy_evidence_0001")
+                .setSourceEvidenceSha256("b".repeat(64));
+        IntelligenceTaxonomyRetirement retirement = new IntelligenceTaxonomyRetirement()
+                .setRetirementId("retirement-01").setTenantId(1L).setTaxonomyId("taxonomy-01")
+                .setTaxonomyVersion(3L).setRetiredByPrincipalId("principal-data-owner-1")
+                .setReasonCode("SOURCE_ROW_DELETED").setRetiredAt(now.plusMinutes(1))
+                .setSourceSystem("YSHOPPING").setSourceTable("ods_intelligence_event_code_level_df")
+                .setSourceRecordKey("19").setSourceVersion("source-v2").setSourceObservedAt(now.plusSeconds(30))
+                .setSourceEvidenceRef("restricted:taxonomy_evidence_0002")
+                .setSourceEvidenceSha256("c".repeat(64));
+
+        service.appendTaxonomyVersion(1L, taxonomy, version, List.of("A", "B", "C"), "DRAFT",
+                publish, occurredAt, now);
+        taxonomy.setStatus("RETIRED").setVersion(3L).setRetiredAt(now.plusMinutes(1));
+        RiskCommand retire = RiskCommand.builder().operation(RiskOperation.RETIRE_INTELLIGENCE_EVENT_TAXONOMY)
+                .idempotencyKey("taxonomy-retire-event-01").runId("taxonomy-run-01")
+                .correlationId("taxonomy-correlation-01").build();
+        service.appendTaxonomyRetirement(2L, taxonomy, retirement, List.of("A", "B", "C"), "PUBLISHED",
+                retire, occurredAt.plusSeconds(60), now.plusMinutes(1));
+
+        ArgumentCaptor<AppendDomainEventCommand> captor = ArgumentCaptor.forClass(AppendDomainEventCommand.class);
+        verify(outbox, times(2)).append(captor.capture());
+        Map<String, AppendDomainEventCommand> events = new HashMap<>();
+        captor.getAllValues().forEach(event -> events.put(event.getEventType(), event));
+        AppendDomainEventCommand published = events.get("risk.intelligence_event_taxonomy.version_published");
+        AppendDomainEventCommand retired = events.get("risk.intelligence_event_taxonomy.retired");
+        assertThat(published.getAggregateType()).isEqualTo("risk_intelligence_event_taxonomy");
+        assertThat(published.getAggregateVersion()).isEqualTo(2L);
+        assertThat(published.getPayload()).containsEntry("event_code", "event_new_001")
+                .containsEntry("level_codes", List.of("A", "B", "C"))
+                .containsEntry("source_table", "ods_intelligence_event_code_level_df")
+                .containsEntry("source_record_key", "19")
+                .doesNotContainKeys("severity", "risk_level", "automatic_enforcement");
+        assertThat(retired.getAggregateVersion()).isEqualTo(3L);
+        assertThat(retired.getPayload()).containsEntry("current_status", "RETIRED")
+                .containsEntry("reason_code", "SOURCE_ROW_DELETED")
+                .containsEntry("level_codes", List.of("A", "B", "C"));
+        assertThat(published.getHeaders()).containsEntry("pii_safe", true)
+                .containsEntry("automatic_enforcement", false);
+        assertThat(retired.getHeaders()).containsEntry("pii_safe", true)
+                .containsEntry("automatic_enforcement", false);
+    }
 }

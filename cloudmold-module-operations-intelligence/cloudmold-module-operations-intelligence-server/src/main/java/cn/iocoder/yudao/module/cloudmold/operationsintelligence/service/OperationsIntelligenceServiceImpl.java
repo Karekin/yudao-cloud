@@ -8,6 +8,8 @@ import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.*;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.dal.dataobject.OperationsIntelligenceRecords.*;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.dal.mysql.OperationsIntelligenceStoreMapper;
+import cn.iocoder.yudao.module.cloudmold.risk.api.IntelligenceEventTaxonomyReference;
+import cn.iocoder.yudao.module.cloudmold.risk.api.RiskQueryApi;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +40,7 @@ public class OperationsIntelligenceServiceImpl
 
     private final OperationsIntelligenceStoreMapper mapper;
     private final OutboxAppender outboxAppender;
+    private final RiskQueryApi riskQueryApi;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -116,27 +119,37 @@ public class OperationsIntelligenceServiceImpl
         requireCode(input.getSourceSystem(), "sourceSystem");
         requireRef(input.getSourceEventId(), "sourceEventId", 256);
         requireCode(input.getObservationType(), "observationType");
+        require(input.getObservedAt() != null && !input.getObservedAt().isAfter(command.getOccurredAt()),
+                "observedAt must not follow occurredAt");
         require(SUBJECT_TYPES.contains(input.getSubjectType()), "unsupported subjectType");
         requireRef(input.getSubjectRef(), "subjectRef", 256);
         requireEvidence(input.getEvidenceRef(), "evidenceRef");
         requireSha256(input.getContentSha256(), "contentSha256");
-        require(input.getObservedAt() != null && !input.getObservedAt().isAfter(command.getOccurredAt()),
-                "observedAt must not follow occurredAt");
+        IntelligenceEventTaxonomyReference taxonomy = riskQueryApi.validateIntelligenceEventLevel(
+                input.getTaxonomyId(), input.getTaxonomyDefinitionVersion(), input.getEventCode(),
+                input.getIntelligenceLevelCode(), input.getObservedAt());
         require(mapper.selectObservationBySource(tenantId, input.getSourceSystem(), input.getSourceEventId()) == null,
                 "source observation already exists");
         String id = valueOrUuid(input.getObservationId());
         Observation row = new Observation().setObservationId(id).setTenantId(tenantId)
                 .setSourceSystem(input.getSourceSystem()).setSourceEventId(input.getSourceEventId())
-                .setObservationType(input.getObservationType()).setSubjectType(input.getSubjectType())
+                .setObservationType(input.getObservationType()).setClassificationContractVersion(2)
+                .setTaxonomyId(taxonomy.getTaxonomyId()).setTaxonomyVersionId(taxonomy.getTaxonomyVersionId())
+                .setTaxonomyDefinitionVersion(taxonomy.getDefinitionVersion()).setEventCode(taxonomy.getEventCode())
+                .setIntelligenceLevelCode(taxonomy.getIntelligenceLevel()).setSubjectType(input.getSubjectType())
                 .setSubjectRef(input.getSubjectRef()).setEvidenceRef(input.getEvidenceRef())
                 .setContentSha256(input.getContentSha256()).setObservedAt(at(input.getObservedAt())).setCreatedAt(now);
         require(mapper.insertObservation(row) == 1, "failed to persist observation");
         Map<String, Object> payload = payload("observation_id", id, "source_system", row.getSourceSystem(),
                 "source_event_id", row.getSourceEventId(), "observation_type", row.getObservationType(),
+                "classification_contract_version", row.getClassificationContractVersion(),
+                "taxonomy_id", row.getTaxonomyId(), "taxonomy_version_id", row.getTaxonomyVersionId(),
+                "taxonomy_definition_version", row.getTaxonomyDefinitionVersion(), "event_code", row.getEventCode(),
+                "intelligence_level_code", row.getIntelligenceLevelCode(),
                 "subject_type", row.getSubjectType(), "subject_ref", row.getSubjectRef(),
                 "evidence_ref", row.getEvidenceRef(), "content_sha256", row.getContentSha256(),
                 "observed_at", input.getObservedAt().toString());
-        return new Outcome("operations_intelligence.observation.recorded", "intelligence_observation", id,
+        return new Outcome("operations_intelligence.observation.recorded", 2, "intelligence_observation", id,
                 1L, "RECORDED", payload);
     }
 
@@ -169,7 +182,7 @@ public class OperationsIntelligenceServiceImpl
                 "outcome_code", row.getOutcomeCode(), "score_basis_points", row.getScoreBasisPoints(),
                 "retry_no", row.getRetryNo(), "evidence_ref", row.getEvidenceRef(),
                 "result_sha256", row.getResultSha256());
-        return new Outcome("operations_intelligence.model_result.recorded", "intelligence_model_result", id,
+        return new Outcome("operations_intelligence.model_result.recorded", 1, "intelligence_model_result", id,
                 1L, "RECORDED", payload);
     }
 
@@ -201,7 +214,7 @@ public class OperationsIntelligenceServiceImpl
                 "source_code", row.getSourceCode(), "source_published_at", input.getSourcePublishedAt().toString(),
                 "evidence_ref", row.getEvidenceRef(), "evidence_sha256", row.getEvidenceSha256(),
                 "current_status", row.getStatus());
-        return new Outcome("operations_intelligence.clue.recorded", "intelligence_clue", id,
+        return new Outcome("operations_intelligence.clue.recorded", 1, "intelligence_clue", id,
                 1L, row.getStatus(), payload);
     }
 
@@ -227,7 +240,7 @@ public class OperationsIntelligenceServiceImpl
         Map<String, Object> payload = payload("clue_id", row.getClueId(), "review_id", review.getReviewId(),
                 "previous_status", row.getStatus(), "current_status", after, "decision", review.getDecision(),
                 "reason_code", review.getReasonCode(), "reviewer_principal_id", review.getReviewerPrincipalId());
-        return new Outcome("operations_intelligence.clue.reviewed", "intelligence_clue", row.getClueId(),
+        return new Outcome("operations_intelligence.clue.reviewed", 1, "intelligence_clue", row.getClueId(),
                 2L, after, payload);
     }
 
@@ -322,12 +335,13 @@ public class OperationsIntelligenceServiceImpl
                 "evidence_ref", row.getEvidenceRef(), "title_sha256", row.getTitleSha256(),
                 "previous_status", before, "current_status", after, "actor_principal_id", actor,
                 "reason_code", reason, "operation", command.getOperation().name());
-        return new Outcome("operations_intelligence.alert.status_changed", "operations_alert", row.getAlertId(),
+        return new Outcome("operations_intelligence.alert.status_changed", 1, "operations_alert", row.getAlertId(),
                 row.getVersion(), after, payload);
     }
 
     private void appendEvent(Long tenantId, OperationsIntelligenceCommand command, Outcome outcome) {
-        outboxAppender.append(AppendDomainEventCommand.builder().eventType(outcome.eventType()).schemaVersion(1)
+        outboxAppender.append(AppendDomainEventCommand.builder().eventType(outcome.eventType())
+                .schemaVersion(outcome.schemaVersion())
                 .sourceSystem(SOURCE_SYSTEM).tenantId(tenantId).aggregateType(outcome.aggregateType())
                 .aggregateId(outcome.aggregateId()).aggregateVersion(outcome.version())
                 .eventSequence(outcome.version().shortValue()).occurredAt(command.getOccurredAt())
@@ -398,6 +412,6 @@ public class OperationsIntelligenceServiceImpl
         return payload;
     }
 
-    private record Outcome(String eventType, String aggregateType, String aggregateId, Long version,
+    private record Outcome(String eventType, int schemaVersion, String aggregateType, String aggregateId, Long version,
                            String status, Map<String, Object> payload) {}
 }

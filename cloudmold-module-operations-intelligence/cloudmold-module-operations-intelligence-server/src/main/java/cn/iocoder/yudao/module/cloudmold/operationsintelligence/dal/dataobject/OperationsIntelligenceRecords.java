@@ -31,6 +31,12 @@ public final class OperationsIntelligenceRecords {
         private String sourceSystem;
         private String sourceEventId;
         private String observationType;
+        private Integer classificationContractVersion;
+        private String taxonomyId;
+        private String taxonomyVersionId;
+        private Long taxonomyDefinitionVersion;
+        private String eventCode;
+        private String intelligenceLevelCode;
         private String subjectType;
         private String subjectRef;
         private String evidenceRef;

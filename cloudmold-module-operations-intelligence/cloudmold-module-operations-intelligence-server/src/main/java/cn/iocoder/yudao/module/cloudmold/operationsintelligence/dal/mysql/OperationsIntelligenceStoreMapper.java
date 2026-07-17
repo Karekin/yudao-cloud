@@ -41,22 +41,29 @@ public interface OperationsIntelligenceStoreMapper {
 
     @Insert("""
             INSERT INTO cloudmold_intelligence_observation
-              (observation_id,tenant_id,source_system,source_event_id,observation_type,subject_type,subject_ref,
-               evidence_ref,content_sha256,observed_at,created_at)
-            VALUES (#{observationId},#{tenantId},#{sourceSystem},#{sourceEventId},#{observationType},#{subjectType},
-                    #{subjectRef},#{evidenceRef},#{contentSha256},#{observedAt},#{createdAt})
+              (observation_id,tenant_id,source_system,source_event_id,observation_type,classification_contract_version,
+               taxonomy_id,taxonomy_version_id,taxonomy_definition_version,event_code,intelligence_level_code,
+               subject_type,subject_ref,evidence_ref,content_sha256,observed_at,created_at)
+            VALUES (#{observationId},#{tenantId},#{sourceSystem},#{sourceEventId},#{observationType},
+                    #{classificationContractVersion},#{taxonomyId},#{taxonomyVersionId},#{taxonomyDefinitionVersion},
+                    #{eventCode},#{intelligenceLevelCode},#{subjectType},#{subjectRef},#{evidenceRef},#{contentSha256},
+                    #{observedAt},#{createdAt})
             """) int insertObservation(Observation value);
 
     @Select("""
-            SELECT observation_id,tenant_id,source_system,source_event_id,observation_type,subject_type,subject_ref,
-                   evidence_ref,content_sha256,observed_at,created_at
+            SELECT observation_id,tenant_id,source_system,source_event_id,observation_type,
+                   classification_contract_version,taxonomy_id,taxonomy_version_id,taxonomy_definition_version,
+                   event_code,intelligence_level_code,subject_type,subject_ref,evidence_ref,content_sha256,
+                   observed_at,created_at
             FROM cloudmold_intelligence_observation WHERE tenant_id=#{tenantId} AND observation_id=#{observationId}
             """) Observation selectObservation(@Param("tenantId") Long tenantId,
                                                   @Param("observationId") String observationId);
 
     @Select("""
-            SELECT observation_id,tenant_id,source_system,source_event_id,observation_type,subject_type,subject_ref,
-                   evidence_ref,content_sha256,observed_at,created_at
+            SELECT observation_id,tenant_id,source_system,source_event_id,observation_type,
+                   classification_contract_version,taxonomy_id,taxonomy_version_id,taxonomy_definition_version,
+                   event_code,intelligence_level_code,subject_type,subject_ref,evidence_ref,content_sha256,
+                   observed_at,created_at
             FROM cloudmold_intelligence_observation
             WHERE tenant_id=#{tenantId} AND source_system=#{sourceSystem} AND source_event_id=#{sourceEventId}
             """) Observation selectObservationBySource(@Param("tenantId") Long tenantId,

@@ -27,6 +27,18 @@ public class RiskCommand {
     private Instant effectiveFrom;
     private List<RuleDefinition> rules;
 
+    private String taxonomyId;
+    private String eventCode;
+    private List<String> intelligenceLevels;
+    private String sourceSystem;
+    private String sourceTable;
+    private String sourceRecordKey;
+    private String sourceVersion;
+    private Instant sourceObservedAt;
+    private String sourceEvidenceRef;
+    private String sourceEvidenceSha256;
+    private String retiredByPrincipalId;
+
     private String signalId;
     private String subjectPrincipalId;
     private String signalType;

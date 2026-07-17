@@ -5,6 +5,7 @@ import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.*;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.*;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.dal.dataobject.OperationsIntelligenceRecords.*;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.dal.mysql.OperationsIntelligenceStoreMapper;
+import cn.iocoder.yudao.module.cloudmold.risk.api.*;
 import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
 
@@ -20,8 +21,9 @@ class OperationsIntelligenceServiceImplTest {
 
     private final OperationsIntelligenceStoreMapper mapper = mock(OperationsIntelligenceStoreMapper.class);
     private final OutboxAppender outboxAppender = mock(OutboxAppender.class);
+    private final RiskQueryApi riskQueryApi = mock(RiskQueryApi.class);
     private final OperationsIntelligenceServiceImpl service =
-            new OperationsIntelligenceServiceImpl(mapper, outboxAppender);
+            new OperationsIntelligenceServiceImpl(mapper, outboxAppender, riskQueryApi);
     private final AtomicReference<Observation> observation = new AtomicReference<>();
     private final AtomicReference<ModelResult> modelResult = new AtomicReference<>();
     private final AtomicReference<Clue> clue = new AtomicReference<>();
@@ -34,6 +36,11 @@ class OperationsIntelligenceServiceImplTest {
         TenantContextHolder.setTenantId(17L);
         when(outboxAppender.append(any())).thenReturn(new AppendDomainEventResult(
                 "11111111-1111-4111-8111-111111111111", "a".repeat(64), false));
+        when(riskQueryApi.validateIntelligenceEventLevel(eq("taxonomy-1"), eq(1L),
+                eq("event_new_001"), eq("B"), any())).thenReturn(IntelligenceEventTaxonomyReference.builder()
+                .taxonomyId("taxonomy-1").taxonomyVersionId("taxonomy-version-1").definitionVersion(1L)
+                .eventCode("event_new_001").intelligenceLevel("B").levelsSha256("9".repeat(64))
+                .effectiveFrom(NOW.minusSeconds(3600)).build());
         when(mapper.insertOrResolveOperation(eq(17L), anyString(), anyString(), anyString(), anyString(), any()))
                 .thenAnswer(invocation -> {
                     requestHash.set(invocation.getArgument(3));
@@ -100,7 +107,13 @@ class OperationsIntelligenceServiceImplTest {
                 .containsExactly("YSHOPPING_INTELLIGENCE", "THIRD_PARTY_CONTENT", "CONTENT");
         AppendDomainEventCommand event = lastEvent();
         assertThat(event.getEventType()).isEqualTo("operations_intelligence.observation.recorded");
+        assertThat(event.getSchemaVersion()).isEqualTo(2);
         assertThat(event.getPayload()).containsKeys("evidence_ref", "content_sha256", "subject_ref")
+                .containsEntry("taxonomy_id", "taxonomy-1")
+                .containsEntry("taxonomy_version_id", "taxonomy-version-1")
+                .containsEntry("taxonomy_definition_version", 1L)
+                .containsEntry("event_code", "event_new_001")
+                .containsEntry("intelligence_level_code", "B")
                 .doesNotContainKeys("content", "title", "description", "message", "prompt");
         assertThat(event.getHeaders()).containsEntry("raw_content_stored", false)
                 .containsEntry("automatic_enforcement", false);
@@ -193,11 +206,24 @@ class OperationsIntelligenceServiceImplTest {
                 .hasMessage("alert cannot transition from OPEN to RESOLVED");
     }
 
+    @Test
+    void rejectsObservationWhenTaxonomyReferenceIsNotEffective() {
+        when(riskQueryApi.validateIntelligenceEventLevel(anyString(), anyLong(), anyString(), anyString(), any()))
+                .thenThrow(new IllegalStateException(
+                        "observation must reference the effective non-retired taxonomy version and level"));
+        assertThatThrownBy(() -> service.execute(observationCommand()))
+                .hasMessage("observation must reference the effective non-retired taxonomy version and level");
+        verify(mapper, never()).insertObservation(any());
+        verify(outboxAppender, never()).append(any());
+    }
+
     private OperationsIntelligenceCommand observationCommand() {
         return base(OperationsIntelligenceOperation.RECORD_OBSERVATION, "observation-record-1")
                 .observation(OperationsIntelligenceCommand.ObservationDefinition.builder()
                         .observationId("observation-1").sourceSystem("YSHOPPING_INTELLIGENCE")
                         .sourceEventId("snippet-775f28").observationType("THIRD_PARTY_CONTENT")
+                        .taxonomyId("taxonomy-1").taxonomyDefinitionVersion(1L)
+                        .eventCode("event_new_001").intelligenceLevelCode("B")
                         .subjectType("CONTENT").subjectRef("content-775f28")
                         .evidenceRef("restricted:observation_0001").contentSha256("a".repeat(64))
                         .observedAt(NOW.minusSeconds(30)).build()).build();

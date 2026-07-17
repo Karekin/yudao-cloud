@@ -24,6 +24,9 @@ public class RiskCommandServiceImpl implements RiskCommandApi, RiskQueryApi {
     private static final Pattern SAFE_REF = Pattern.compile("(?:sha256:[0-9a-f]{64}|restricted:[A-Za-z0-9_-]{16,128})");
     private static final Pattern NUMERIC_THRESHOLD = Pattern.compile("-?[0-9]{1,18}(?:\\.[0-9]{1,6})?");
     private static final Pattern EXPLANATION = Pattern.compile("[A-Za-z0-9 _.,:()<>=%+\\-/]{4,256}");
+    private static final Pattern EVENT_CODE = Pattern.compile("[A-Za-z][A-Za-z0-9_.:-]{1,127}");
+    private static final Pattern SOURCE_TABLE = Pattern.compile("[a-z][a-z0-9_]{1,127}");
+    private static final Pattern LEVEL_CODE = Pattern.compile("[A-Z][A-Z0-9_-]{0,31}");
     private static final Set<String> SIGNAL_SEVERITIES = Set.of("LOW", "MEDIUM", "HIGH", "CRITICAL");
     private static final Set<String> MEDIUM_TYPES = Set.of("PHONE", "DEVICE", "IP", "ADDRESS", "PAYMENT_ACCOUNT");
     private static final Set<String> OPERATORS = Set.of("EQ", "NE", "GT", "GTE", "LT", "LTE");
@@ -65,6 +68,12 @@ public class RiskCommandServiceImpl implements RiskCommandApi, RiskQueryApi {
         RiskView result = switch (command.getOperation()) {
             case CREATE_POLICY -> createPolicy(tenantId, operationId, command, now);
             case PUBLISH_POLICY_VERSION -> publishPolicyVersion(tenantId, operationId, command, occurredAt, now);
+            case CREATE_INTELLIGENCE_EVENT_TAXONOMY ->
+                    createIntelligenceEventTaxonomy(tenantId, operationId, command, occurredAt, now);
+            case PUBLISH_INTELLIGENCE_EVENT_TAXONOMY_VERSION ->
+                    publishIntelligenceEventTaxonomyVersion(tenantId, operationId, command, occurredAt, now);
+            case RETIRE_INTELLIGENCE_EVENT_TAXONOMY ->
+                    retireIntelligenceEventTaxonomy(tenantId, operationId, command, occurredAt, now);
             case DETECT_SIGNAL -> detectSignal(tenantId, operationId, command, occurredAt, now);
             case OBSERVE_RELATIONSHIP -> observeRelationship(tenantId, operationId, command, occurredAt, now);
             case CREATE_CLUSTER -> createCluster(tenantId, operationId, command, occurredAt, now);
@@ -77,6 +86,7 @@ public class RiskCommandServiceImpl implements RiskCommandApi, RiskQueryApi {
         };
         String aggregateId = firstNonNull(result.getFeedbackId(), result.getDecisionId(), result.getCaseId(),
                 result.getClusterId(), result.getRelationId(), result.getSignalId(), result.getPolicyId());
+        if (result.getTaxonomyId() != null) aggregateId = result.getTaxonomyId();
         require(mapper.markOperationSucceeded(operationId, tenantId, aggregateId, JsonUtils.toJsonString(result), now) == 1,
                 "risk operation completion conflict");
         return result;
@@ -88,6 +98,39 @@ public class RiskCommandServiceImpl implements RiskCommandApi, RiskQueryApi {
         Policy policy = mapper.selectPolicy(TenantContextHolder.getRequiredTenantId(), policyId);
         require(policy != null, "risk policy does not exist");
         return policyView(null, policy, false);
+    }
+
+    @Override
+    public RiskView getIntelligenceEventTaxonomy(String taxonomyId) {
+        requireId(taxonomyId, "taxonomyId");
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        IntelligenceTaxonomy taxonomy = mapper.selectIntelligenceTaxonomy(tenantId, taxonomyId);
+        require(taxonomy != null, "intelligence event taxonomy does not exist");
+        List<String> levels = taxonomy.getCurrentDefinitionVersion() > 0
+                ? mapper.selectIntelligenceTaxonomyLevelCodes(tenantId, taxonomyId,
+                taxonomy.getCurrentDefinitionVersion()) : List.of();
+        return taxonomyView(null, taxonomy, null, levels, false);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public IntelligenceEventTaxonomyReference validateIntelligenceEventLevel(
+            String taxonomyId, Long definitionVersion, String eventCode, String intelligenceLevel,
+            Instant observedAt) {
+        requireId(taxonomyId, "taxonomyId");
+        require(definitionVersion != null && definitionVersion > 0, "taxonomy definitionVersion must be positive");
+        requireEventCode(eventCode);
+        requireLevelCode(intelligenceLevel);
+        require(observedAt != null, "observedAt is required");
+        IntelligenceTaxonomyReferenceRow row = mapper.selectEffectiveIntelligenceTaxonomyReference(
+                TenantContextHolder.getRequiredTenantId(), taxonomyId, definitionVersion, eventCode,
+                intelligenceLevel, LocalDateTime.ofInstant(observedAt, ZoneOffset.UTC));
+        require(row != null, "observation must reference the effective non-retired taxonomy version and level");
+        return IntelligenceEventTaxonomyReference.builder().taxonomyId(row.getTaxonomyId())
+                .taxonomyVersionId(row.getTaxonomyVersionId()).definitionVersion(row.getDefinitionVersion())
+                .eventCode(row.getEventCode()).intelligenceLevel(row.getLevelCode())
+                .levelsSha256(row.getLevelsSha256())
+                .effectiveFrom(row.getEffectiveFrom().toInstant(ZoneOffset.UTC)).build();
     }
 
     @Override
@@ -115,6 +158,122 @@ public class RiskCommandServiceImpl implements RiskCommandApi, RiskQueryApi {
                 .setCurrentVersion(0L).setCreatedAt(now).setUpdatedAt(now);
         require(mapper.insertPolicy(policy) == 1, "failed to create risk policy");
         return policyView(operationId, policy, false);
+    }
+
+    private RiskView createIntelligenceEventTaxonomy(Long tenantId, Long operationId, RiskCommand command,
+                                                      Instant occurredAt, LocalDateTime now) {
+        requireEventCode(command.getEventCode());
+        IntelligenceTaxonomy taxonomy = new IntelligenceTaxonomy().setTaxonomyId(UUID.randomUUID().toString())
+                .setTenantId(tenantId).setEventCode(command.getEventCode()).setStatus("DRAFT")
+                .setCurrentDefinitionVersion(0L).setVersion(1L).setCreatedAt(now).setUpdatedAt(now);
+        require(mapper.insertIntelligenceTaxonomy(taxonomy) == 1,
+                "failed to create intelligence event taxonomy");
+        eventService.appendTaxonomyHistory(operationId, taxonomy, null, command, occurredAt, now);
+        return taxonomyView(operationId, taxonomy, null, List.of(), false);
+    }
+
+    private RiskView publishIntelligenceEventTaxonomyVersion(Long tenantId, Long operationId, RiskCommand command,
+                                                              Instant occurredAt, LocalDateTime now) {
+        requireId(command.getTaxonomyId(), "taxonomyId");
+        requireExpectedVersion(command);
+        requireId(command.getApprovedByPrincipalId(), "approvedByPrincipalId");
+        validateTaxonomySourceEvidence(command, occurredAt, now);
+        require(command.getEffectiveFrom() != null && !command.getEffectiveFrom().isBefore(occurredAt),
+                "effectiveFrom must not backdate a taxonomy correction");
+        require(!command.getEffectiveFrom().isAfter(occurredAt.plus(Duration.ofDays(366))),
+                "effectiveFrom must be within the bounded scheduling horizon");
+        require(command.getIntelligenceLevels() != null && !command.getIntelligenceLevels().isEmpty()
+                        && command.getIntelligenceLevels().size() <= 32,
+                "intelligenceLevels must contain between 1 and 32 ordered codes");
+        LinkedHashSet<String> uniqueLevels = new LinkedHashSet<>();
+        for (String level : command.getIntelligenceLevels()) {
+            requireLevelCode(level);
+            require(uniqueLevels.add(level), "intelligence level codes must be unique within a version");
+        }
+        List<String> levels = List.copyOf(uniqueLevels);
+        IntelligenceTaxonomy taxonomy = mapper.selectIntelligenceTaxonomyForUpdate(tenantId, command.getTaxonomyId());
+        require(taxonomy != null, "intelligence event taxonomy does not exist");
+        require(Objects.equals(taxonomy.getVersion(), command.getExpectedVersion()), "taxonomy version conflict");
+        require(!"RETIRED".equals(taxonomy.getStatus()), "retired taxonomy cannot publish another version");
+        IntelligenceTaxonomyVersion currentVersion = taxonomy.getCurrentDefinitionVersion() > 0
+                ? mapper.selectIntelligenceTaxonomyVersion(tenantId, taxonomy.getTaxonomyId(),
+                taxonomy.getCurrentDefinitionVersion()) : null;
+        if (currentVersion != null) {
+            require(command.getEffectiveFrom().isAfter(currentVersion.getEffectiveFrom().toInstant(ZoneOffset.UTC)),
+                    "taxonomy version effectiveFrom must increase strictly");
+        }
+        long nextDefinitionVersion = taxonomy.getCurrentDefinitionVersion() + 1;
+        String levelsSha256 = DigestUtil.sha256Hex(JsonUtils.toJsonString(levels));
+        IntelligenceTaxonomyVersion version = new IntelligenceTaxonomyVersion()
+                .setTaxonomyVersionId(UUID.randomUUID().toString()).setTenantId(tenantId)
+                .setTaxonomyId(taxonomy.getTaxonomyId()).setDefinitionVersion(nextDefinitionVersion)
+                .setLevelCount(levels.size()).setLevelsSha256(levelsSha256)
+                .setApprovedByPrincipalId(command.getApprovedByPrincipalId())
+                .setSourceSystem(command.getSourceSystem()).setSourceTable(command.getSourceTable())
+                .setSourceRecordKey(command.getSourceRecordKey()).setSourceVersion(command.getSourceVersion())
+                .setSourceObservedAt(LocalDateTime.ofInstant(command.getSourceObservedAt(), ZoneOffset.UTC))
+                .setSourceEvidenceRef(command.getSourceEvidenceRef())
+                .setSourceEvidenceSha256(command.getSourceEvidenceSha256())
+                .setEffectiveFrom(LocalDateTime.ofInstant(command.getEffectiveFrom(), ZoneOffset.UTC))
+                .setPublishedAt(now);
+        require(mapper.insertIntelligenceTaxonomyVersion(version) == 1,
+                "failed to persist immutable taxonomy version");
+        int sequence = 0;
+        for (String level : levels) {
+            require(mapper.insertIntelligenceTaxonomyLevel(new IntelligenceTaxonomyLevel()
+                    .setLevelDefinitionId(UUID.randomUUID().toString()).setTenantId(tenantId)
+                    .setTaxonomyVersionId(version.getTaxonomyVersionId()).setTaxonomyId(taxonomy.getTaxonomyId())
+                    .setDefinitionVersion(nextDefinitionVersion).setLevelSequence(++sequence).setLevelCode(level)
+                    .setCreatedAt(now)) == 1, "failed to persist immutable taxonomy level");
+        }
+        String previousStatus = taxonomy.getStatus();
+        require(mapper.publishIntelligenceTaxonomy(tenantId, taxonomy.getTaxonomyId(), taxonomy.getVersion(), now) == 1,
+                "taxonomy publish conflict");
+        taxonomy.setStatus("PUBLISHED").setCurrentDefinitionVersion(nextDefinitionVersion)
+                .setVersion(taxonomy.getVersion() + 1).setUpdatedAt(now);
+        eventService.appendTaxonomyVersion(operationId, taxonomy, version, levels, previousStatus,
+                command, occurredAt, now);
+        return taxonomyView(operationId, taxonomy, version, levels, false);
+    }
+
+    private RiskView retireIntelligenceEventTaxonomy(Long tenantId, Long operationId, RiskCommand command,
+                                                      Instant occurredAt, LocalDateTime now) {
+        requireId(command.getTaxonomyId(), "taxonomyId");
+        requireExpectedVersion(command);
+        requireId(command.getRetiredByPrincipalId(), "retiredByPrincipalId");
+        requireCode(command.getReasonCode(), "reasonCode");
+        validateTaxonomySourceEvidence(command, occurredAt, now);
+        IntelligenceTaxonomy taxonomy = mapper.selectIntelligenceTaxonomyForUpdate(tenantId, command.getTaxonomyId());
+        require(taxonomy != null, "intelligence event taxonomy does not exist");
+        require(Objects.equals(taxonomy.getVersion(), command.getExpectedVersion()), "taxonomy version conflict");
+        require("PUBLISHED".equals(taxonomy.getStatus()), "only a published taxonomy can be retired");
+        IntelligenceTaxonomyVersion currentVersion = mapper.selectIntelligenceTaxonomyVersion(
+                tenantId, taxonomy.getTaxonomyId(), taxonomy.getCurrentDefinitionVersion());
+        require(currentVersion != null, "published taxonomy has no current immutable version");
+        require(!occurredAt.isBefore(currentVersion.getEffectiveFrom().toInstant(ZoneOffset.UTC)),
+                "taxonomy cannot retire before its current version becomes effective");
+        long nextVersion = taxonomy.getVersion() + 1;
+        LocalDateTime retiredAt = LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC);
+        require(mapper.retireIntelligenceTaxonomy(tenantId, taxonomy.getTaxonomyId(), taxonomy.getVersion(),
+                retiredAt, now) == 1, "taxonomy retirement conflict");
+        IntelligenceTaxonomyRetirement retirement = new IntelligenceTaxonomyRetirement()
+                .setRetirementId(UUID.randomUUID().toString()).setTenantId(tenantId)
+                .setTaxonomyId(taxonomy.getTaxonomyId()).setTaxonomyVersion(nextVersion)
+                .setRetiredByPrincipalId(command.getRetiredByPrincipalId()).setReasonCode(command.getReasonCode())
+                .setSourceSystem(command.getSourceSystem()).setSourceTable(command.getSourceTable())
+                .setSourceRecordKey(command.getSourceRecordKey()).setSourceVersion(command.getSourceVersion())
+                .setSourceObservedAt(LocalDateTime.ofInstant(command.getSourceObservedAt(), ZoneOffset.UTC))
+                .setSourceEvidenceRef(command.getSourceEvidenceRef())
+                .setSourceEvidenceSha256(command.getSourceEvidenceSha256()).setRetiredAt(retiredAt).setCreatedAt(now);
+        require(mapper.insertIntelligenceTaxonomyRetirement(retirement) == 1,
+                "failed to persist immutable taxonomy retirement");
+        String previousStatus = taxonomy.getStatus();
+        taxonomy.setStatus("RETIRED").setVersion(nextVersion).setRetiredAt(retiredAt).setUpdatedAt(now);
+        List<String> levels = mapper.selectIntelligenceTaxonomyLevelCodes(
+                tenantId, taxonomy.getTaxonomyId(), taxonomy.getCurrentDefinitionVersion());
+        eventService.appendTaxonomyRetirement(operationId, taxonomy, retirement, levels,
+                previousStatus, command, occurredAt, now);
+        return taxonomyView(operationId, taxonomy, currentVersion, levels, false);
     }
 
     private RiskView publishPolicyVersion(Long tenantId, Long operationId, RiskCommand command, Instant occurredAt,
@@ -402,6 +561,19 @@ public class RiskCommandServiceImpl implements RiskCommandApi, RiskQueryApi {
                 .setPolicyVersion(policy.getCurrentVersion()).setPolicyStatus(policy.getStatus());
     }
 
+    private static RiskView taxonomyView(Long operationId, IntelligenceTaxonomy taxonomy,
+                                         IntelligenceTaxonomyVersion version, List<String> levels,
+                                         boolean duplicate) {
+        return new RiskView().setOperationId(operationId).setDuplicate(duplicate)
+                .setTaxonomyId(taxonomy.getTaxonomyId()).setTaxonomyVersion(taxonomy.getVersion())
+                .setTaxonomyStatus(taxonomy.getStatus())
+                .setTaxonomyVersionId(version == null ? null : version.getTaxonomyVersionId())
+                .setTaxonomyDefinitionVersion(taxonomy.getCurrentDefinitionVersion())
+                .setEventCode(taxonomy.getEventCode()).setIntelligenceLevels(levels)
+                .setRetiredAt(taxonomy.getRetiredAt() == null ? null
+                        : taxonomy.getRetiredAt().toInstant(ZoneOffset.UTC).toString());
+    }
+
     private static RiskView clusterView(Long operationId, Cluster cluster, boolean duplicate) {
         return new RiskView().setOperationId(operationId).setDuplicate(duplicate).setClusterId(cluster.getClusterId())
                 .setClusterVersion(cluster.getVersion()).setClusterStatus(cluster.getStatus())
@@ -430,6 +602,33 @@ public class RiskCommandServiceImpl implements RiskCommandApi, RiskQueryApi {
     private static void requireSafeRef(String value, String field) {
         require(value != null && SAFE_REF.matcher(value).matches(),
                 field + " must be a digest or restricted-store token; raw PII is forbidden");
+    }
+
+    private static void validateTaxonomySourceEvidence(RiskCommand command, Instant occurredAt,
+                                                       LocalDateTime persistedAt) {
+        requireCode(command.getSourceSystem(), "sourceSystem");
+        require(command.getSourceTable() != null && SOURCE_TABLE.matcher(command.getSourceTable()).matches(),
+                "sourceTable must be a lowercase physical source identifier");
+        requireId(command.getSourceRecordKey(), "sourceRecordKey");
+        requireId(command.getSourceVersion(), "sourceVersion");
+        require(command.getSourceObservedAt() != null && !command.getSourceObservedAt().isAfter(occurredAt),
+                "sourceObservedAt must not follow occurredAt");
+        require(!command.getSourceObservedAt().isAfter(persistedAt.toInstant(ZoneOffset.UTC)),
+                "sourceObservedAt must not be in the future relative to persisted evidence");
+        requireSafeRef(command.getSourceEvidenceRef(), "sourceEvidenceRef");
+        require(command.getSourceEvidenceSha256() != null
+                        && HMAC_TOKEN.matcher(command.getSourceEvidenceSha256()).matches(),
+                "sourceEvidenceSha256 must be lowercase SHA-256");
+    }
+
+    private static void requireEventCode(String value) {
+        require(value != null && EVENT_CODE.matcher(value).matches(),
+                "eventCode must preserve a bounded source event identifier");
+    }
+
+    private static void requireLevelCode(String value) {
+        require(value != null && LEVEL_CODE.matcher(value).matches(),
+                "intelligence level must be a bounded uppercase code");
     }
 
     private static String firstNonNull(String... values) {

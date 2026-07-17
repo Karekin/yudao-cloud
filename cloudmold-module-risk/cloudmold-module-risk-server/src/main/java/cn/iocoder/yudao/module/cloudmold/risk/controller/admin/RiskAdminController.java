@@ -30,6 +30,12 @@ public class RiskAdminController {
         return success(queryApi.getPolicy(policyId));
     }
 
+    @GetMapping("/intelligence-taxonomy/get")
+    @PreAuthorize("@ss.hasPermission('cloudmold:risk:query')")
+    public CommonResult<RiskView> getIntelligenceTaxonomy(@RequestParam("taxonomyId") String taxonomyId) {
+        return success(queryApi.getIntelligenceEventTaxonomy(taxonomyId));
+    }
+
     @GetMapping("/cluster/get")
     @PreAuthorize("@ss.hasPermission('cloudmold:risk:query')")
     public CommonResult<RiskView> getCluster(@RequestParam("clusterId") String clusterId) {

@@ -20,6 +20,9 @@ class RiskCommandServiceImplTest {
     private final RiskCommandServiceImpl service = new RiskCommandServiceImpl(mapper, eventService);
     private final Map<String, Operation> operations = new HashMap<>();
     private final Map<String, Policy> policies = new HashMap<>();
+    private final Map<String, IntelligenceTaxonomy> taxonomies = new HashMap<>();
+    private final Map<String, IntelligenceTaxonomyVersion> taxonomyVersions = new HashMap<>();
+    private final Map<String, List<String>> taxonomyLevels = new HashMap<>();
     private final Map<String, Relation> relations = new HashMap<>();
     private final Map<String, Cluster> clusters = new HashMap<>();
     private final Map<String, ReviewCase> reviews = new HashMap<>();
@@ -194,6 +197,55 @@ class RiskCommandServiceImplTest {
                 .hasMessage("idempotency key conflicts with different risk payload");
     }
 
+    @Test
+    void shouldVersionCorrectRetireAndValidateIntelligenceTaxonomyAsOfObservationTime() {
+        Instant firstEffective = Instant.parse("2026-07-17T10:00:00Z");
+        RiskView created = service.execute(base(RiskOperation.CREATE_INTELLIGENCE_EVENT_TAXONOMY,
+                "taxonomy-create-01").occurredAt(firstEffective.minusSeconds(10))
+                .eventCode("event_new_001").build());
+        assertThat(created.getTaxonomyStatus()).isEqualTo("DRAFT");
+        assertThat(created.getTaxonomyVersion()).isEqualTo(1L);
+
+        RiskCommand firstPublication = taxonomyPublication(created.getTaxonomyId(), 1L, firstEffective,
+                "source-v1", List.of("A", "B", "C"), "taxonomy-publish-01");
+        RiskView first = service.execute(firstPublication);
+        assertThat(first.getTaxonomyDefinitionVersion()).isEqualTo(1L);
+        assertThat(first.getIntelligenceLevels()).containsExactly("A", "B", "C");
+        IntelligenceEventTaxonomyReference firstReference = service.validateIntelligenceEventLevel(
+                created.getTaxonomyId(), 1L, "event_new_001", "B", firstEffective.plusSeconds(30));
+        assertThat(firstReference.getTaxonomyVersionId()).isNotBlank();
+
+        Instant correctedEffective = firstEffective.plusSeconds(60);
+        RiskView corrected = service.execute(taxonomyPublication(created.getTaxonomyId(), 2L, correctedEffective,
+                "source-v2", List.of("A", "B", "C", "D"), "taxonomy-publish-02"));
+        assertThat(corrected.getTaxonomyDefinitionVersion()).isEqualTo(2L);
+        assertThatThrownBy(() -> service.validateIntelligenceEventLevel(created.getTaxonomyId(), 1L,
+                "event_new_001", "B", correctedEffective.plusSeconds(1)))
+                .hasMessage("observation must reference the effective non-retired taxonomy version and level");
+        assertThat(service.validateIntelligenceEventLevel(created.getTaxonomyId(), 2L,
+                "event_new_001", "D", correctedEffective.plusSeconds(1)).getIntelligenceLevel()).isEqualTo("D");
+
+        Instant retiredAt = correctedEffective.plusSeconds(60);
+        RiskCommand retirement = taxonomySource(base(RiskOperation.RETIRE_INTELLIGENCE_EVENT_TAXONOMY,
+                "taxonomy-retire-01").occurredAt(retiredAt).taxonomyId(created.getTaxonomyId()).expectedVersion(3L)
+                .retiredByPrincipalId("principal-data-owner-1").reasonCode("SOURCE_ROW_DELETED"), retiredAt,
+                "source-v3").build();
+        RiskView retired = service.execute(retirement);
+        assertThat(retired.getTaxonomyStatus()).isEqualTo("RETIRED");
+        RiskView retiredReplay = service.execute(retirement);
+        assertThat(retiredReplay.getDuplicate()).isTrue();
+        assertThat(retiredReplay.getRetiredAt()).isEqualTo(retired.getRetiredAt());
+        assertThat(service.validateIntelligenceEventLevel(created.getTaxonomyId(), 2L,
+                "event_new_001", "D", retiredAt.minusMillis(1))).isNotNull();
+        assertThatThrownBy(() -> service.validateIntelligenceEventLevel(created.getTaxonomyId(), 2L,
+                "event_new_001", "D", retiredAt))
+                .hasMessage("observation must reference the effective non-retired taxonomy version and level");
+        verify(eventService).appendTaxonomyVersion(anyLong(), any(), any(), eq(List.of("A", "B", "C")),
+                eq("DRAFT"), same(firstPublication), any(), any());
+        verify(eventService).appendTaxonomyRetirement(anyLong(), any(), any(), anyList(),
+                eq("PUBLISHED"), same(retirement), any(), any());
+    }
+
     private RiskView createPublishedPolicy() {
         RiskView policy = service.execute(createPolicy("policy-create-published", "PUBLISHED_POLICY"));
         return service.execute(base(RiskOperation.PUBLISH_POLICY_VERSION, "policy-publish-ready")
@@ -211,6 +263,40 @@ class RiskCommandServiceImplTest {
         when(mapper.insertPolicyRule(any())).thenReturn(1);
         when(mapper.publishPolicy(anyLong(), anyString(), anyLong(), any())).thenReturn(1);
         when(mapper.insertSignal(any())).thenReturn(1);
+        when(mapper.insertIntelligenceTaxonomy(any())).thenAnswer(invocation -> {
+            IntelligenceTaxonomy value = invocation.getArgument(0);
+            taxonomies.put(key(value.getTenantId(), value.getTaxonomyId()), value);
+            return 1;
+        });
+        when(mapper.selectIntelligenceTaxonomy(anyLong(), anyString())).thenAnswer(invocation ->
+                taxonomies.get(key(invocation.getArgument(0), invocation.getArgument(1))));
+        when(mapper.selectIntelligenceTaxonomyForUpdate(anyLong(), anyString())).thenAnswer(invocation ->
+                taxonomies.get(key(invocation.getArgument(0), invocation.getArgument(1))));
+        when(mapper.insertIntelligenceTaxonomyVersion(any())).thenAnswer(invocation -> {
+            IntelligenceTaxonomyVersion value = invocation.getArgument(0);
+            taxonomyVersions.put(taxonomyVersionKey(value.getTenantId(), value.getTaxonomyId(),
+                    value.getDefinitionVersion()), value);
+            return 1;
+        });
+        when(mapper.selectIntelligenceTaxonomyVersion(anyLong(), anyString(), anyLong())).thenAnswer(invocation ->
+                taxonomyVersions.get(taxonomyVersionKey(invocation.getArgument(0), invocation.getArgument(1),
+                        invocation.getArgument(2))));
+        when(mapper.insertIntelligenceTaxonomyLevel(any())).thenAnswer(invocation -> {
+            IntelligenceTaxonomyLevel value = invocation.getArgument(0);
+            taxonomyLevels.computeIfAbsent(taxonomyVersionKey(value.getTenantId(), value.getTaxonomyId(),
+                    value.getDefinitionVersion()), ignored -> new ArrayList<>()).add(value.getLevelCode());
+            return 1;
+        });
+        when(mapper.selectIntelligenceTaxonomyLevelCodes(anyLong(), anyString(), anyLong())).thenAnswer(invocation ->
+                List.copyOf(taxonomyLevels.getOrDefault(taxonomyVersionKey(invocation.getArgument(0),
+                        invocation.getArgument(1), invocation.getArgument(2)), List.of())));
+        when(mapper.publishIntelligenceTaxonomy(anyLong(), anyString(), anyLong(), any())).thenReturn(1);
+        when(mapper.retireIntelligenceTaxonomy(anyLong(), anyString(), anyLong(), any(), any())).thenReturn(1);
+        when(mapper.insertIntelligenceTaxonomyRetirement(any())).thenReturn(1);
+        when(mapper.selectEffectiveIntelligenceTaxonomyReference(anyLong(), anyString(), anyLong(), anyString(),
+                anyString(), any())).thenAnswer(invocation -> effectiveTaxonomyReference(
+                        invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2),
+                        invocation.getArgument(3), invocation.getArgument(4), invocation.getArgument(5)));
         when(mapper.insertRelation(any())).thenAnswer(invocation -> { Relation value = invocation.getArgument(0); relations.put(value.getRelationId(), value); return 1; });
         when(mapper.selectRelation(anyLong(), anyString())).thenAnswer(invocation -> {
             Relation value = relations.get(invocation.getArgument(1)); return value != null && value.getTenantId().equals(invocation.getArgument(0)) ? value : null;
@@ -280,6 +366,48 @@ class RiskCommandServiceImplTest {
     private static RiskCommand.RiskCommandBuilder base(RiskOperation operation, String key) {
         return RiskCommand.builder().operation(operation).idempotencyKey(key).runId("risk-run-001")
                 .correlationId("risk-correlation-001").occurredAt(Instant.now().minusSeconds(30));
+    }
+
+    private static RiskCommand taxonomyPublication(String taxonomyId, Long expectedVersion, Instant effectiveAt,
+                                                    String sourceVersion, List<String> levels, String key) {
+        return taxonomySource(base(RiskOperation.PUBLISH_INTELLIGENCE_EVENT_TAXONOMY_VERSION, key)
+                .occurredAt(effectiveAt).taxonomyId(taxonomyId).expectedVersion(expectedVersion)
+                .approvedByPrincipalId("principal-data-owner-1").effectiveFrom(effectiveAt)
+                .intelligenceLevels(levels), effectiveAt, sourceVersion).build();
+    }
+
+    private static RiskCommand.RiskCommandBuilder taxonomySource(RiskCommand.RiskCommandBuilder builder,
+                                                                  Instant observedAt, String sourceVersion) {
+        return builder.sourceSystem("YSHOPPING").sourceTable("ods_intelligence_event_code_level_df")
+                .sourceRecordKey("19").sourceVersion(sourceVersion).sourceObservedAt(observedAt.minusSeconds(1))
+                .sourceEvidenceRef("restricted:taxonomy_evidence_0001")
+                .sourceEvidenceSha256("f".repeat(64));
+    }
+
+    private IntelligenceTaxonomyReferenceRow effectiveTaxonomyReference(
+            Long tenantId, String taxonomyId, Long definitionVersion, String eventCode, String levelCode,
+            java.time.LocalDateTime observedAt) {
+        IntelligenceTaxonomy taxonomy = taxonomies.get(key(tenantId, taxonomyId));
+        IntelligenceTaxonomyVersion version = taxonomyVersions.get(
+                taxonomyVersionKey(tenantId, taxonomyId, definitionVersion));
+        if (taxonomy == null || version == null || !taxonomy.getEventCode().equals(eventCode)
+                || !taxonomyLevels.getOrDefault(taxonomyVersionKey(tenantId, taxonomyId, definitionVersion), List.of())
+                .contains(levelCode)
+                || version.getEffectiveFrom().isAfter(observedAt)
+                || (taxonomy.getRetiredAt() != null && !observedAt.isBefore(taxonomy.getRetiredAt()))) return null;
+        boolean newerEffective = taxonomyVersions.values().stream().anyMatch(candidate ->
+                candidate.getTenantId().equals(tenantId) && candidate.getTaxonomyId().equals(taxonomyId)
+                        && candidate.getDefinitionVersion() > definitionVersion
+                        && !candidate.getEffectiveFrom().isAfter(observedAt));
+        if (newerEffective) return null;
+        return new IntelligenceTaxonomyReferenceRow().setTaxonomyId(taxonomyId)
+                .setTaxonomyVersionId(version.getTaxonomyVersionId()).setDefinitionVersion(definitionVersion)
+                .setEventCode(eventCode).setLevelCode(levelCode).setLevelsSha256(version.getLevelsSha256())
+                .setEffectiveFrom(version.getEffectiveFrom());
+    }
+
+    private static String taxonomyVersionKey(Object tenantId, Object taxonomyId, Object version) {
+        return tenantId + "|" + taxonomyId + "|" + version;
     }
 
     private static String key(Object tenantId, Object id) { return tenantId + "|" + id; }

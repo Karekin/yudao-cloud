@@ -38,6 +38,46 @@ public final class RiskRecords {
     }
 
     @Data @Accessors(chain = true)
+    public static class IntelligenceTaxonomy {
+        private String taxonomyId; private Long tenantId; private String eventCode; private String status;
+        private Long currentDefinitionVersion; private Long version; private LocalDateTime retiredAt;
+        private LocalDateTime createdAt; private LocalDateTime updatedAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class IntelligenceTaxonomyVersion {
+        private String taxonomyVersionId; private Long tenantId; private String taxonomyId;
+        private Long definitionVersion; private Integer levelCount; private String levelsSha256;
+        private String approvedByPrincipalId; private String sourceSystem; private String sourceTable;
+        private String sourceRecordKey; private String sourceVersion; private LocalDateTime sourceObservedAt;
+        private String sourceEvidenceRef; private String sourceEvidenceSha256; private LocalDateTime effectiveFrom;
+        private LocalDateTime publishedAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class IntelligenceTaxonomyLevel {
+        private String levelDefinitionId; private Long tenantId; private String taxonomyVersionId;
+        private String taxonomyId; private Long definitionVersion; private Integer levelSequence;
+        private String levelCode; private LocalDateTime createdAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class IntelligenceTaxonomyRetirement {
+        private String retirementId; private Long tenantId; private String taxonomyId; private Long taxonomyVersion;
+        private String retiredByPrincipalId; private String reasonCode; private String sourceSystem;
+        private String sourceTable; private String sourceRecordKey; private String sourceVersion;
+        private LocalDateTime sourceObservedAt; private String sourceEvidenceRef; private String sourceEvidenceSha256;
+        private LocalDateTime retiredAt; private LocalDateTime createdAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class IntelligenceTaxonomyReferenceRow {
+        private String taxonomyId; private String taxonomyVersionId; private Long definitionVersion;
+        private String eventCode; private String levelCode; private String levelsSha256;
+        private LocalDateTime effectiveFrom;
+    }
+
+    @Data @Accessors(chain = true)
     public static class Signal {
         private String signalId; private Long tenantId; private String subjectPrincipalId; private String policyId;
         private Long policyVersion; private String signalType; private String severity; private String evidenceRef;

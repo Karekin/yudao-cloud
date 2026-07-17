@@ -37,6 +37,70 @@ public class RiskEventService {
                 policy.getTenantId(), command, occurredAt, payload);
     }
 
+    public void appendTaxonomyHistory(Long operationId, IntelligenceTaxonomy taxonomy, String previousStatus,
+                                      RiskCommand command, Instant occurredAt, LocalDateTime now) {
+        history(operationId, taxonomy.getTenantId(), "INTELLIGENCE_TAXONOMY", taxonomy.getTaxonomyId(),
+                taxonomy.getVersion(), previousStatus, taxonomy.getStatus(), command.getReasonCode(), occurredAt, now);
+    }
+
+    public void appendTaxonomyVersion(Long operationId, IntelligenceTaxonomy taxonomy,
+                                      IntelligenceTaxonomyVersion version, List<String> levels,
+                                      String previousStatus, RiskCommand command, Instant occurredAt,
+                                      LocalDateTime now) {
+        appendTaxonomyHistory(operationId, taxonomy, previousStatus, command, occurredAt, now);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("taxonomy_id", taxonomy.getTaxonomyId());
+        payload.put("taxonomy_version_id", version.getTaxonomyVersionId());
+        payload.put("definition_version", version.getDefinitionVersion());
+        payload.put("event_code", taxonomy.getEventCode());
+        payload.put("level_codes", levels);
+        payload.put("levels_sha256", version.getLevelsSha256());
+        payload.put("previous_status", previousStatus);
+        payload.put("current_status", taxonomy.getStatus());
+        payload.put("approved_by_principal_id", version.getApprovedByPrincipalId());
+        payload.put("effective_from", version.getEffectiveFrom().toInstant(ZoneOffset.UTC).toString());
+        addTaxonomySourceEvidence(payload, version.getSourceSystem(), version.getSourceTable(),
+                version.getSourceRecordKey(), version.getSourceVersion(), version.getSourceObservedAt(),
+                version.getSourceEvidenceRef(), version.getSourceEvidenceSha256());
+        append("risk.intelligence_event_taxonomy.version_published", "risk_intelligence_event_taxonomy",
+                taxonomy.getTaxonomyId(), taxonomy.getVersion(), taxonomy.getTenantId(), command, occurredAt, payload);
+    }
+
+    public void appendTaxonomyRetirement(Long operationId, IntelligenceTaxonomy taxonomy,
+                                         IntelligenceTaxonomyRetirement retirement, List<String> levels,
+                                         String previousStatus, RiskCommand command, Instant occurredAt,
+                                         LocalDateTime now) {
+        appendTaxonomyHistory(operationId, taxonomy, previousStatus, command, occurredAt, now);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("taxonomy_id", taxonomy.getTaxonomyId());
+        payload.put("definition_version", taxonomy.getCurrentDefinitionVersion());
+        payload.put("event_code", taxonomy.getEventCode());
+        payload.put("level_codes", levels);
+        payload.put("previous_status", previousStatus);
+        payload.put("current_status", taxonomy.getStatus());
+        payload.put("retired_by_principal_id", retirement.getRetiredByPrincipalId());
+        payload.put("reason_code", retirement.getReasonCode());
+        payload.put("retired_at", retirement.getRetiredAt().toInstant(ZoneOffset.UTC).toString());
+        addTaxonomySourceEvidence(payload, retirement.getSourceSystem(), retirement.getSourceTable(),
+                retirement.getSourceRecordKey(), retirement.getSourceVersion(), retirement.getSourceObservedAt(),
+                retirement.getSourceEvidenceRef(), retirement.getSourceEvidenceSha256());
+        append("risk.intelligence_event_taxonomy.retired", "risk_intelligence_event_taxonomy",
+                taxonomy.getTaxonomyId(), taxonomy.getVersion(), taxonomy.getTenantId(), command, occurredAt, payload);
+    }
+
+    private static void addTaxonomySourceEvidence(Map<String, Object> payload, String sourceSystem,
+                                                   String sourceTable, String sourceRecordKey,
+                                                   String sourceVersion, LocalDateTime sourceObservedAt,
+                                                   String sourceEvidenceRef, String sourceEvidenceSha256) {
+        payload.put("source_system", sourceSystem);
+        payload.put("source_table", sourceTable);
+        payload.put("source_record_key", sourceRecordKey);
+        payload.put("source_version", sourceVersion);
+        payload.put("source_observed_at", sourceObservedAt.toInstant(ZoneOffset.UTC).toString());
+        payload.put("source_evidence_ref", sourceEvidenceRef);
+        payload.put("source_evidence_sha256", sourceEvidenceSha256);
+    }
+
     public void appendSignal(Signal signal, RiskCommand command, Instant occurredAt) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("signal_id", signal.getSignalId());

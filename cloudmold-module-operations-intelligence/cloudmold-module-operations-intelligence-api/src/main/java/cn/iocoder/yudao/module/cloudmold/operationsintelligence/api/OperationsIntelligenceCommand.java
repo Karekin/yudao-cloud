@@ -26,6 +26,10 @@ public class OperationsIntelligenceCommand {
         private String sourceSystem;
         private String sourceEventId;
         private String observationType;
+        private String taxonomyId;
+        private Long taxonomyDefinitionVersion;
+        private String eventCode;
+        private String intelligenceLevelCode;
         private String subjectType;
         private String subjectRef;
         private String evidenceRef;

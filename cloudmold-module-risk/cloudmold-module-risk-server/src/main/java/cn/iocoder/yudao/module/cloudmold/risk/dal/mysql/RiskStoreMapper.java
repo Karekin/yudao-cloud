@@ -4,6 +4,7 @@ import cn.iocoder.yudao.module.cloudmold.risk.dal.dataobject.RiskRecords.*;
 import org.apache.ibatis.annotations.*;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface RiskStoreMapper {
@@ -73,6 +74,121 @@ public interface RiskStoreMapper {
             VALUES (#{ruleId},#{tenantId},#{policyVersionId},#{policyId},#{policyVersion},#{ruleSequence},#{ruleCode},
                     #{signalType},#{operatorCode},#{thresholdValue},#{outcomeCode},#{explanationTemplate},#{createdAt})
             """) int insertPolicyRule(PolicyRule value);
+
+    @Insert("""
+            INSERT INTO cloudmold_risk_intelligence_taxonomy
+              (taxonomy_id,tenant_id,event_code,status,current_definition_version,version,retired_at,created_at,updated_at)
+            VALUES (#{taxonomyId},#{tenantId},#{eventCode},#{status},#{currentDefinitionVersion},#{version},#{retiredAt},
+                    #{createdAt},#{updatedAt})
+            """) int insertIntelligenceTaxonomy(IntelligenceTaxonomy value);
+
+    @Select("""
+            SELECT taxonomy_id,tenant_id,event_code,status,current_definition_version,version,retired_at,
+                   created_at,updated_at
+            FROM cloudmold_risk_intelligence_taxonomy
+            WHERE tenant_id=#{tenantId} AND taxonomy_id=#{taxonomyId} FOR UPDATE
+            """) IntelligenceTaxonomy selectIntelligenceTaxonomyForUpdate(
+            @Param("tenantId") Long tenantId, @Param("taxonomyId") String taxonomyId);
+
+    @Select("""
+            SELECT taxonomy_id,tenant_id,event_code,status,current_definition_version,version,retired_at,
+                   created_at,updated_at
+            FROM cloudmold_risk_intelligence_taxonomy
+            WHERE tenant_id=#{tenantId} AND taxonomy_id=#{taxonomyId}
+            """) IntelligenceTaxonomy selectIntelligenceTaxonomy(
+            @Param("tenantId") Long tenantId, @Param("taxonomyId") String taxonomyId);
+
+    @Insert("""
+            INSERT INTO cloudmold_risk_intelligence_taxonomy_version
+              (taxonomy_version_id,tenant_id,taxonomy_id,definition_version,level_count,levels_sha256,
+               approved_by_principal_id,source_system,source_table,source_record_key,source_version,
+               source_observed_at,source_evidence_ref,source_evidence_sha256,effective_from,published_at)
+            VALUES (#{taxonomyVersionId},#{tenantId},#{taxonomyId},#{definitionVersion},#{levelCount},#{levelsSha256},
+                    #{approvedByPrincipalId},#{sourceSystem},#{sourceTable},#{sourceRecordKey},#{sourceVersion},
+                    #{sourceObservedAt},#{sourceEvidenceRef},#{sourceEvidenceSha256},#{effectiveFrom},#{publishedAt})
+            """) int insertIntelligenceTaxonomyVersion(IntelligenceTaxonomyVersion value);
+
+    @Select("""
+            SELECT taxonomy_version_id,tenant_id,taxonomy_id,definition_version,level_count,levels_sha256,
+                   approved_by_principal_id,source_system,source_table,source_record_key,source_version,
+                   source_observed_at,source_evidence_ref,source_evidence_sha256,effective_from,published_at
+            FROM cloudmold_risk_intelligence_taxonomy_version
+            WHERE tenant_id=#{tenantId} AND taxonomy_id=#{taxonomyId} AND definition_version=#{definitionVersion}
+            """) IntelligenceTaxonomyVersion selectIntelligenceTaxonomyVersion(
+            @Param("tenantId") Long tenantId, @Param("taxonomyId") String taxonomyId,
+            @Param("definitionVersion") Long definitionVersion);
+
+    @Insert("""
+            INSERT INTO cloudmold_risk_intelligence_taxonomy_level
+              (level_definition_id,tenant_id,taxonomy_version_id,taxonomy_id,definition_version,level_sequence,
+               level_code,created_at)
+            VALUES (#{levelDefinitionId},#{tenantId},#{taxonomyVersionId},#{taxonomyId},#{definitionVersion},
+                    #{levelSequence},#{levelCode},#{createdAt})
+            """) int insertIntelligenceTaxonomyLevel(IntelligenceTaxonomyLevel value);
+
+    @Select("""
+            SELECT level_code FROM cloudmold_risk_intelligence_taxonomy_level
+            WHERE tenant_id=#{tenantId} AND taxonomy_id=#{taxonomyId} AND definition_version=#{definitionVersion}
+            ORDER BY level_sequence
+            """) List<String> selectIntelligenceTaxonomyLevelCodes(
+            @Param("tenantId") Long tenantId, @Param("taxonomyId") String taxonomyId,
+            @Param("definitionVersion") Long definitionVersion);
+
+    @Update("""
+            UPDATE cloudmold_risk_intelligence_taxonomy
+            SET status='PUBLISHED',current_definition_version=current_definition_version+1,
+                version=version+1,updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND taxonomy_id=#{taxonomyId} AND version=#{expectedVersion}
+              AND status IN ('DRAFT','PUBLISHED')
+            """) int publishIntelligenceTaxonomy(
+            @Param("tenantId") Long tenantId, @Param("taxonomyId") String taxonomyId,
+            @Param("expectedVersion") Long expectedVersion, @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE cloudmold_risk_intelligence_taxonomy
+            SET status='RETIRED',version=version+1,retired_at=#{retiredAt},updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND taxonomy_id=#{taxonomyId} AND version=#{expectedVersion}
+              AND status='PUBLISHED'
+            """) int retireIntelligenceTaxonomy(
+            @Param("tenantId") Long tenantId, @Param("taxonomyId") String taxonomyId,
+            @Param("expectedVersion") Long expectedVersion, @Param("retiredAt") LocalDateTime retiredAt,
+            @Param("now") LocalDateTime now);
+
+    @Insert("""
+            INSERT INTO cloudmold_risk_intelligence_taxonomy_retirement
+              (retirement_id,tenant_id,taxonomy_id,taxonomy_version,retired_by_principal_id,reason_code,
+               source_system,source_table,source_record_key,source_version,source_observed_at,source_evidence_ref,
+               source_evidence_sha256,retired_at,created_at)
+            VALUES (#{retirementId},#{tenantId},#{taxonomyId},#{taxonomyVersion},#{retiredByPrincipalId},#{reasonCode},
+                    #{sourceSystem},#{sourceTable},#{sourceRecordKey},#{sourceVersion},#{sourceObservedAt},
+                    #{sourceEvidenceRef},#{sourceEvidenceSha256},#{retiredAt},#{createdAt})
+            """) int insertIntelligenceTaxonomyRetirement(IntelligenceTaxonomyRetirement value);
+
+    @Select("""
+            SELECT t.taxonomy_id,v.taxonomy_version_id,v.definition_version,t.event_code,l.level_code,
+                   v.levels_sha256,v.effective_from
+            FROM cloudmold_risk_intelligence_taxonomy t
+            JOIN cloudmold_risk_intelligence_taxonomy_version v
+              ON v.tenant_id=t.tenant_id AND v.taxonomy_id=t.taxonomy_id
+            JOIN cloudmold_risk_intelligence_taxonomy_level l
+              ON l.tenant_id=v.tenant_id AND l.taxonomy_version_id=v.taxonomy_version_id
+            WHERE t.tenant_id=#{tenantId} AND t.taxonomy_id=#{taxonomyId}
+              AND v.definition_version=#{definitionVersion} AND t.event_code=#{eventCode}
+              AND l.level_code=#{levelCode} AND v.effective_from <= #{observedAt}
+              AND (t.retired_at IS NULL OR #{observedAt} < t.retired_at)
+              AND NOT EXISTS (
+                  SELECT 1 FROM cloudmold_risk_intelligence_taxonomy_version newer
+                  WHERE newer.tenant_id=v.tenant_id AND newer.taxonomy_id=v.taxonomy_id
+                    AND newer.effective_from <= #{observedAt}
+                    AND (newer.effective_from > v.effective_from
+                         OR (newer.effective_from=v.effective_from
+                             AND newer.definition_version > v.definition_version))
+              )
+            FOR SHARE
+            """) IntelligenceTaxonomyReferenceRow selectEffectiveIntelligenceTaxonomyReference(
+            @Param("tenantId") Long tenantId, @Param("taxonomyId") String taxonomyId,
+            @Param("definitionVersion") Long definitionVersion, @Param("eventCode") String eventCode,
+            @Param("levelCode") String levelCode, @Param("observedAt") LocalDateTime observedAt);
 
     @Insert("""
             INSERT INTO cloudmold_risk_signal
