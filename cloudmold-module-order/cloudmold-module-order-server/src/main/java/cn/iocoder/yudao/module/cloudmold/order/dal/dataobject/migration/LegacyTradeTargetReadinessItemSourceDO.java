@@ -10,6 +10,13 @@ public class LegacyTradeTargetReadinessItemSourceDO {
     private Long legacyOrderItemId;
     private String itemEvidenceId;
     private String legacyItemSnapshotHash;
+    private Integer productIdentityQualificationCount;
+    private String productIdentityQualificationId;
+    private Long qualifiedLegacyOrderItemId;
+    private Long historicalSpuId;
+    private Long historicalSkuId;
+    private String productIdentitySourceItemEvidenceHash;
+    private String historicalProductSnapshotHash;
     private Boolean deleted;
     private Boolean orderDeleted;
     private Long legacySpuId;

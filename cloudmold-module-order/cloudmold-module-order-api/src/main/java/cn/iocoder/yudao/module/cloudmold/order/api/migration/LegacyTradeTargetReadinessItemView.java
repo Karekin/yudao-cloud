@@ -12,6 +12,8 @@ public class LegacyTradeTargetReadinessItemView {
     private Long legacyOrderId;
     private Long legacyOrderItemId;
     private String itemEvidenceId;
+    private String productIdentityQualificationId;
+    private String historicalProductIdentityStatus;
     private String spuMappingStatus;
     private String canonicalSpuId;
     private String skuMappingStatus;

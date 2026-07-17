@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 public class LegacyTradeTargetReadinessServiceImpl implements LegacyTradeTargetReadinessApi {
 
     static final String READINESS_EVENT = "order.migration.legacy_trade_target_readiness_assessed";
-    static final String POLICY_VERSION = "legacy-trade-target-readiness-v1";
+    static final String POLICY_VERSION = "legacy-trade-target-readiness-v2";
     private static final int OPERATION_SUCCEEDED = 10;
 
     private final LegacyTradeTargetReadinessMapper mapper;
@@ -175,6 +175,16 @@ public class LegacyTradeTargetReadinessServiceImpl implements LegacyTradeTargetR
         String skuStatus = resolutionStatus(source.getSkuMappingCount());
         String itemPlanStatus = resolutionStatus(source.getOrderItemMappingCount());
         boolean excluded = Boolean.TRUE.equals(source.getDeleted()) || Boolean.TRUE.equals(source.getOrderDeleted());
+        boolean productIdentityExact = Objects.equals(source.getProductIdentityQualificationCount(), 1)
+                && Objects.equals(source.getLegacyOrderItemId(), source.getQualifiedLegacyOrderItemId())
+                && Objects.equals(source.getLegacySpuId(), source.getHistoricalSpuId())
+                && Objects.equals(source.getLegacySkuId(), source.getHistoricalSkuId())
+                && Objects.equals(source.getLegacyItemSnapshotHash(), source.getProductIdentitySourceItemEvidenceHash())
+                && source.getHistoricalProductSnapshotHash() != null
+                && source.getHistoricalProductSnapshotHash().matches("[0-9a-f]{64}");
+        String historicalProductIdentityStatus = productIdentityExact ? "QUALIFIED"
+                : (Objects.equals(source.getProductIdentityQualificationCount(), 0)
+                || source.getProductIdentityQualificationCount() == null) ? "MISSING" : "AMBIGUOUS";
         boolean moneyExact = source.getItemQuantity() != null && source.getItemQuantity() > 0
                 && source.getUnitPriceMinor() != null && source.getUnitPriceMinor() >= 0
                 && source.getGrossAmountMinor() != null
@@ -190,6 +200,11 @@ public class LegacyTradeTargetReadinessServiceImpl implements LegacyTradeTargetR
         if (excluded) blockers.add("SOURCE_DELETED");
         if (!"SOURCE_IDS_PRESENT".equals(source.getSourceProductIdentityStatus())) {
             blockers.add("SOURCE_PRODUCT_IDS_MISSING");
+        }
+        if (!excluded && !productIdentityExact) {
+            blockers.add("MISSING".equals(historicalProductIdentityStatus)
+                    ? "HISTORICAL_PRODUCT_IDENTITY_MISSING"
+                    : "HISTORICAL_PRODUCT_IDENTITY_AMBIGUOUS_OR_INVALID");
         }
         addResolutionBlocker(blockers, "SPU_MAPPING", spuStatus);
         addResolutionBlocker(blockers, "SKU_MAPPING", skuStatus);
@@ -208,6 +223,9 @@ public class LegacyTradeTargetReadinessServiceImpl implements LegacyTradeTargetR
         String readiness = excluded ? "EXCLUDED" : ready ? "READY" : "BLOCKED";
         String evidenceHash = DigestUtil.sha256Hex(String.join("\u001f",
                 Objects.toString(source.getLegacyItemSnapshotHash(), ""), spuStatus,
+                historicalProductIdentityStatus,
+                Objects.toString(source.getProductIdentityQualificationId(), ""),
+                Objects.toString(source.getHistoricalProductSnapshotHash(), ""),
                 Objects.toString(source.getSpuMappingId(), ""), Objects.toString(source.getSpuMappingVersion(), ""),
                 skuStatus, Objects.toString(source.getSkuMappingId(), ""),
                 Objects.toString(source.getSkuMappingVersion(), ""), itemPlanStatus,
@@ -222,6 +240,9 @@ public class LegacyTradeTargetReadinessServiceImpl implements LegacyTradeTargetR
                 .setOrderReadinessId(orderReadinessId).setLegacyOrderId(source.getLegacyOrderId())
                 .setLegacyOrderItemId(source.getLegacyOrderItemId()).setItemEvidenceId(source.getItemEvidenceId())
                 .setLegacyItemSnapshotHash(source.getLegacyItemSnapshotHash())
+                .setProductIdentityQualificationId(productIdentityExact
+                        ? source.getProductIdentityQualificationId() : null)
+                .setHistoricalProductIdentityStatus(historicalProductIdentityStatus)
                 .setSpuMappingId("QUALIFIED".equals(spuStatus) ? source.getSpuMappingId() : null)
                 .setCanonicalSpuId("QUALIFIED".equals(spuStatus) ? source.getCanonicalSpuId() : null)
                 .setSpuMappingVersion("QUALIFIED".equals(spuStatus) ? source.getSpuMappingVersion() : null)
@@ -347,6 +368,8 @@ public class LegacyTradeTargetReadinessServiceImpl implements LegacyTradeTargetR
             Map<String, Object> value = new LinkedHashMap<>();
             value.put("item_readiness_id", item.getItemReadinessId());
             value.put("legacy_order_item_id", item.getLegacyOrderItemId());
+            value.put("product_identity_qualification_id", item.getProductIdentityQualificationId());
+            value.put("historical_product_identity_status", item.getHistoricalProductIdentityStatus());
             value.put("spu_mapping_status", item.getSpuMappingStatus());
             value.put("canonical_spu_id", item.getCanonicalSpuId());
             value.put("sku_mapping_status", item.getSkuMappingStatus());
@@ -369,7 +392,7 @@ public class LegacyTradeTargetReadinessServiceImpl implements LegacyTradeTargetR
         String idempotency = command.getIdempotencyKey() + ":order:" + order.getLegacyOrderId();
         outboxAppender.append(AppendDomainEventCommand.builder()
                 .eventId(deterministicUuid(tenantId + "|" + idempotency))
-                .eventType(READINESS_EVENT).schemaVersion(1).sourceSystem("cloudmold-order")
+                .eventType(READINESS_EVENT).schemaVersion(2).sourceSystem("cloudmold-order")
                 .tenantId(tenantId).aggregateType("legacy_trade_target_readiness")
                 .aggregateId(order.getOrderReadinessId()).aggregateVersion(1L).eventSequence((short) 1)
                 .occurredAt(command.getOccurredAt()).correlationId(command.getCorrelationId())
@@ -396,7 +419,7 @@ public class LegacyTradeTargetReadinessServiceImpl implements LegacyTradeTargetR
 
     private static String requirePolicy(String value) {
         String policy = requireText(value, "policyVersion", 64);
-        require(POLICY_VERSION.equals(policy), "new target-readiness assessments require policy v1");
+        require(POLICY_VERSION.equals(policy), "new target-readiness assessments require policy v2");
         return policy;
     }
 
@@ -441,6 +464,8 @@ public class LegacyTradeTargetReadinessServiceImpl implements LegacyTradeTargetR
                 .setTargetReadinessRunId(value.getTargetReadinessRunId())
                 .setOrderReadinessId(value.getOrderReadinessId()).setLegacyOrderId(value.getLegacyOrderId())
                 .setLegacyOrderItemId(value.getLegacyOrderItemId()).setItemEvidenceId(value.getItemEvidenceId())
+                .setProductIdentityQualificationId(value.getProductIdentityQualificationId())
+                .setHistoricalProductIdentityStatus(value.getHistoricalProductIdentityStatus())
                 .setSpuMappingStatus(value.getSpuMappingStatus()).setCanonicalSpuId(value.getCanonicalSpuId())
                 .setSkuMappingStatus(value.getSkuMappingStatus()).setCanonicalSkuId(value.getCanonicalSkuId())
                 .setOrderItemMappingStatus(value.getOrderItemMappingStatus())

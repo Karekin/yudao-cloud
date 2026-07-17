@@ -61,7 +61,17 @@ public interface LegacyTradeTargetReadinessMapper {
                                                                       @Param("sourceRunId") String sourceRunId);
 
     @Select("""
-            WITH spu_map AS (
+            WITH product_identity AS (
+              SELECT tenant_id,source_migration_run_id,item_evidence_id,COUNT(*) qualification_count,
+                     MAX(qualification_id) qualification_id,
+                     MAX(legacy_order_item_id) qualified_legacy_order_item_id,
+                     MAX(historical_spu_id) historical_spu_id,MAX(historical_sku_id) historical_sku_id,
+                     MAX(source_item_evidence_hash) source_item_evidence_hash,
+                     MAX(historical_product_snapshot_hash) historical_product_snapshot_hash
+              FROM cloudmold_order_product_identity_qualification
+              WHERE status='QUALIFIED'
+              GROUP BY tenant_id,source_migration_run_id,item_evidence_id
+            ), spu_map AS (
               SELECT tenant_id,source_id,COUNT(*) mapping_count,MAX(mapping_id) mapping_id,
                      MAX(target_id) target_id,MAX(version) version
               FROM cloudmold_catalog_migration_source_mapping
@@ -86,6 +96,19 @@ public interface LegacyTradeTargetReadinessMapper {
             )
             SELECT item.tenant_id,item.candidate_id,item.legacy_order_id,item.legacy_order_item_id,
                    item.item_evidence_id,item.legacy_item_snapshot_hash,item.is_deleted AS deleted,
+                   COALESCE(product_identity.qualification_count,0) product_identity_qualification_count,
+                   CASE WHEN product_identity.qualification_count=1
+                     THEN product_identity.qualification_id END product_identity_qualification_id,
+                   CASE WHEN product_identity.qualification_count=1
+                     THEN product_identity.qualified_legacy_order_item_id END qualified_legacy_order_item_id,
+                   CASE WHEN product_identity.qualification_count=1
+                     THEN product_identity.historical_spu_id END historical_spu_id,
+                   CASE WHEN product_identity.qualification_count=1
+                     THEN product_identity.historical_sku_id END historical_sku_id,
+                   CASE WHEN product_identity.qualification_count=1
+                     THEN product_identity.source_item_evidence_hash END product_identity_source_item_evidence_hash,
+                   CASE WHEN product_identity.qualification_count=1
+                     THEN product_identity.historical_product_snapshot_hash END historical_product_snapshot_hash,
                    candidate.is_deleted AS order_deleted,item.legacy_spu_id,item.legacy_sku_id,
                    item.source_product_identity_status,item.item_quantity,item.unit_price_minor,
                    item.gross_amount_minor,item.generic_discount_amount_minor,item.coupon_amount_minor,
@@ -111,6 +134,9 @@ public interface LegacyTradeTargetReadinessMapper {
               ON candidate.tenant_id=item.tenant_id
              AND BINARY candidate.migration_run_id=BINARY item.migration_run_id
              AND BINARY candidate.candidate_id=BINARY item.candidate_id
+            LEFT JOIN product_identity ON product_identity.tenant_id=item.tenant_id
+             AND BINARY product_identity.source_migration_run_id=BINARY item.migration_run_id
+             AND BINARY product_identity.item_evidence_id=BINARY item.item_evidence_id
             LEFT JOIN spu_map ON spu_map.tenant_id=item.tenant_id
              AND spu_map.source_id=CONVERT(CAST(item.legacy_spu_id AS CHAR) USING utf8mb4)
                COLLATE utf8mb4_unicode_ci
@@ -200,7 +226,8 @@ public interface LegacyTradeTargetReadinessMapper {
     @Insert("""
             INSERT INTO cloudmold_order_target_readiness_item
               (item_readiness_id,tenant_id,target_readiness_run_id,order_readiness_id,legacy_order_id,
-               legacy_order_item_id,item_evidence_id,legacy_item_snapshot_hash,spu_mapping_id,canonical_spu_id,
+               legacy_order_item_id,item_evidence_id,legacy_item_snapshot_hash,product_identity_qualification_id,
+               historical_product_identity_status,spu_mapping_id,canonical_spu_id,
                spu_mapping_version,spu_mapping_status,sku_mapping_id,canonical_sku_id,sku_mapping_version,
                sku_mapping_status,order_item_mapping_plan_id,planned_order_item_id,planned_order_id,
                order_item_mapping_version,order_item_mapping_status,money_reconciliation_status,
@@ -208,7 +235,8 @@ public interface LegacyTradeTargetReadinessMapper {
                evidence_hash,version,assessed_at,created_at,updated_at)
             VALUES
               (#{itemReadinessId},#{tenantId},#{targetReadinessRunId},#{orderReadinessId},#{legacyOrderId},
-               #{legacyOrderItemId},#{itemEvidenceId},#{legacyItemSnapshotHash},#{spuMappingId},#{canonicalSpuId},
+               #{legacyOrderItemId},#{itemEvidenceId},#{legacyItemSnapshotHash},#{productIdentityQualificationId},
+               #{historicalProductIdentityStatus},#{spuMappingId},#{canonicalSpuId},
                #{spuMappingVersion},#{spuMappingStatus},#{skuMappingId},#{canonicalSkuId},#{skuMappingVersion},
                #{skuMappingStatus},#{orderItemMappingPlanId},#{plannedOrderItemId},#{plannedOrderId},
                #{orderItemMappingVersion},#{orderItemMappingStatus},#{moneyReconciliationStatus},

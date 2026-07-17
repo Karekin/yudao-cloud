@@ -113,13 +113,14 @@ class LegacyTradeTargetReadinessServiceImplTest {
                 .singleElement().satisfies(value -> {
                     assertThat(value.getSpuMappingStatus()).isEqualTo("MISSING");
                     assertThat(value.getSkuMappingStatus()).isEqualTo("MISSING");
+                    assertThat(value.getHistoricalProductIdentityStatus()).isEqualTo("MISSING");
                     assertThat(value.getOrderItemMappingStatus()).isEqualTo("MISSING");
                     assertThat(value.getMappingReadinessStatus()).isEqualTo("BLOCKED");
                     assertThat(value.getCanonicalImportAllowed()).isFalse();
                 });
         assertThat(events).hasSize(2).allSatisfy(event -> {
             assertThat(event.getEventType()).isEqualTo(LegacyTradeTargetReadinessServiceImpl.READINESS_EVENT);
-            assertThat(event.getSchemaVersion()).isEqualTo(1);
+            assertThat(event.getSchemaVersion()).isEqualTo(2);
             assertThat(event.getPayload()).containsEntry("target_readiness_run_id", READY_RUN)
                     .containsEntry("source_migration_run_id", SOURCE_RUN)
                     .containsEntry("canonical_import_allowed", false);
@@ -130,6 +131,11 @@ class LegacyTradeTargetReadinessServiceImplTest {
     void fullyQualifiedPlansCanPassMappingAdmissionButNeverOpenCanonicalImport() {
         LegacyTradeTargetReadinessCommand command = command();
         LegacyTradeTargetReadinessItemSourceDO itemSource = itemSource(20L, 200L, false, false)
+                .setProductIdentityQualificationCount(1)
+                .setProductIdentityQualificationId("44000000-0000-4000-8000-000000000009")
+                .setQualifiedLegacyOrderItemId(200L).setHistoricalSpuId(1200L).setHistoricalSkuId(2200L)
+                .setProductIdentitySourceItemEvidenceHash("b".repeat(64))
+                .setHistoricalProductSnapshotHash("c".repeat(64))
                 .setSpuMappingCount(1).setSpuMappingId("44000000-0000-4000-8000-000000000010")
                 .setCanonicalSpuId("44000000-0000-4000-8000-000000000011").setSpuMappingVersion(1L)
                 .setSkuMappingCount(1).setSkuMappingId("44000000-0000-4000-8000-000000000012")

@@ -447,6 +447,8 @@ WHERE readiness.evidence_hash NOT REGEXP '^[0-9a-f]{64}$' OR JSON_TYPE(readiness
    OR readiness.canonical_import_allowed<>0 OR readiness.version<>1
    OR (readiness.mapping_readiness_status='READY'
        AND (readiness.mapping_admission_allowed<>1 OR JSON_LENGTH(readiness.blocker_codes)<>0
+         OR readiness.historical_product_identity_status<>'QUALIFIED'
+         OR readiness.product_identity_qualification_id IS NULL
          OR readiness.spu_mapping_status<>'QUALIFIED' OR readiness.sku_mapping_status<>'QUALIFIED'
          OR readiness.order_item_mapping_status<>'QUALIFIED'
          OR readiness.money_reconciliation_status<>'EXACT'
@@ -466,7 +468,7 @@ LEFT JOIN cloudmold_event_outbox event
  AND event.aggregate_type='legacy_trade_target_readiness'
  AND BINARY event.aggregate_id=BINARY readiness.order_readiness_id
  AND event.aggregate_version=readiness.version
-WHERE event.event_id IS NULL OR event.schema_version<>1
+WHERE event.event_id IS NULL OR event.schema_version NOT IN (1,2)
    OR BINARY JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.target_readiness_run_id'))
         <>BINARY readiness.target_readiness_run_id
    OR CAST(JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.legacy_order_id')) AS UNSIGNED)
@@ -482,3 +484,16 @@ WHERE event.event_id IS NULL OR event.schema_version<>1
      WHERE item.tenant_id=readiness.tenant_id
        AND BINARY item.target_readiness_run_id=BINARY readiness.target_readiness_run_id
        AND BINARY item.order_readiness_id=BINARY readiness.order_readiness_id);
+
+SELECT 'legacy_trade_target_readiness_product_identity_mismatch' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_order_target_readiness_item readiness
+LEFT JOIN cloudmold_order_product_identity_qualification qualification
+  ON qualification.tenant_id=readiness.tenant_id
+ AND BINARY qualification.qualification_id=BINARY readiness.product_identity_qualification_id
+WHERE (readiness.historical_product_identity_status='QUALIFIED' AND (
+       qualification.qualification_id IS NULL OR qualification.status<>'QUALIFIED'
+       OR qualification.legacy_order_item_id<>readiness.legacy_order_item_id
+       OR BINARY qualification.item_evidence_id<>BINARY readiness.item_evidence_id
+       OR BINARY qualification.source_item_evidence_hash<>BINARY readiness.legacy_item_snapshot_hash))
+   OR (readiness.historical_product_identity_status<>'QUALIFIED'
+       AND readiness.product_identity_qualification_id IS NOT NULL);

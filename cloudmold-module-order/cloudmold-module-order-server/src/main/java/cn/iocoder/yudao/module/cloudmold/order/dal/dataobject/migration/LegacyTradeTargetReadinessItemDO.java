@@ -14,6 +14,8 @@ public class LegacyTradeTargetReadinessItemDO {
     private Long legacyOrderItemId;
     private String itemEvidenceId;
     private String legacyItemSnapshotHash;
+    private String productIdentityQualificationId;
+    private String historicalProductIdentityStatus;
     private String spuMappingId;
     private String canonicalSpuId;
     private Long spuMappingVersion;
