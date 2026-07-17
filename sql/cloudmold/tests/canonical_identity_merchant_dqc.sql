@@ -15,6 +15,10 @@ FROM (
   HAVING COUNT(*)<>1
 ) x;
 
+SELECT COUNT(*) AS identity_principal_type_contract_violation
+FROM cloudmold_identity_principal
+WHERE principal_type NOT IN ('PLATFORM_OPERATOR','MEMBER','MERCHANT_OPERATOR','WAREHOUSE_OPERATOR');
+
 SELECT COUNT(*) AS merchant_entity_identity_collision_violation
 FROM cloudmold_merchant_account m
 JOIN cloudmold_merchant_shop s

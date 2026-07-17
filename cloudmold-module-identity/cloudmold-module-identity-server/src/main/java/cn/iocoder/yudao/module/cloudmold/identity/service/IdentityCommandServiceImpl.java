@@ -23,8 +23,6 @@ import java.util.regex.Pattern;
 public class IdentityCommandServiceImpl implements IdentityCommandApi {
 
     static final int OPERATION_SUCCEEDED = 10;
-    private static final Set<String> PRINCIPAL_TYPES = Set.of(
-            "CONSUMER", "PLATFORM_OPERATOR", "MERCHANT_OPERATOR", "SERVICE");
     private static final Pattern TYPE_CODE = Pattern.compile("^[A-Z][A-Z0-9_]*$");
 
     private final IdentityOperationMapper operationMapper;
@@ -141,7 +139,7 @@ public class IdentityCommandServiceImpl implements IdentityCommandApi {
         require(command.getIdempotencyKey().length() >= 8, "idempotencyKey is too short");
         requireText(command.getRunId(), "runId", 64);
         requireText(command.getPrincipalType(), "principalType", 32);
-        require(PRINCIPAL_TYPES.contains(command.getPrincipalType()), "principalType is not supported");
+        require(PrincipalType.isSupported(command.getPrincipalType()), "principalType is not supported");
         requireTypeCode(command.getSourceSystem(), "sourceSystem");
         requireTypeCode(command.getSourceType(), "sourceType");
         requireText(command.getSourceId(), "sourceId", 128);

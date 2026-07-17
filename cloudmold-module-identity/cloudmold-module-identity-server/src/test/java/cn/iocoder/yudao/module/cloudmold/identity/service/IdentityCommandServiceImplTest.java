@@ -18,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.*;
@@ -25,6 +26,12 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class IdentityCommandServiceImplTest {
+
+    @Test
+    void principalTypeVocabularyMustMatchTheVersionedDatabaseAndEventContract() {
+        assertThat(PrincipalType.contractCodes()).isEqualTo(Set.of(
+                "PLATFORM_OPERATOR", "MEMBER", "MERCHANT_OPERATOR", "WAREHOUSE_OPERATOR"));
+    }
 
     private final IdentityOperationMapper operationMapper = mock(IdentityOperationMapper.class);
     private final PrincipalMapper principalMapper = mock(PrincipalMapper.class);
@@ -39,6 +46,7 @@ class IdentityCommandServiceImplTest {
     void setUp() {
         TenantContextHolder.setTenantId(1L);
         when(sourceValidator.supports("SYSTEM", "SYSTEM_ADMIN_USER")).thenReturn(true);
+        when(sourceValidator.supports("MEMBER", "MEMBER_USER")).thenReturn(true);
         when(operationMapper.insertOrResolve(anyLong(), anyString(), anyString(), anyString(), anyString(), any()))
                 .thenAnswer(invocation -> { attemptToken.set(invocation.getArgument(4)); return 1; });
         when(operationMapper.selectLastInsertId()).thenReturn(11L);
@@ -74,6 +82,43 @@ class IdentityCommandServiceImplTest {
         assertThat(event.getValue().getTenantId()).isEqualTo(1L);
         assertThat(event.getValue().getPayload()).containsEntry("principal_id", result.getPrincipalId())
                 .containsEntry("source_id", "42").doesNotContainKey("tenant_id");
+    }
+
+    @Test
+    void shouldCreateCanonicalMemberPrincipalUsingTheSchemaAndEventType() {
+        LinkSourceIdentityCommand command = LinkSourceIdentityCommand.builder()
+                .idempotencyKey("identity-member-link-1").runId("identity-member-run-1")
+                .principalType("MEMBER").sourceSystem("MEMBER").sourceType("MEMBER_USER")
+                .sourceId("247").correlationId("6f9619ff-8b86-d011-b42d-00cf4fc964ff")
+                .occurredAt(Instant.parse("2026-07-17T05:50:00Z")).build();
+
+        LinkSourceIdentityResult result = service.linkSource(command);
+
+        verify(sourceValidator).requireActive(1L, "MEMBER", "MEMBER_USER", "247");
+        verify(principalMapper).insert(org.mockito.ArgumentMatchers.<PrincipalDO>argThat(row ->
+                row.getPrincipalId().equals(result.getPrincipalId())
+                        && row.getPrincipalType().equals("MEMBER")
+                        && row.getStatus().equals("ACTIVE")));
+        ArgumentCaptor<AppendDomainEventCommand> event = ArgumentCaptor.forClass(AppendDomainEventCommand.class);
+        verify(outboxAppender).append(event.capture());
+        assertThat(event.getValue().getPayload()).containsEntry("principal_type", "MEMBER")
+                .containsEntry("source_system", "MEMBER")
+                .containsEntry("source_type", "MEMBER_USER")
+                .containsEntry("source_id", "247");
+    }
+
+    @Test
+    void shouldRejectPrincipalTypesOutsideTheVersionedIdentityContract() {
+        LinkSourceIdentityCommand command = LinkSourceIdentityCommand.builder()
+                .idempotencyKey("identity-invalid-type").runId("identity-invalid-run")
+                .principalType("CONSUMER").sourceSystem("MEMBER").sourceType("MEMBER_USER")
+                .sourceId("247").correlationId("6f9619ff-8b86-d011-b42d-00cf4fc964ff")
+                .occurredAt(Instant.parse("2026-07-17T05:50:00Z")).build();
+
+        assertThatThrownBy(() -> service.linkSource(command))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("principalType is not supported");
+        verifyNoInteractions(operationMapper, principalMapper, sourceIdentityMapper, outboxAppender);
     }
 
     @Test

@@ -35,7 +35,7 @@ class IdentityQueryServiceTest {
                         .setSourceId("88").setStatus("ACTIVE").setVersion(1L));
         when(principalMapper.selectByTenantAndId(7L, "principal-1"))
                 .thenReturn(new PrincipalDO().setPrincipalId("principal-1").setTenantId(7L)
-                        .setPrincipalType("CONSUMER").setStatus("ACTIVE").setVersion(1L));
+                        .setPrincipalType("MEMBER").setStatus("ACTIVE").setVersion(1L));
 
         assertThat(service.resolveActiveSource(new SourceIdentityReference("MEMBER", "MEMBER_USER", "88"))
                 .getPrincipalId()).isEqualTo("principal-1");
