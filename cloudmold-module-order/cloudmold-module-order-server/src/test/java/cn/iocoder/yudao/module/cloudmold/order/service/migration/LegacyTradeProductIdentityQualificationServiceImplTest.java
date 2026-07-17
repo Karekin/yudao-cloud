@@ -31,14 +31,18 @@ class LegacyTradeProductIdentityQualificationServiceImplTest {
     private final LegacyTradeProductIdentityQualificationMapper mapper =
             mock(LegacyTradeProductIdentityQualificationMapper.class);
     private final OutboxAppender outboxAppender = mock(OutboxAppender.class);
+    private final HistoricalProductEvidenceVerifier evidenceVerifier = mock(HistoricalProductEvidenceVerifier.class);
     private final LegacyTradeProductIdentityQualificationServiceImpl service =
-            new LegacyTradeProductIdentityQualificationServiceImpl(mapper, outboxAppender);
+            new LegacyTradeProductIdentityQualificationServiceImpl(mapper, outboxAppender, evidenceVerifier);
 
     @BeforeEach
     void setUp() {
-        reset(mapper, outboxAppender);
+        reset(mapper, outboxAppender, evidenceVerifier);
         TenantContextHolder.setTenantId(1L);
         doAnswer(invocation -> null).when(outboxAppender).append(any());
+        when(evidenceVerifier.verify(anyString(), anyString())).thenReturn(
+                new HistoricalProductEvidenceVerifier.EvidenceVerification(
+                        FileSystemHistoricalProductEvidenceVerifier.VERIFIER_VERSION, 128));
     }
 
     @AfterEach
@@ -62,6 +66,9 @@ class LegacyTradeProductIdentityQualificationServiceImplTest {
         verify(mapper).insertRequest(saved.capture());
         assertThat(saved.getValue().getScopeHash()).matches("[0-9a-f]{64}");
         assertThat(saved.getValue().getRequesterId()).isEqualTo(10L);
+        assertThat(saved.getValue().getEvidenceVerificationStatus()).isEqualTo("VERIFIED");
+        assertThat(saved.getValue().getEvidenceContentLength()).isEqualTo(128L);
+        verify(evidenceVerifier).verify("evidence://sha256/" + "b".repeat(64), "b".repeat(64));
         verify(mapper, never()).insertQualification(any());
         ArgumentCaptor<AppendDomainEventCommand> event = ArgumentCaptor.forClass(AppendDomainEventCommand.class);
         verify(outboxAppender).append(event.capture());
@@ -102,6 +109,22 @@ class LegacyTradeProductIdentityQualificationServiceImplTest {
     }
 
     @Test
+    void legacyUnverifiedQualificationCannotAdvanceButRemainsRevocable() {
+        LegacyTradeProductIdentityQualificationRequestDO request = pendingRequest(1L, 10L)
+                .setSourceEvidenceUri("restricted://legacy/product-snapshot/111")
+                .setEvidenceVerificationStatus("LEGACY_UNVERIFIED")
+                .setEvidenceVerifierVersion("legacy-v0").setEvidenceContentLength(0L);
+        when(mapper.selectRequestForUpdate(1L, REQUEST)).thenReturn(request);
+
+        assertThatThrownBy(() -> service.approve(
+                REQUEST, approvalCommand("DATA_OWNER", 1L), 20L))
+                .isInstanceOf(ServiceException.class)
+                .hasMessageContaining("lacks verified historical product evidence");
+        verify(mapper, never()).insertApproval(any());
+        verifyNoInteractions(evidenceVerifier);
+    }
+
+    @Test
     void secondIndependentApprovalCreatesQualificationAtomically() {
         LegacyTradeProductIdentityQualificationRequestDO request = pendingRequest(2L, 10L)
                 .setStatus("PARTIALLY_APPROVED").setApprovalCount(1);
@@ -127,6 +150,8 @@ class LegacyTradeProductIdentityQualificationServiceImplTest {
         verify(mapper).insertQualification(qualification.capture());
         assertThat(qualification.getValue().getApprovalSetHash()).matches("[0-9a-f]{64}");
         assertThat(qualification.getValue().getRequestId()).isEqualTo(REQUEST);
+        assertThat(qualification.getValue().getEvidenceVerificationStatus()).isEqualTo("VERIFIED");
+        verify(evidenceVerifier).verify("evidence://sha256/" + "b".repeat(64), "b".repeat(64));
         verify(mapper, never()).revokeQualification(anyLong(), anyString(), anyLong(), anyString(), anyString(), any());
     }
 
@@ -134,12 +159,19 @@ class LegacyTradeProductIdentityQualificationServiceImplTest {
     void secondIndependentApprovalBindsRevocationProofAtomically() {
         LegacyTradeProductIdentityQualificationRequestDO request = pendingRequest(2L, 10L)
                 .setActionType("REVOKE").setTargetQualificationId(QUALIFICATION)
+                .setSourceEvidenceUri("restricted://legacy/product-snapshot/111")
+                .setEvidenceVerificationStatus("LEGACY_UNVERIFIED")
+                .setEvidenceVerifierVersion("legacy-v0").setEvidenceContentLength(0L)
                 .setStatus("PARTIALLY_APPROVED").setApprovalCount(1);
         LegacyTradeProductIdentityQualificationDO target = new LegacyTradeProductIdentityQualificationDO()
                 .setQualificationId(QUALIFICATION).setTenantId(1L)
                 .setSourceMigrationRunId(SOURCE_RUN).setItemEvidenceId(ITEM_EVIDENCE)
                 .setLegacyOrderItemId(111L).setHistoricalSpuId(633L).setHistoricalSkuId(1L)
                 .setSourceItemEvidenceHash("a".repeat(64)).setHistoricalProductSnapshotHash("b".repeat(64))
+                .setSourceEvidenceUri("restricted://legacy/product-snapshot/111")
+                .setEvidenceVerificationStatus("LEGACY_UNVERIFIED")
+                .setEvidenceVerifierVersion("legacy-v0")
+                .setEvidenceContentLength(0L).setEvidenceVerifiedAt(java.time.LocalDateTime.of(2026, 7, 17, 5, 0))
                 .setStatus("QUALIFIED").setVersion(1L);
         when(mapper.selectRequestForUpdate(1L, REQUEST)).thenReturn(request);
         when(mapper.selectApprovalsForUpdate(1L, REQUEST)).thenReturn(List.of(approval("DATA_OWNER", 20L)));
@@ -166,7 +198,7 @@ class LegacyTradeProductIdentityQualificationServiceImplTest {
                 .setActionType("QUALIFY").setSourceMigrationRunId(SOURCE_RUN)
                 .setItemEvidenceId(ITEM_EVIDENCE).setHistoricalSpuId(633L).setHistoricalSkuId(1L)
                 .setSourceItemEvidenceHash("a".repeat(64)).setHistoricalProductSnapshotHash("b".repeat(64))
-                .setSourceEvidenceUri("evidence://restricted/product-snapshot/111")
+                .setSourceEvidenceUri("evidence://sha256/" + "b".repeat(64))
                 .setQualificationRef("review:product-history-111")
                 .setCorrelationId(CORRELATION).setOccurredAt(Instant.parse("2026-07-17T05:00:00Z"));
     }
@@ -194,7 +226,10 @@ class LegacyTradeProductIdentityQualificationServiceImplTest {
                 .setActionType("QUALIFY").setSourceMigrationRunId(SOURCE_RUN).setItemEvidenceId(ITEM_EVIDENCE)
                 .setLegacyOrderItemId(111L).setHistoricalSpuId(633L).setHistoricalSkuId(1L)
                 .setSourceItemEvidenceHash("a".repeat(64)).setHistoricalProductSnapshotHash("b".repeat(64))
-                .setSourceEvidenceUri("evidence://restricted/product-snapshot/111")
+                .setSourceEvidenceUri("evidence://sha256/" + "b".repeat(64))
+                .setEvidenceVerificationStatus("VERIFIED")
+                .setEvidenceVerifierVersion(FileSystemHistoricalProductEvidenceVerifier.VERIFIER_VERSION)
+                .setEvidenceContentLength(128L).setEvidenceVerifiedAt(java.time.LocalDateTime.of(2026, 7, 17, 5, 0))
                 .setQualificationRef("review:product-history-111").setScopeHash("c".repeat(64))
                 .setRequesterId(requesterId).setApprovalCount(0).setStatus("PENDING").setVersion(version);
     }

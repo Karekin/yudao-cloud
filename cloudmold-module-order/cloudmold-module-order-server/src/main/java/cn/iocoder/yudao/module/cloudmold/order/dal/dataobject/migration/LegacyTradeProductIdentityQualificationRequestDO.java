@@ -22,6 +22,10 @@ public class LegacyTradeProductIdentityQualificationRequestDO {
     private String sourceItemEvidenceHash;
     private String historicalProductSnapshotHash;
     private String sourceEvidenceUri;
+    private String evidenceVerificationStatus;
+    private String evidenceVerifierVersion;
+    private Long evidenceContentLength;
+    private LocalDateTime evidenceVerifiedAt;
     private String qualificationRef;
     private String scopeHash;
     private Long requesterId;

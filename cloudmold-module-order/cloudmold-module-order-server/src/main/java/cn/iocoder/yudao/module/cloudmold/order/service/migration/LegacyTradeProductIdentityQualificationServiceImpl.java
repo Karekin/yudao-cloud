@@ -31,10 +31,11 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
     private static final List<String> EVIDENCE_REF_PREFIXES =
             List.of("evidence:", "ticket:", "change:", "review:");
     private static final List<String> EVIDENCE_URI_PREFIXES =
-            List.of("s3://", "oss://", "restricted://", "evidence://");
+            List.of("evidence://sha256/");
 
     private final LegacyTradeProductIdentityQualificationMapper mapper;
     private final OutboxAppender outboxAppender;
+    private final HistoricalProductEvidenceVerifier evidenceVerifier;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -56,6 +57,8 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
         LegacyTradeProductIdentityQualificationSourceDO source = requireSource(tenantId,
                 command.getSourceMigrationRunId(), command.getItemEvidenceId());
         LegacyTradeProductIdentityQualificationDO target = null;
+        HistoricalProductEvidenceVerifier.EvidenceVerification evidenceVerification;
+        LocalDateTime evidenceVerifiedAt;
         if ("QUALIFY".equals(command.getActionType())) {
             require(!Boolean.TRUE.equals(source.getDeleted()) && !Boolean.TRUE.equals(source.getOrderDeleted()),
                     "deleted source Order Items cannot receive historical product qualification");
@@ -70,6 +73,9 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
             require(mapper.selectActiveQualificationForUpdate(tenantId, command.getSourceMigrationRunId(),
                     command.getItemEvidenceId()) == null,
                     "an active historical product qualification already exists for this source item");
+            evidenceVerification = evidenceVerifier.verify(command.getSourceEvidenceUri(),
+                    command.getHistoricalProductSnapshotHash());
+            evidenceVerifiedAt = now;
         } else {
             target = mapper.selectQualificationForUpdate(tenantId, command.getTargetQualificationId());
             require(target != null && "QUALIFIED".equals(target.getStatus()),
@@ -78,6 +84,14 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
                             && Objects.equals(target.getItemEvidenceId(), command.getItemEvidenceId()),
                     "revocation target does not belong to the requested source item");
             requireQualificationMatchesSource(target, source);
+            require(target.getEvidenceVerificationStatus() != null
+                            && target.getEvidenceVerifierVersion() != null
+                            && target.getEvidenceContentLength() != null
+                            && target.getEvidenceVerifiedAt() != null,
+                    "revocation target lacks historical product evidence audit metadata");
+            evidenceVerification = new HistoricalProductEvidenceVerifier.EvidenceVerification(
+                    target.getEvidenceVerifierVersion(), target.getEvidenceContentLength());
+            evidenceVerifiedAt = target.getEvidenceVerifiedAt();
         }
 
         String historicalSpuId = Objects.toString(target == null
@@ -93,7 +107,9 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
                 Objects.toString(command.getTargetQualificationId(), ""), command.getSourceMigrationRunId(),
                 command.getItemEvidenceId(), Objects.toString(source.getLegacyOrderItemId()),
                 historicalSpuId, historicalSkuId, sourceHash, snapshotHash, sourceUri,
-                command.getQualificationRef()));
+                target == null ? "VERIFIED" : target.getEvidenceVerificationStatus(),
+                evidenceVerification.verifierVersion(),
+                Long.toString(evidenceVerification.contentLength()), command.getQualificationRef()));
         String requestId = deterministicUuid(tenantId + "|product-identity-qualification-request|"
                 + command.getIdempotencyKey());
         LegacyTradeProductIdentityQualificationRequestDO request =
@@ -107,7 +123,11 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
                         .setLegacyOrderItemId(source.getLegacyOrderItemId())
                         .setHistoricalSpuId(Long.valueOf(historicalSpuId)).setHistoricalSkuId(Long.valueOf(historicalSkuId))
                         .setSourceItemEvidenceHash(sourceHash).setHistoricalProductSnapshotHash(snapshotHash)
-                        .setSourceEvidenceUri(sourceUri).setQualificationRef(command.getQualificationRef())
+                        .setSourceEvidenceUri(sourceUri).setEvidenceVerificationStatus(
+                                target == null ? "VERIFIED" : target.getEvidenceVerificationStatus())
+                        .setEvidenceVerifierVersion(evidenceVerification.verifierVersion())
+                        .setEvidenceContentLength(evidenceVerification.contentLength())
+                        .setEvidenceVerifiedAt(evidenceVerifiedAt).setQualificationRef(command.getQualificationRef())
                         .setScopeHash(scopeHash).setRequesterId(requesterId).setApprovalCount(0)
                         .setStatus("PENDING").setVersion(1L).setRequestedAt(now)
                         .setCreatedAt(now).setUpdatedAt(now);
@@ -143,6 +163,14 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
                 "qualification request version changed before approval");
         require(Set.of("PENDING", "PARTIALLY_APPROVED").contains(request.getStatus()),
                 "qualification request is not awaiting approval");
+        if ("QUALIFY".equals(request.getActionType())) {
+            require("VERIFIED".equals(request.getEvidenceVerificationStatus())
+                            && request.getEvidenceVerifierVersion() != null
+                            && request.getEvidenceContentLength() != null
+                            && request.getEvidenceContentLength() > 0
+                            && request.getEvidenceVerifiedAt() != null,
+                    "qualification request lacks verified historical product evidence");
+        }
         require(!Objects.equals(request.getRequesterId(), approverId),
                 "qualification requester cannot approve the same request");
         List<LegacyTradeProductIdentityQualificationApprovalDO> approvals =
@@ -183,6 +211,15 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
                 require(mapper.selectActiveQualificationForUpdate(tenantId, request.getSourceMigrationRunId(),
                         request.getItemEvidenceId()) == null,
                         "an active historical product qualification appeared before final approval");
+                HistoricalProductEvidenceVerifier.EvidenceVerification finalVerification =
+                        evidenceVerifier.verify(request.getSourceEvidenceUri(),
+                                request.getHistoricalProductSnapshotHash());
+                require("VERIFIED".equals(request.getEvidenceVerificationStatus())
+                                && Objects.equals(request.getEvidenceVerifierVersion(),
+                                finalVerification.verifierVersion())
+                                && Objects.equals(request.getEvidenceContentLength(),
+                                finalVerification.contentLength()),
+                        "historical product evidence verification changed before final approval");
                 qualificationId = deterministicUuid(requestId + "|qualification");
                 LegacyTradeProductIdentityQualificationDO qualification =
                         new LegacyTradeProductIdentityQualificationDO()
@@ -195,6 +232,10 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
                                 .setSourceItemEvidenceHash(request.getSourceItemEvidenceHash())
                                 .setHistoricalProductSnapshotHash(request.getHistoricalProductSnapshotHash())
                                 .setSourceEvidenceUri(request.getSourceEvidenceUri())
+                                .setEvidenceVerificationStatus("VERIFIED")
+                                .setEvidenceVerifierVersion(finalVerification.verifierVersion())
+                                .setEvidenceContentLength(finalVerification.contentLength())
+                                .setEvidenceVerifiedAt(now)
                                 .setQualificationRef(request.getQualificationRef()).setRequestId(requestId)
                                 .setApprovalSetHash(approvalSetHash).setQualifiedBy(qualifiedBy(request, approvals))
                                 .setQualifiedAt(now).setStatus("QUALIFIED").setVersion(1L)
@@ -271,6 +312,10 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
         payload.put("source_item_evidence_hash", request.getSourceItemEvidenceHash());
         payload.put("historical_product_snapshot_hash", request.getHistoricalProductSnapshotHash());
         payload.put("source_evidence_uri", request.getSourceEvidenceUri());
+        payload.put("evidence_verification_status", request.getEvidenceVerificationStatus());
+        payload.put("evidence_verifier_version", request.getEvidenceVerifierVersion());
+        payload.put("evidence_content_length", request.getEvidenceContentLength());
+        payload.put("evidence_verified_at", request.getEvidenceVerifiedAt().toInstant(ZoneOffset.UTC).toString());
         payload.put("qualification_ref", request.getQualificationRef());
         payload.put("scope_hash", request.getScopeHash());
         payload.put("requester_system_user_id", request.getRequesterId());
@@ -298,11 +343,11 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
         payload.put("request_version", request.getVersion());
         payload.put("canonical_import_allowed", false);
         payload.put("production_migration_enabled", false);
-        payload.put("policy_version", "legacy-trade-product-identity-qualification-v1");
+        payload.put("policy_version", "legacy-trade-product-identity-qualification-v2");
         payload.put("reviewed_at", request.getUpdatedAt().toInstant(ZoneOffset.UTC).toString());
         outboxAppender.append(AppendDomainEventCommand.builder()
                 .eventId(deterministicUuid(request.getTenantId() + "|" + QUALIFICATION_EVENT + "|" + idempotencyKey))
-                .eventType(QUALIFICATION_EVENT).schemaVersion(1).sourceSystem("cloudmold-order")
+                .eventType(QUALIFICATION_EVENT).schemaVersion(2).sourceSystem("cloudmold-order")
                 .tenantId(request.getTenantId()).aggregateType("legacy_trade_product_identity_qualification_request")
                 .aggregateId(request.getRequestId()).aggregateVersion(request.getVersion()).eventSequence((short) 1)
                 .occurredAt(occurredAt).correlationId(correlationId).causationId(causationId)
@@ -324,7 +369,12 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
                 .historicalSkuId(request.getHistoricalSkuId())
                 .sourceItemEvidenceHash(request.getSourceItemEvidenceHash())
                 .historicalProductSnapshotHash(request.getHistoricalProductSnapshotHash())
-                .sourceEvidenceUri(request.getSourceEvidenceUri()).qualificationRef(request.getQualificationRef())
+                .sourceEvidenceUri(request.getSourceEvidenceUri())
+                .evidenceVerificationStatus(request.getEvidenceVerificationStatus())
+                .evidenceVerifierVersion(request.getEvidenceVerifierVersion())
+                .evidenceContentLength(request.getEvidenceContentLength())
+                .evidenceVerifiedAt(request.getEvidenceVerifiedAt().toInstant(ZoneOffset.UTC))
+                .qualificationRef(request.getQualificationRef())
                 .scopeHash(request.getScopeHash()).requesterId(request.getRequesterId())
                 .approvalCount(request.getApprovalCount()).status(request.getStatus())
                 .qualificationId(request.getQualificationId()).qualificationStatus(qualificationStatus)
@@ -439,7 +489,7 @@ public class LegacyTradeProductIdentityQualificationServiceImpl
     private static String requireEvidenceUri(String value) {
         String normalized = requireText(value, "sourceEvidenceUri", 512);
         require(EVIDENCE_URI_PREFIXES.stream().anyMatch(normalized::startsWith),
-                "sourceEvidenceUri must use an immutable approved storage scheme");
+                "sourceEvidenceUri must use evidence://sha256/<content-sha256>");
         return normalized;
     }
 

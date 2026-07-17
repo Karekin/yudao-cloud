@@ -20,7 +20,13 @@ WHERE source_item.item_evidence_id IS NULL OR source_run.migration_run_id IS NUL
    OR source_item.legacy_spu_id<>request.historical_spu_id
    OR source_item.legacy_sku_id<>request.historical_sku_id
    OR BINARY source_item.legacy_item_snapshot_hash<>BINARY request.source_item_evidence_hash
-   OR request.source_evidence_uri NOT REGEXP '^(s3|oss|restricted|evidence)://'
+   OR (request.action_type='QUALIFY' AND (
+        request.evidence_verification_status<>'VERIFIED'
+        OR request.evidence_verifier_version<>'filesystem-content-addressed-sha256-v1'
+        OR request.evidence_content_length NOT BETWEEN 1 AND 65536
+        OR request.evidence_verified_at IS NULL
+        OR BINARY request.source_evidence_uri
+             <>BINARY CONCAT('evidence://sha256/',request.historical_product_snapshot_hash)))
    OR request.qualification_ref NOT REGEXP '^(evidence|ticket|change|review):';
 
 SELECT 'legacy_trade_product_identity_approval_separation_mismatch' AS check_name, COUNT(*) violation_count
@@ -80,7 +86,14 @@ WHERE request.request_id IS NULL OR request.action_type<>'QUALIFY' OR request.st
    OR request.historical_spu_id<>qualification.historical_spu_id
    OR request.historical_sku_id<>qualification.historical_sku_id
    OR BINARY request.source_item_evidence_hash<>BINARY qualification.source_item_evidence_hash
-   OR BINARY request.historical_product_snapshot_hash<>BINARY qualification.historical_product_snapshot_hash;
+   OR BINARY request.historical_product_snapshot_hash<>BINARY qualification.historical_product_snapshot_hash
+   OR qualification.evidence_verification_status<>'VERIFIED'
+   OR qualification.evidence_verifier_version<>'filesystem-content-addressed-sha256-v1'
+   OR qualification.evidence_content_length NOT BETWEEN 1 AND 65536
+   OR qualification.evidence_verified_at IS NULL
+   OR BINARY request.source_evidence_uri<>BINARY qualification.source_evidence_uri
+   OR BINARY request.evidence_verifier_version<>BINARY qualification.evidence_verifier_version
+   OR request.evidence_content_length<>qualification.evidence_content_length;
 
 SELECT 'legacy_trade_product_identity_revocation_workflow_mismatch' AS check_name, COUNT(*) violation_count
 FROM cloudmold_order_product_identity_qualification qualification
@@ -106,6 +119,10 @@ WHERE qualification.status='REVOKED' AND (
    OR BINARY request.qualification_id<>BINARY qualification.qualification_id
    OR approval_set.approval_count<>2
    OR BINARY approval_set.approval_set_hash<>BINARY qualification.revocation_approval_set_hash
+   OR BINARY request.evidence_verification_status<>BINARY qualification.evidence_verification_status
+   OR BINARY request.evidence_verifier_version<>BINARY qualification.evidence_verifier_version
+   OR request.evidence_content_length<>qualification.evidence_content_length
+   OR request.evidence_verified_at<>qualification.evidence_verified_at
    OR qualification.revoked_at<>request.applied_at);
 
 SELECT 'legacy_trade_product_identity_review_event_cardinality' AS check_name, COUNT(*) violation_count
@@ -118,7 +135,7 @@ FROM (
   LEFT JOIN cloudmold_event_outbox event
     ON event.tenant_id=request.tenant_id
    AND event.event_type='order.migration.legacy_trade_product_identity_qualification_reviewed'
-   AND event.schema_version=1
+   AND event.schema_version IN (1,2)
    AND event.aggregate_type='legacy_trade_product_identity_qualification_request'
    AND BINARY event.aggregate_id=BINARY request.request_id
   GROUP BY request.tenant_id,request.request_id,request.version
@@ -131,13 +148,18 @@ FROM cloudmold_order_product_identity_qualification_request request
 LEFT JOIN cloudmold_event_outbox event
   ON event.tenant_id=request.tenant_id
  AND event.event_type='order.migration.legacy_trade_product_identity_qualification_reviewed'
- AND event.schema_version=1
+ AND event.schema_version IN (1,2)
  AND BINARY event.aggregate_id=BINARY request.request_id
  AND event.aggregate_version=request.version
 WHERE event.event_id IS NULL
    OR BINARY JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.scope_hash'))<>BINARY request.scope_hash
    OR JSON_EXTRACT(event.payload,'$.approval_count')<>request.approval_count
    OR BINARY JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.request_status'))<>BINARY request.status
+   OR BINARY JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.evidence_verification_status'))
+        <>BINARY request.evidence_verification_status
+   OR BINARY JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.evidence_verifier_version'))
+        <>BINARY request.evidence_verifier_version
+   OR JSON_EXTRACT(event.payload,'$.evidence_content_length')<>request.evidence_content_length
    OR BINARY JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.qualification_id'))
         <>BINARY COALESCE(request.qualification_id,'null')
    OR JSON_EXTRACT(event.payload,'$.canonical_import_allowed')<>CAST('false' AS JSON)

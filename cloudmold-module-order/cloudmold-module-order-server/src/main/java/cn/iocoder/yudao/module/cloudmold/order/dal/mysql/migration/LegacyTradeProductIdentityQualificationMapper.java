@@ -40,13 +40,17 @@ public interface LegacyTradeProductIdentityQualificationMapper {
               (request_id,tenant_id,idempotency_key,request_hash,action_type,target_qualification_id,
                source_migration_run_id,item_evidence_id,legacy_order_item_id,historical_spu_id,
                historical_sku_id,source_item_evidence_hash,historical_product_snapshot_hash,
-               source_evidence_uri,qualification_ref,scope_hash,requester_id,approval_count,status,
+               source_evidence_uri,evidence_verification_status,evidence_verifier_version,
+               evidence_content_length,evidence_verified_at,qualification_ref,scope_hash,
+               requester_id,approval_count,status,
                qualification_id,version,requested_at,applied_at,created_at,updated_at)
             VALUES
               (#{requestId},#{tenantId},#{idempotencyKey},#{requestHash},#{actionType},#{targetQualificationId},
                #{sourceMigrationRunId},#{itemEvidenceId},#{legacyOrderItemId},#{historicalSpuId},
                #{historicalSkuId},#{sourceItemEvidenceHash},#{historicalProductSnapshotHash},
-               #{sourceEvidenceUri},#{qualificationRef},#{scopeHash},#{requesterId},#{approvalCount},#{status},
+               #{sourceEvidenceUri},#{evidenceVerificationStatus},#{evidenceVerifierVersion},
+               #{evidenceContentLength},#{evidenceVerifiedAt},#{qualificationRef},#{scopeHash},
+               #{requesterId},#{approvalCount},#{status},
                #{qualificationId},#{version},#{requestedAt},#{appliedAt},#{createdAt},#{updatedAt})
             """)
     int insertRequest(LegacyTradeProductIdentityQualificationRequestDO value);
@@ -140,12 +144,16 @@ public interface LegacyTradeProductIdentityQualificationMapper {
             INSERT INTO cloudmold_order_product_identity_qualification
               (qualification_id,tenant_id,source_migration_run_id,item_evidence_id,legacy_order_item_id,
                historical_spu_id,historical_sku_id,source_item_evidence_hash,
-               historical_product_snapshot_hash,source_evidence_uri,qualification_ref,request_id,
+               historical_product_snapshot_hash,source_evidence_uri,evidence_verification_status,
+               evidence_verifier_version,evidence_content_length,evidence_verified_at,
+               qualification_ref,request_id,
                approval_set_hash,qualified_by,qualified_at,status,version,created_at,updated_at)
             VALUES
               (#{qualificationId},#{tenantId},#{sourceMigrationRunId},#{itemEvidenceId},#{legacyOrderItemId},
                #{historicalSpuId},#{historicalSkuId},#{sourceItemEvidenceHash},
-               #{historicalProductSnapshotHash},#{sourceEvidenceUri},#{qualificationRef},#{requestId},
+               #{historicalProductSnapshotHash},#{sourceEvidenceUri},#{evidenceVerificationStatus},
+               #{evidenceVerifierVersion},#{evidenceContentLength},#{evidenceVerifiedAt},
+               #{qualificationRef},#{requestId},
                #{approvalSetHash},#{qualifiedBy},#{qualifiedAt},#{status},#{version},#{createdAt},#{updatedAt})
             """)
     int insertQualification(LegacyTradeProductIdentityQualificationDO value);
