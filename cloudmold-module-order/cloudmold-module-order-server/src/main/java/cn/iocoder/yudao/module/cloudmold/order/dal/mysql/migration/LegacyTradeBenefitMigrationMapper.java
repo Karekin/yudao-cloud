@@ -10,7 +10,13 @@ import java.util.List;
 public interface LegacyTradeBenefitMigrationMapper {
 
     @Select("""
-            WITH item_rollup AS (
+            WITH buyer_identity AS (
+              SELECT tenant_id,source_id,COUNT(*) mapping_count,
+                     MAX(source_identity_id) source_identity_id,MAX(principal_id) principal_id,MAX(version) version
+              FROM cloudmold_identity_source_identity
+              WHERE source_system='MEMBER' AND source_type='MEMBER_USER' AND status='ACTIVE'
+              GROUP BY tenant_id,source_id
+            ), item_rollup AS (
               SELECT tenant_id,order_id,COUNT(*) item_row_count,SUM(`count`) item_quantity,
                      SUM(price*`count`) item_gross_amount_minor,
                      SUM(discount_price) item_generic_discount_amount_minor,
@@ -28,7 +34,13 @@ public interface LegacyTradeBenefitMigrationMapper {
               FROM trade_order_item WHERE tenant_id=#{tenantId} AND deleted=0
               GROUP BY tenant_id,order_id
             )
-            SELECT o.tenant_id,o.id legacy_order_id,o.no legacy_order_no,o.update_time source_updated_at,
+            SELECT o.tenant_id,o.id legacy_order_id,o.no legacy_order_no,o.create_time source_created_at,
+                   o.update_time source_updated_at,o.user_id legacy_buyer_id,o.status legacy_order_status,
+                   CASE WHEN buyer.mapping_count=1 THEN buyer.source_identity_id END buyer_source_identity_id,
+                   CASE WHEN buyer.mapping_count=1 THEN buyer.principal_id END buyer_principal_id,
+                   CASE WHEN buyer.mapping_count=1 THEN buyer.version END buyer_identity_version,
+                   CASE WHEN buyer.mapping_count=1 THEN 'RESOLVED'
+                        WHEN buyer.mapping_count>1 THEN 'AMBIGUOUS' ELSE 'MISSING' END buyer_identity_status,
                    o.deleted,o.product_count header_quantity,
                    COALESCE(i.item_row_count,0) item_row_count,COALESCE(i.item_quantity,0) item_quantity,
                    CAST(o.total_price AS SIGNED) header_gross_amount_minor,
@@ -55,13 +67,17 @@ public interface LegacyTradeBenefitMigrationMapper {
                    o.point_activity_id legacy_point_activity_id
             FROM trade_order o
             LEFT JOIN item_rollup i ON i.tenant_id=o.tenant_id AND i.order_id=o.id
+            LEFT JOIN buyer_identity buyer
+              ON buyer.tenant_id=o.tenant_id
+             AND buyer.source_id=CONVERT(CAST(o.user_id AS CHAR) USING utf8mb4) COLLATE utf8mb4_unicode_ci
             WHERE o.tenant_id=#{tenantId}
             ORDER BY o.id
             """)
     List<LegacyTradeOrderAssessmentSourceDO> selectSourceOrders(@Param("tenantId") Long tenantId);
 
     @Select("""
-            SELECT tenant_id,id legacy_order_item_id,order_id legacy_order_id,update_time source_updated_at,
+            SELECT tenant_id,id legacy_order_item_id,order_id legacy_order_id,user_id legacy_buyer_id,
+                   update_time source_updated_at,
                    deleted,spu_id legacy_spu_id,sku_id legacy_sku_id,`count` item_quantity,
                    CAST(price AS SIGNED) unit_price_minor,CAST(price*`count` AS SIGNED) gross_amount_minor,
                    CAST(discount_price AS SIGNED) generic_discount_amount_minor,
@@ -136,6 +152,8 @@ public interface LegacyTradeBenefitMigrationMapper {
     @Insert("""
             INSERT INTO cloudmold_order_benefit_migration_candidate
               (candidate_id,tenant_id,migration_run_id,legacy_order_id,legacy_order_no,legacy_snapshot_hash,
+               source_created_at,legacy_buyer_id,legacy_order_status,buyer_source_identity_id,buyer_principal_id,
+               buyer_identity_version,buyer_identity_status,
                source_updated_at,is_deleted,header_quantity,item_row_count,item_quantity,
                header_gross_amount_minor,header_generic_discount_amount_minor,header_coupon_amount_minor,
                header_point_amount_minor,header_vip_amount_minor,header_delivery_amount_minor,
@@ -146,6 +164,8 @@ public interface LegacyTradeBenefitMigrationMapper {
                assessment_status,reason_codes,canonical_import_allowed,version,assessed_at,created_at,updated_at)
             VALUES
               (#{candidateId},#{tenantId},#{migrationRunId},#{legacyOrderId},#{legacyOrderNo},#{legacySnapshotHash},
+               #{sourceCreatedAt},#{legacyBuyerId},#{legacyOrderStatus},#{buyerSourceIdentityId},#{buyerPrincipalId},
+               #{buyerIdentityVersion},#{buyerIdentityStatus},
                #{sourceUpdatedAt},#{deleted},#{headerQuantity},#{itemRowCount},#{itemQuantity},
                #{headerGrossAmountMinor},#{headerGenericDiscountAmountMinor},#{headerCouponAmountMinor},
                #{headerPointAmountMinor},#{headerVipAmountMinor},#{headerDeliveryAmountMinor},
@@ -173,6 +193,7 @@ public interface LegacyTradeBenefitMigrationMapper {
     @Insert("""
             INSERT INTO cloudmold_order_benefit_migration_item
               (item_evidence_id,tenant_id,migration_run_id,candidate_id,legacy_order_id,legacy_order_item_id,
+               legacy_buyer_id,
                legacy_item_snapshot_hash,source_updated_at,is_deleted,legacy_spu_id,legacy_sku_id,
                source_product_identity_status,item_quantity,unit_price_minor,gross_amount_minor,
                generic_discount_amount_minor,coupon_amount_minor,point_amount_minor,vip_amount_minor,
@@ -180,6 +201,7 @@ public interface LegacyTradeBenefitMigrationMapper {
                canonical_import_allowed,version,created_at,updated_at)
             VALUES
               (#{itemEvidenceId},#{tenantId},#{migrationRunId},#{candidateId},#{legacyOrderId},#{legacyOrderItemId},
+               #{legacyBuyerId},
                #{legacyItemSnapshotHash},#{sourceUpdatedAt},#{deleted},#{legacySpuId},#{legacySkuId},
                #{sourceProductIdentityStatus},#{itemQuantity},#{unitPriceMinor},#{grossAmountMinor},
                #{genericDiscountAmountMinor},#{couponAmountMinor},#{pointAmountMinor},#{vipAmountMinor},

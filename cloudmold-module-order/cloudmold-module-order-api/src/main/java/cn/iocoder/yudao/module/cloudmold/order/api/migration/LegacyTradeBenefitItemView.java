@@ -11,6 +11,7 @@ public class LegacyTradeBenefitItemView {
     private String candidateId;
     private Long legacyOrderId;
     private Long legacyOrderItemId;
+    private Long legacyBuyerId;
     private String legacyItemSnapshotHash;
     private Boolean deleted;
     private Long legacySpuId;

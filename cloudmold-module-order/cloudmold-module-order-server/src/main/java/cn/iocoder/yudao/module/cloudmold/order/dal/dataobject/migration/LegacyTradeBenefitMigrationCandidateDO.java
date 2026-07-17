@@ -12,6 +12,13 @@ public class LegacyTradeBenefitMigrationCandidateDO {
     private Long legacyOrderId;
     private String legacyOrderNo;
     private String legacySnapshotHash;
+    private LocalDateTime sourceCreatedAt;
+    private Long legacyBuyerId;
+    private Integer legacyOrderStatus;
+    private String buyerSourceIdentityId;
+    private String buyerPrincipalId;
+    private Long buyerIdentityVersion;
+    private String buyerIdentityStatus;
     private LocalDateTime sourceUpdatedAt;
     private Boolean deleted;
     private Integer headerQuantity;

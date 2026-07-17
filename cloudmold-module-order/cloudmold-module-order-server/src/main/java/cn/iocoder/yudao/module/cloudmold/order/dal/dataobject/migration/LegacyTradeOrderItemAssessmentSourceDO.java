@@ -9,6 +9,7 @@ public class LegacyTradeOrderItemAssessmentSourceDO {
     private Long tenantId;
     private Long legacyOrderItemId;
     private Long legacyOrderId;
+    private Long legacyBuyerId;
     private LocalDateTime sourceUpdatedAt;
     private Boolean deleted;
     private Long legacySpuId;

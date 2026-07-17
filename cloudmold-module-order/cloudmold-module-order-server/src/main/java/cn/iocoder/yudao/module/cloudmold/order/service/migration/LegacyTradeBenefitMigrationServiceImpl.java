@@ -53,8 +53,8 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
             replay.setDuplicate(true);
             return replay;
         }
-        require("legacy-trade-benefit-v3".equals(command.getPolicyVersion()),
-                "new legacy Trade benefit assessments require item-evidence policy v3");
+        require("legacy-trade-benefit-v4".equals(command.getPolicyVersion()),
+                "new legacy Trade benefit assessments require buyer-lineage policy v4");
 
         List<LegacyTradeOrderAssessmentSourceDO> sourceRows = mapper.selectSourceOrders(tenantId);
         require(sourceRows != null && !sourceRows.isEmpty(),
@@ -264,6 +264,12 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
         return new LegacyTradeBenefitMigrationCandidateDO().setCandidateId(candidateId).setTenantId(tenantId)
                 .setMigrationRunId(runId).setLegacyOrderId(source.getLegacyOrderId())
                 .setLegacyOrderNo(source.getLegacyOrderNo()).setLegacySnapshotHash(snapshotHash)
+                .setSourceCreatedAt(source.getSourceCreatedAt()).setLegacyBuyerId(source.getLegacyBuyerId())
+                .setLegacyOrderStatus(source.getLegacyOrderStatus())
+                .setBuyerSourceIdentityId(source.getBuyerSourceIdentityId())
+                .setBuyerPrincipalId(source.getBuyerPrincipalId())
+                .setBuyerIdentityVersion(source.getBuyerIdentityVersion())
+                .setBuyerIdentityStatus(source.getBuyerIdentityStatus())
                 .setSourceUpdatedAt(source.getSourceUpdatedAt()).setDeleted(source.getDeleted())
                 .setHeaderQuantity(source.getHeaderQuantity()).setItemRowCount(source.getItemRowCount())
                 .setItemQuantity(source.getItemQuantity()).setHeaderGrossAmountMinor(source.getHeaderGrossAmountMinor())
@@ -316,8 +322,9 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
         for (LegacyTradeOrderItemAssessmentSourceDO source : sourceItems) {
             normalizeItemSource(source);
             require(Objects.equals(candidate.getTenantId(), source.getTenantId())
-                            && Objects.equals(candidate.getLegacyOrderId(), source.getLegacyOrderId()),
-                    "legacy Trade Order Item tenant or Order lineage is inconsistent");
+                            && Objects.equals(candidate.getLegacyOrderId(), source.getLegacyOrderId())
+                            && Objects.equals(candidate.getLegacyBuyerId(), source.getLegacyBuyerId()),
+                    "legacy Trade Order Item tenant, Order, or buyer lineage is inconsistent");
             String itemEvidenceId = deterministicUuid(candidate.getMigrationRunId()
                     + "|legacy-trade-order-item|" + source.getLegacyOrderItemId());
             boolean sourceIdsPresent = positive(source.getLegacySpuId()) && positive(source.getLegacySkuId());
@@ -325,6 +332,7 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
                     .setTenantId(candidate.getTenantId()).setMigrationRunId(candidate.getMigrationRunId())
                     .setCandidateId(candidate.getCandidateId()).setLegacyOrderId(candidate.getLegacyOrderId())
                     .setLegacyOrderItemId(source.getLegacyOrderItemId())
+                    .setLegacyBuyerId(source.getLegacyBuyerId())
                     .setLegacyItemSnapshotHash(itemSnapshotHash(source)).setSourceUpdatedAt(source.getSourceUpdatedAt())
                     .setDeleted(source.getDeleted()).setLegacySpuId(source.getLegacySpuId())
                     .setLegacySkuId(source.getLegacySkuId())
@@ -389,7 +397,14 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
         payload.put("source_scope", run.getSourceScope());
         payload.put("legacy_order_id", candidate.getLegacyOrderId());
         payload.put("legacy_order_no", candidate.getLegacyOrderNo());
+        payload.put("source_created_at", candidate.getSourceCreatedAt().toInstant(ZoneOffset.UTC).toString());
         payload.put("source_updated_at", candidate.getSourceUpdatedAt().toInstant(ZoneOffset.UTC).toString());
+        payload.put("legacy_buyer_id", candidate.getLegacyBuyerId());
+        payload.put("legacy_order_status", candidate.getLegacyOrderStatus());
+        payload.put("buyer_source_identity_id", candidate.getBuyerSourceIdentityId());
+        payload.put("buyer_principal_id", candidate.getBuyerPrincipalId());
+        payload.put("buyer_identity_version", candidate.getBuyerIdentityVersion());
+        payload.put("buyer_identity_status", candidate.getBuyerIdentityStatus());
         payload.put("source_snapshot_hash", candidate.getLegacySnapshotHash());
         payload.put("is_deleted", candidate.getDeleted());
         payload.put("header_quantity", candidate.getHeaderQuantity());
@@ -429,6 +444,7 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("item_evidence_id", value.getItemEvidenceId());
             item.put("legacy_order_item_id", value.getLegacyOrderItemId());
+            item.put("legacy_buyer_id", value.getLegacyBuyerId());
             item.put("legacy_item_snapshot_hash", value.getLegacyItemSnapshotHash());
             item.put("source_updated_at", value.getSourceUpdatedAt().toInstant(ZoneOffset.UTC).toString());
             item.put("is_deleted", value.getDeleted());
@@ -455,7 +471,7 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
         String idempotency = command.getIdempotencyKey() + ":order:" + candidate.getLegacyOrderId();
         outboxAppender.append(AppendDomainEventCommand.builder()
                 .eventId(deterministicUuid(tenantId + "|" + idempotency))
-                .eventType(ASSESSMENT_EVENT).schemaVersion(2).sourceSystem("cloudmold-order")
+                .eventType(ASSESSMENT_EVENT).schemaVersion(3).sourceSystem("cloudmold-order")
                 .tenantId(tenantId).aggregateType("legacy_trade_benefit_migration_assessment")
                 .aggregateId(candidate.getCandidateId()).aggregateVersion(1L).eventSequence((short) 1)
                 .occurredAt(command.getOccurredAt()).correlationId(command.getCorrelationId())
@@ -491,6 +507,11 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
         return new LegacyTradeBenefitCandidateView().setCandidateId(value.getCandidateId())
                 .setMigrationRunId(value.getMigrationRunId()).setLegacyOrderId(value.getLegacyOrderId())
                 .setLegacyOrderNo(value.getLegacyOrderNo()).setLegacySnapshotHash(value.getLegacySnapshotHash())
+                .setLegacyBuyerId(value.getLegacyBuyerId()).setLegacyOrderStatus(value.getLegacyOrderStatus())
+                .setBuyerSourceIdentityId(value.getBuyerSourceIdentityId())
+                .setBuyerPrincipalId(value.getBuyerPrincipalId())
+                .setBuyerIdentityVersion(value.getBuyerIdentityVersion())
+                .setBuyerIdentityStatus(value.getBuyerIdentityStatus())
                 .setDeleted(value.getDeleted()).setHeaderQuantity(value.getHeaderQuantity())
                 .setItemRowCount(value.getItemRowCount()).setItemQuantity(value.getItemQuantity())
                 .setHeaderBenefitAmountMinor(value.headerBenefitAmountMinor())
@@ -501,6 +522,8 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
                 .setAssessmentStatus(value.getAssessmentStatus())
                 .setReasonCodes(JsonUtils.parseArray(value.getReasonCodes(), String.class))
                 .setCanonicalImportAllowed(value.getCanonicalImportAllowed())
+                .setSourceCreatedAt(value.getSourceCreatedAt() == null ? null
+                        : value.getSourceCreatedAt().toInstant(ZoneOffset.UTC))
                 .setSourceUpdatedAt(value.getSourceUpdatedAt().toInstant(ZoneOffset.UTC))
                 .setAssessedAt(value.getAssessedAt().toInstant(ZoneOffset.UTC));
     }
@@ -520,6 +543,7 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
         return new LegacyTradeBenefitItemView().setItemEvidenceId(value.getItemEvidenceId())
                 .setMigrationRunId(value.getMigrationRunId()).setCandidateId(value.getCandidateId())
                 .setLegacyOrderId(value.getLegacyOrderId()).setLegacyOrderItemId(value.getLegacyOrderItemId())
+                .setLegacyBuyerId(value.getLegacyBuyerId())
                 .setLegacyItemSnapshotHash(value.getLegacyItemSnapshotHash()).setDeleted(value.getDeleted())
                 .setLegacySpuId(value.getLegacySpuId()).setLegacySkuId(value.getLegacySkuId())
                 .setSourceProductIdentityStatus(value.getSourceProductIdentityStatus())
@@ -559,7 +583,13 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
     static String sourceSnapshotHash(LegacyTradeOrderAssessmentSourceDO source) {
         return DigestUtil.sha256Hex(String.join("\u001f",
                 Objects.toString(source.getTenantId(), ""), Objects.toString(source.getLegacyOrderId(), ""),
-                Objects.toString(source.getLegacyOrderNo(), ""), Objects.toString(source.getSourceUpdatedAt(), ""),
+                Objects.toString(source.getLegacyOrderNo(), ""), Objects.toString(source.getSourceCreatedAt(), ""),
+                Objects.toString(source.getSourceUpdatedAt(), ""), Objects.toString(source.getLegacyBuyerId(), ""),
+                Objects.toString(source.getLegacyOrderStatus(), ""),
+                Objects.toString(source.getBuyerSourceIdentityId(), ""),
+                Objects.toString(source.getBuyerPrincipalId(), ""),
+                Objects.toString(source.getBuyerIdentityVersion(), ""),
+                Objects.toString(source.getBuyerIdentityStatus(), ""),
                 Objects.toString(source.getDeleted(), ""), Objects.toString(source.getHeaderQuantity(), ""),
                 Objects.toString(source.getItemRowCount(), ""), Objects.toString(source.getItemQuantity(), ""),
                 Objects.toString(source.getHeaderGrossAmountMinor(), ""),
@@ -590,7 +620,8 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
     static String itemSnapshotHash(LegacyTradeOrderItemAssessmentSourceDO source) {
         return DigestUtil.sha256Hex(String.join("\u001f",
                 Objects.toString(source.getTenantId(), ""), Objects.toString(source.getLegacyOrderItemId(), ""),
-                Objects.toString(source.getLegacyOrderId(), ""), Objects.toString(source.getSourceUpdatedAt(), ""),
+                Objects.toString(source.getLegacyOrderId(), ""), Objects.toString(source.getLegacyBuyerId(), ""),
+                Objects.toString(source.getSourceUpdatedAt(), ""),
                 Objects.toString(source.getDeleted(), ""), Objects.toString(source.getLegacySpuId(), ""),
                 Objects.toString(source.getLegacySkuId(), ""), Objects.toString(source.getItemQuantity(), ""),
                 Objects.toString(source.getUnitPriceMinor(), ""), Objects.toString(source.getGrossAmountMinor(), ""),
@@ -641,8 +672,10 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
         require(source.getLegacyOrderNo() != null && !source.getLegacyOrderNo().isBlank()
                         && source.getLegacyOrderNo().length() <= 64,
                 "legacy Trade order number is missing or too long");
-        require(source.getSourceUpdatedAt() != null, "legacy Trade source watermark is missing");
-        Object[] required = {source.getDeleted(), source.getHeaderQuantity(), source.getItemRowCount(),
+        require(source.getSourceCreatedAt() != null && source.getSourceUpdatedAt() != null,
+                "legacy Trade source lifecycle timestamps are missing");
+        Object[] required = {source.getLegacyBuyerId(), source.getLegacyOrderStatus(), source.getBuyerIdentityStatus(),
+                source.getDeleted(), source.getHeaderQuantity(), source.getItemRowCount(),
                 source.getItemQuantity(), source.getHeaderGrossAmountMinor(),
                 source.getHeaderGenericDiscountAmountMinor(), source.getHeaderCouponAmountMinor(),
                 source.getHeaderPointAmountMinor(), source.getHeaderVipAmountMinor(),
@@ -654,6 +687,16 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
                 source.getItemPayAmountMinor(), source.getInvalidItemMoneyCount()};
         require(Arrays.stream(required).noneMatch(Objects::isNull),
                 "legacy Trade source money evidence is incomplete");
+        require(source.getLegacyBuyerId() > 0
+                        && Set.of("RESOLVED", "MISSING", "AMBIGUOUS").contains(source.getBuyerIdentityStatus()),
+                "legacy Trade buyer identity evidence is invalid");
+        require(("RESOLVED".equals(source.getBuyerIdentityStatus())
+                        && source.getBuyerSourceIdentityId() != null && source.getBuyerPrincipalId() != null
+                        && source.getBuyerIdentityVersion() != null && source.getBuyerIdentityVersion() > 0)
+                        || (!"RESOLVED".equals(source.getBuyerIdentityStatus())
+                        && source.getBuyerSourceIdentityId() == null && source.getBuyerPrincipalId() == null
+                        && source.getBuyerIdentityVersion() == null),
+                "legacy Trade buyer identity resolution shape is invalid");
     }
 
     private static void normalizeItemSource(LegacyTradeOrderItemAssessmentSourceDO source) {
@@ -661,12 +704,13 @@ public class LegacyTradeBenefitMigrationServiceImpl implements LegacyTradeBenefi
                         && source.getLegacyOrderItemId() != null,
                 "legacy Trade Order Item source identity is missing");
         require(source.getSourceUpdatedAt() != null, "legacy Trade Order Item source watermark is missing");
-        Object[] required = {source.getDeleted(), source.getItemQuantity(), source.getUnitPriceMinor(),
+        Object[] required = {source.getLegacyBuyerId(), source.getDeleted(), source.getItemQuantity(), source.getUnitPriceMinor(),
                 source.getGrossAmountMinor(), source.getGenericDiscountAmountMinor(), source.getCouponAmountMinor(),
                 source.getPointAmountMinor(), source.getVipAmountMinor(), source.getDeliveryAmountMinor(),
                 source.getAdjustAmountMinor(), source.getPayAmountMinor(), source.getUsedPointQuantity()};
         require(Arrays.stream(required).noneMatch(Objects::isNull),
                 "legacy Trade Order Item source money evidence is incomplete");
+        require(source.getLegacyBuyerId() > 0, "legacy Trade Order Item buyer identity is invalid");
     }
 
     private static LegacyTradeBenefitAssessmentCommand normalize(LegacyTradeBenefitAssessmentCommand command) {

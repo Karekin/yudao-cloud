@@ -12,6 +12,7 @@ public class LegacyTradeBenefitMigrationItemDO {
     private String candidateId;
     private Long legacyOrderId;
     private Long legacyOrderItemId;
+    private Long legacyBuyerId;
     private String legacyItemSnapshotHash;
     private LocalDateTime sourceUpdatedAt;
     private Boolean deleted;

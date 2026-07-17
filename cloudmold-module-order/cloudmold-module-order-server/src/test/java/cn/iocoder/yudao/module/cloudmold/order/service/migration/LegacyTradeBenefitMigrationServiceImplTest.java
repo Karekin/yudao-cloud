@@ -114,6 +114,11 @@ class LegacyTradeBenefitMigrationServiceImplTest {
                 .containsExactly("NO_BENEFIT", "BENEFIT_REQUIRES_IDENTITY_AND_FUNDING",
                         "QUARANTINED_MONEY", "QUARANTINED_HEADER_ITEM", "DELETED_EXCLUDED");
         assertThat(savedCandidates).allSatisfy(candidate -> assertThat(candidate.getCanonicalImportAllowed()).isFalse());
+        assertThat(savedCandidates).allSatisfy(candidate -> {
+            assertThat(candidate.getLegacyBuyerId()).isPositive();
+            assertThat(candidate.getBuyerIdentityStatus()).isEqualTo("MISSING");
+            assertThat(candidate.getSourceCreatedAt()).isNotNull();
+        });
         assertThat(savedComponents).hasSize(6).allSatisfy(component -> {
             assertThat(component.getIdentityResolutionStatus()).isNotBlank();
             assertThat(component.getFundingResolutionStatus()).isEqualTo("MISSING_NAMED_FUNDER_BREAKDOWN");
@@ -121,6 +126,7 @@ class LegacyTradeBenefitMigrationServiceImplTest {
         });
         assertThat(savedItems).hasSize(5).allSatisfy(item -> {
             assertThat(item.getLegacyOrderItemId()).isPositive();
+            assertThat(item.getLegacyBuyerId()).isPositive();
             assertThat(item.getLegacyItemSnapshotHash()).matches("[0-9a-f]{64}");
             assertThat(item.getCanonicalImportAllowed()).isFalse();
         });
@@ -135,8 +141,9 @@ class LegacyTradeBenefitMigrationServiceImplTest {
                         tuple("VIP", "MISSING_BENEFIT_VERSION", null));
         assertThat(events).hasSize(5).allSatisfy(event -> {
             assertThat(event.getEventType()).isEqualTo(LegacyTradeBenefitMigrationServiceImpl.ASSESSMENT_EVENT);
-            assertThat(event.getSchemaVersion()).isEqualTo(2);
+            assertThat(event.getSchemaVersion()).isEqualTo(3);
             assertThat(event.getPayload()).containsEntry("migration_run_id", RUN)
+                    .containsEntry("buyer_identity_status", "MISSING")
                     .containsEntry("canonical_import_allowed", false)
                     .containsEntry("item_evidence_complete", true)
                     .containsEntry("run_source_item_count", 5)
@@ -261,7 +268,7 @@ class LegacyTradeBenefitMigrationServiceImplTest {
 
     private static LegacyTradeBenefitAssessmentCommand command() {
         return new LegacyTradeBenefitAssessmentCommand().setIdempotencyKey("legacy-trade-benefit-assessment-v1")
-                .setMigrationRunId(RUN).setPolicyVersion("legacy-trade-benefit-v3")
+                .setMigrationRunId(RUN).setPolicyVersion("legacy-trade-benefit-v4")
                 .setEvidenceRef("evidence:local-yudao-trade-current")
                 .setCorrelationId(CORRELATION).setOccurredAt(OCCURRED_AT);
     }
@@ -272,7 +279,9 @@ class LegacyTradeBenefitMigrationServiceImplTest {
         long benefit = generic + coupon + point + vip;
         long pay = gross - benefit;
         return new LegacyTradeOrderAssessmentSourceDO().setTenantId(1L).setLegacyOrderId(orderId)
-                .setLegacyOrderNo("T" + orderId).setSourceUpdatedAt(UPDATED_AT.plusSeconds(orderId))
+                .setLegacyOrderNo("T" + orderId).setSourceCreatedAt(UPDATED_AT.minusDays(1))
+                .setSourceUpdatedAt(UPDATED_AT.plusSeconds(orderId)).setLegacyBuyerId(900L + orderId)
+                .setLegacyOrderStatus(20).setBuyerIdentityStatus("MISSING")
                 .setDeleted(false).setHeaderQuantity(1).setItemRowCount(1).setItemQuantity(1)
                 .setHeaderGrossAmountMinor(gross).setHeaderGenericDiscountAmountMinor(generic)
                 .setHeaderCouponAmountMinor(coupon).setHeaderPointAmountMinor(point)
@@ -298,6 +307,7 @@ class LegacyTradeBenefitMigrationServiceImplTest {
                                                                  long itemId) {
         return new LegacyTradeOrderItemAssessmentSourceDO().setTenantId(source.getTenantId())
                 .setLegacyOrderItemId(itemId).setLegacyOrderId(source.getLegacyOrderId())
+                .setLegacyBuyerId(source.getLegacyBuyerId())
                 .setSourceUpdatedAt(source.getSourceUpdatedAt()).setDeleted(false)
                 .setLegacySpuId(100L + itemId).setLegacySkuId(200L + itemId)
                 .setItemQuantity(source.getItemQuantity()).setUnitPriceMinor(source.getItemGrossAmountMinor())

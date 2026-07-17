@@ -9,7 +9,14 @@ public class LegacyTradeOrderAssessmentSourceDO {
     private Long tenantId;
     private Long legacyOrderId;
     private String legacyOrderNo;
+    private LocalDateTime sourceCreatedAt;
     private LocalDateTime sourceUpdatedAt;
+    private Long legacyBuyerId;
+    private Integer legacyOrderStatus;
+    private String buyerSourceIdentityId;
+    private String buyerPrincipalId;
+    private Long buyerIdentityVersion;
+    private String buyerIdentityStatus;
     private Boolean deleted;
     private Integer headerQuantity;
     private Integer itemRowCount;
