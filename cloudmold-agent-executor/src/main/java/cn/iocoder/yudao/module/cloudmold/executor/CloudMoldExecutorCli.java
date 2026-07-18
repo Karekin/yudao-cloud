@@ -16,13 +16,16 @@ public class CloudMoldExecutorCli implements ApplicationRunner {
 
     private final CloudMoldCapabilityCatalog catalog;
     private final CloudMoldCapabilityExecutor executor;
+    private final CapabilityContractDescriber contractDescriber;
     private final ObjectMapper objectMapper;
     private final ConfigurableApplicationContext applicationContext;
 
     public CloudMoldExecutorCli(CloudMoldCapabilityCatalog catalog, CloudMoldCapabilityExecutor executor,
-                                ObjectMapper objectMapper, ConfigurableApplicationContext applicationContext) {
+                                CapabilityContractDescriber contractDescriber, ObjectMapper objectMapper,
+                                ConfigurableApplicationContext applicationContext) {
         this.catalog = catalog;
         this.executor = executor;
+        this.contractDescriber = contractDescriber;
         this.objectMapper = objectMapper;
         this.applicationContext = applicationContext;
     }
@@ -33,6 +36,11 @@ public class CloudMoldExecutorCli implements ApplicationRunner {
             if (args.containsOption("list-capabilities")) {
                 System.out.println(objectMapper.writeValueAsString(catalog.all().stream()
                         .map(CapabilityOutput::from).toList()));
+                return;
+            }
+            if (args.containsOption("describe-capability")) {
+                System.out.println(objectMapper.writeValueAsString(
+                        contractDescriber.describe(required(args, "describe-capability"))));
                 return;
             }
             String capabilityId = required(args, "capability-id");
