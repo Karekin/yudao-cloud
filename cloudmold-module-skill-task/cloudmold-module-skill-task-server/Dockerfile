@@ -15,4 +15,4 @@ ENV JAVA_OPTS="-Xms192m -Xmx512m -Dfile.encoding=UTF-8 -Ddubbo.application.migra
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=12 \
   CMD test -s /tmp/cloudmold-skill-task-ready || exit 1
 
-ENTRYPOINT ["/bin/bash", "-c", "export CLOUDMOLD_RPC_SHARED_SECRET=\"$(</run/secrets/cloudmold_rpc_shared_secret)\"; export CLOUDMOLD_DB_PASSWORD=\"$(</run/secrets/cloudmold_mysql_password)\"; exec java ${JAVA_OPTS} -jar app.jar"]
+ENTRYPOINT ["/bin/bash", "-c", "set -euo pipefail; if [[ -r /run/secrets/cloudmold_rpc_shared_secret ]]; then export CLOUDMOLD_RPC_SHARED_SECRET=\"$(</run/secrets/cloudmold_rpc_shared_secret)\"; fi; if [[ -r /run/secrets/cloudmold_mysql_password ]]; then export CLOUDMOLD_DB_PASSWORD=\"$(</run/secrets/cloudmold_mysql_password)\"; fi; : \"${CLOUDMOLD_RPC_SHARED_SECRET:?CLOUDMOLD_RPC_SHARED_SECRET is required}\"; : \"${CLOUDMOLD_DB_PASSWORD:?CLOUDMOLD_DB_PASSWORD is required}\"; exec java ${JAVA_OPTS} -jar app.jar"]

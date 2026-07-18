@@ -94,5 +94,7 @@ dubbo:
     retries: 0
 
 yudao:
+  info:
+    base-package: cn.iocoder.yudao
   tenant:
     enable: false
