@@ -4,6 +4,7 @@ import cn.iocoder.yudao.framework.mybatis.core.mapper.BaseMapperX;
 import cn.iocoder.yudao.module.cloudmold.warehouse.dal.dataobject.WarehouseLocationDO;
 import org.apache.ibatis.annotations.*;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface WarehouseLocationMapper extends BaseMapperX<WarehouseLocationDO> {
@@ -14,6 +15,9 @@ public interface WarehouseLocationMapper extends BaseMapperX<WarehouseLocationDO
     @Select("SELECT * FROM cloudmold_warehouse_location WHERE tenant_id=#{tenantId} AND warehouse_id=#{warehouseId} AND location_code=#{code}")
     WarehouseLocationDO selectByCode(@Param("tenantId") Long tenantId, @Param("warehouseId") String warehouseId,
                                      @Param("code") String code);
+    @Select("SELECT * FROM cloudmold_warehouse_location WHERE tenant_id=#{tenantId} AND warehouse_id=#{warehouseId} AND status='ACTIVE' ORDER BY location_id")
+    List<WarehouseLocationDO> selectActiveByWarehouse(@Param("tenantId") Long tenantId,
+                                                       @Param("warehouseId") String warehouseId);
     @Update("UPDATE cloudmold_warehouse_location SET status=#{status},version=version+1,updated_at=#{now} WHERE tenant_id=#{tenantId} AND location_id=#{id} AND version=#{version}")
     int updateStatusCas(@Param("tenantId") Long tenantId, @Param("id") String id, @Param("version") Long version,
                         @Param("status") String status, @Param("now") LocalDateTime now);

@@ -83,25 +83,82 @@ public interface OperationsIntelligenceStoreMapper {
                    score_basis_points,retry_no,evidence_ref,result_sha256,occurred_at,created_at
             FROM cloudmold_intelligence_model_result
             WHERE tenant_id=#{tenantId} AND model_result_id=#{modelResultId}
-            """) ModelResult selectModelResult(@Param("tenantId") Long tenantId,
+    """) ModelResult selectModelResult(@Param("tenantId") Long tenantId,
                                                  @Param("modelResultId") String modelResultId);
 
     @Insert("""
+            INSERT INTO cloudmold_intelligence_clue_source_version
+              (source_version_id,tenant_id,source_system,source_biz_id,business_revision,supersedes_source_version_id,
+               intelligence_type_code,source_code,source_published_at,source_valid,source_deleted,title_sha256,
+               summary_sha256,clue_info_sha256,clue_info_item_count,semantic_payload_sha256,source_observed_at,created_at)
+            VALUES (#{sourceVersionId},#{tenantId},#{sourceSystem},#{sourceBizId},#{businessRevision},
+                    #{supersedesSourceVersionId},#{intelligenceTypeCode},#{sourceCode},#{sourcePublishedAt},
+                    #{sourceValid},#{sourceDeleted},#{titleSha256},#{summarySha256},#{clueInfoSha256},
+                    #{clueInfoItemCount},#{semanticPayloadSha256},#{sourceObservedAt},#{createdAt})
+            """) int insertClueSourceVersion(ClueSourceVersion value);
+
+    @Select("""
+            SELECT source_version_id,tenant_id,source_system,source_biz_id,business_revision,
+                   supersedes_source_version_id,intelligence_type_code,source_code,source_published_at,source_valid,
+                   source_deleted,title_sha256,summary_sha256,clue_info_sha256,clue_info_item_count,
+                   semantic_payload_sha256,source_observed_at,created_at
+            FROM cloudmold_intelligence_clue_source_version
+            WHERE tenant_id=#{tenantId} AND source_version_id=#{sourceVersionId}
+            """) ClueSourceVersion selectClueSourceVersion(@Param("tenantId") Long tenantId,
+                                                             @Param("sourceVersionId") String sourceVersionId);
+
+    @Insert("""
+            INSERT INTO cloudmold_intelligence_clue_source_delivery
+              (delivery_id,tenant_id,source_version_id,source_dataset_id,source_dataset_version,
+               declared_source_asset,physical_source_asset,source_transport,source_record_key,source_record_version,
+               payload_schema_version,source_schema_sha256,source_evidence_ref,source_evidence_sha256,
+               source_observed_at,created_at)
+            VALUES (#{deliveryId},#{tenantId},#{sourceVersionId},#{sourceDatasetId},#{sourceDatasetVersion},
+                    #{declaredSourceAsset},#{physicalSourceAsset},#{sourceTransport},#{sourceRecordKey},
+                    #{sourceRecordVersion},#{payloadSchemaVersion},#{sourceSchemaSha256},#{sourceEvidenceRef},
+                    #{sourceEvidenceSha256},#{sourceObservedAt},#{createdAt})
+            """) int insertClueSourceDelivery(ClueSourceDelivery value);
+
+    @Select("""
+            SELECT delivery_id,tenant_id,source_version_id,source_dataset_id,source_dataset_version,
+                   declared_source_asset,physical_source_asset,source_transport,source_record_key,
+                   source_record_version,payload_schema_version,source_schema_sha256,source_evidence_ref,
+                   source_evidence_sha256,source_observed_at,created_at
+            FROM cloudmold_intelligence_clue_source_delivery
+            WHERE tenant_id=#{tenantId} AND delivery_id=#{deliveryId}
+            """) ClueSourceDelivery selectClueSourceDelivery(@Param("tenantId") Long tenantId,
+                                                               @Param("deliveryId") String deliveryId);
+
+    @Select("""
+            SELECT COUNT(*) FROM cloudmold_intelligence_clue_source_delivery
+            WHERE tenant_id=#{tenantId} AND source_version_id=#{sourceVersionId}
+            """) int countClueSourceDeliveries(@Param("tenantId") Long tenantId,
+                                                 @Param("sourceVersionId") String sourceVersionId);
+
+    @Select("""
+            SELECT clue_id,tenant_id,source_version_id,observation_id,model_result_id,clue_type,source_code,
+                   source_published_at,evidence_ref,evidence_sha256,status,version,created_at,updated_at
+            FROM cloudmold_intelligence_clue
+            WHERE tenant_id=#{tenantId} AND source_version_id=#{sourceVersionId}
+            """) Clue selectClueBySourceVersion(@Param("tenantId") Long tenantId,
+                                                  @Param("sourceVersionId") String sourceVersionId);
+
+    @Insert("""
             INSERT INTO cloudmold_intelligence_clue
-              (clue_id,tenant_id,observation_id,model_result_id,clue_type,source_code,source_published_at,evidence_ref,
-               evidence_sha256,status,version,created_at,updated_at)
-            VALUES (#{clueId},#{tenantId},#{observationId},#{modelResultId},#{clueType},#{sourceCode},
+              (clue_id,tenant_id,source_version_id,observation_id,model_result_id,clue_type,source_code,
+               source_published_at,evidence_ref,evidence_sha256,status,version,created_at,updated_at)
+            VALUES (#{clueId},#{tenantId},#{sourceVersionId},#{observationId},#{modelResultId},#{clueType},#{sourceCode},
                     #{sourcePublishedAt},#{evidenceRef},#{evidenceSha256},#{status},#{version},#{createdAt},#{updatedAt})
             """) int insertClue(Clue value);
 
     @Select("""
-            SELECT clue_id,tenant_id,observation_id,model_result_id,clue_type,source_code,source_published_at,
+            SELECT clue_id,tenant_id,source_version_id,observation_id,model_result_id,clue_type,source_code,source_published_at,
                    evidence_ref,evidence_sha256,status,version,created_at,updated_at
             FROM cloudmold_intelligence_clue WHERE tenant_id=#{tenantId} AND clue_id=#{clueId}
             """) Clue selectClue(@Param("tenantId") Long tenantId, @Param("clueId") String clueId);
 
     @Select("""
-            SELECT clue_id,tenant_id,observation_id,model_result_id,clue_type,source_code,source_published_at,
+            SELECT clue_id,tenant_id,source_version_id,observation_id,model_result_id,clue_type,source_code,source_published_at,
                    evidence_ref,evidence_sha256,status,version,created_at,updated_at
             FROM cloudmold_intelligence_clue WHERE tenant_id=#{tenantId} AND clue_id=#{clueId} FOR UPDATE
             """) Clue selectClueForUpdate(@Param("tenantId") Long tenantId, @Param("clueId") String clueId);

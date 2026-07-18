@@ -31,6 +31,8 @@ public class OrderCommand {
     private String refundId;
     private String cancellationSagaId;
     private String cancellationMode;
+    private String responsibilityParty;
+    private String responsibilityCode;
     private Integer cancellationStepOrdinal;
     private String reason;
     private String correlationId;

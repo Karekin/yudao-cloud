@@ -127,6 +127,42 @@ public final class RiskRecords {
     }
 
     @Data @Accessors(chain = true)
+    public static class OrderReference {
+        private String orderId; private Long tenantId; private String paymentId; private String status;
+        private Long payableAmountMinor; private String currencyCode;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class PaymentReference {
+        private String paymentId; private Long tenantId; private String orderId; private String status;
+        private Long capturedAmountMinor; private Long refundedAmountMinor; private String currencyCode;
+        private String providerCode; private Boolean testMode;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class OrderRiskCase {
+        private String orderRiskCaseId; private Long tenantId; private String caseId; private String orderId;
+        private String paymentId; private String riskType; private String reasonCode; private LocalDateTime createdAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class PaymentDispute {
+        private String disputeId; private Long tenantId; private String orderId; private String paymentId;
+        private String caseId; private String decisionId; private String disputeType; private String status;
+        private String reasonCode; private Long amountMinor; private String currencyCode; private String externalRef;
+        private Long version; private LocalDateTime openedAt; private LocalDateTime resolvedAt;
+        private LocalDateTime createdAt; private LocalDateTime updatedAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class LossEntry {
+        private String lossEntryId; private Long tenantId; private String orderId; private String paymentId;
+        private String disputeId; private String decisionId; private String entryType; private Long signedAmountMinor;
+        private String currencyCode; private String externalRef; private LocalDateTime occurredAt;
+        private LocalDateTime createdAt;
+    }
+
+    @Data @Accessors(chain = true)
     public static class StatusHistory {
         private Long tenantId; private String aggregateType; private String aggregateId; private Long aggregateVersion;
         private String previousStatus; private String currentStatus; private Long operationId; private String reasonCode;

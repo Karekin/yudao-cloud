@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 
 @Mapper
 public interface FulfillmentOrderMapper extends BaseMapperX<FulfillmentOrderDO> {
-    String COLUMNS = "fulfillment_id,tenant_id,fulfillment_no,run_id,order_id,order_no,seller_id,warehouse_id,status,cancellation_saga_id,pre_cancellation_status,version,created_at,updated_at";
+    String COLUMNS = "fulfillment_id,tenant_id,fulfillment_no,run_id,order_id,order_no,seller_id,warehouse_id,delivery_promise_version_ref,promised_delivery_at,promise_frozen_at,status,cancellation_saga_id,pre_cancellation_status,version,created_at,updated_at";
 
     @Select("SELECT " + COLUMNS + " FROM cloudmold_fulfillment_order WHERE tenant_id=#{tenantId} AND fulfillment_id=#{fulfillmentId} FOR UPDATE")
     FulfillmentOrderDO selectForUpdate(@Param("tenantId") Long tenantId,

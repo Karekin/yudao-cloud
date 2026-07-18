@@ -30,6 +30,12 @@ public class OperationsIntelligenceAdminController {
         return success(queryApi.getObservation(observationId));
     }
 
+    @GetMapping("/clue-source-version/get")
+    @PreAuthorize("@ss.hasPermission('cloudmold:operations-intelligence:query')")
+    public CommonResult<OperationsIntelligenceResult> getClueSourceVersion(@RequestParam String sourceVersionId) {
+        return success(queryApi.getClueSourceVersion(sourceVersionId));
+    }
+
     @GetMapping("/clue/get")
     @PreAuthorize("@ss.hasPermission('cloudmold:operations-intelligence:query')")
     public CommonResult<OperationsIntelligenceResult> getClue(@RequestParam String clueId) {

@@ -22,6 +22,8 @@ public class FulfillmentCommand {
     private String sellerId;
     private String warehouseId;
     private List<FulfillmentLineCommand> items;
+    private String deliveryPromiseVersionRef;
+    private Instant promisedDeliveryAt;
     private String carrierCode;
     private String waybillNo;
     private String reason;

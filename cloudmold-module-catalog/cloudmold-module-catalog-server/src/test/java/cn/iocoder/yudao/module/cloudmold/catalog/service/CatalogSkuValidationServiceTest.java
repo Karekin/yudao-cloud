@@ -48,7 +48,7 @@ class CatalogSkuValidationServiceTest {
 
     @Test
     void shouldAcceptActiveSpuInCurrentTenant() {
-        when(mapper.selectSpu(1L, "spu-active")).thenReturn(new CatalogSpuDO().setSpuId("spu-active").setStatus(10));
+        when(mapper.selectSpu(1L, "spu-active")).thenReturn(new CatalogSpuDO().setSpuId("spu-active").setStatus(30));
         assertThatCode(() -> service.requireActiveSpu("spu-active")).doesNotThrowAnyException();
     }
 

@@ -35,6 +35,11 @@ public class CustomerServiceEventService {
         payload.put("channel_code", ticket.getChannelCode());
         payload.put("priority", ticket.getPriority());
         payload.put("category_code", ticket.getCategoryCode());
+        payload.put("sla_policy_code", ticket.getSlaPolicyCode());
+        payload.put("sla_policy_version", ticket.getSlaPolicyVersion());
+        payload.put("resolution_deadline_at",
+                ticket.getResolutionDeadlineAt() == null ? null : ticket.getResolutionDeadlineAt().toInstant(ZoneOffset.UTC).toString());
+        payload.put("fcr_window_hours", ticket.getFcrWindowHours());
         payload.put("previous_status", previousStatus);
         payload.put("current_status", ticket.getStatus());
         payload.put("assigned_agent_principal_id", ticket.getAssignedAgentPrincipalId());
@@ -75,6 +80,24 @@ public class CustomerServiceEventService {
         payload.put("malware_scan_status", attachment.getMalwareScanStatus());
         append("customer_service.attachment.recorded", "customer_service_attachment", attachment.getAttachmentId(),
                 1L, attachment.getTenantId(), attachment.getRunId(), command, occurredAt, payload);
+    }
+
+    public void appendBuyerFeedback(CustomerServiceBuyerFeedbackDO feedback, CustomerServiceCommand command,
+                                    Instant occurredAt) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("run_id", feedback.getRunId());
+        payload.put("feedback_id", feedback.getFeedbackId());
+        payload.put("ticket_id", feedback.getTicketId());
+        payload.put("customer_principal_id", feedback.getCustomerPrincipalId());
+        payload.put("touchpoint_code", feedback.getTouchpointCode());
+        payload.put("sentiment_code", feedback.getSentimentCode());
+        payload.put("score_basis_points", feedback.getScoreBasisPoints());
+        payload.put("reason_code", feedback.getReasonCode());
+        payload.put("comment_token", feedback.getCommentToken());
+        payload.put("occurred_at", occurredAt.toString());
+        append("customer_service.buyer_feedback.recorded", "customer_service_buyer_feedback",
+                feedback.getFeedbackId(), 1L, feedback.getTenantId(), feedback.getRunId(), command, occurredAt,
+                payload);
     }
 
     public void appendQualityReview(CustomerServiceQualityReviewDO review, CustomerServiceCommand command,

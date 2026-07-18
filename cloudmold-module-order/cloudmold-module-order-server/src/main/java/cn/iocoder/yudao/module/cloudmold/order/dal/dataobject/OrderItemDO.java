@@ -22,6 +22,7 @@ public class OrderItemDO {
     private Long lineAmountMinor;
     private Long discountAmountMinor;
     private Long netAmountMinor;
+    private Long merchandiseCostMinor;
     private String reservationId;
     private String listingId;
     private String listingOfferId;

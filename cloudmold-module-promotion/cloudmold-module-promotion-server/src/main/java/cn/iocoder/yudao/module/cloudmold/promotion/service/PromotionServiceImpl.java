@@ -5,6 +5,8 @@ import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventCommand;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
+import cn.iocoder.yudao.module.cloudmold.order.api.OrderAttributionView;
+import cn.iocoder.yudao.module.cloudmold.order.api.OrderQueryApi;
 import cn.iocoder.yudao.module.cloudmold.promotion.api.*;
 import cn.iocoder.yudao.module.cloudmold.promotion.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.promotion.dal.mysql.*;
@@ -28,6 +30,9 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
     private final CouponEntitlementLedgerMapper ledgerMapper;
     private final AdvertisingPlacementMapper placementMapper;
     private final AdvertisingInteractionMapper interactionMapper;
+    private final AdvertisingLedgerEntryMapper advertisingLedgerEntryMapper;
+    private final PromotionExperimentResultMapper promotionExperimentResultMapper;
+    private final OrderQueryApi orderQueryApi;
     private final OutboxAppender outboxAppender;
 
     @Override
@@ -69,6 +74,8 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
             case ACTIVATE_ADVERTISING_PLACEMENT, PAUSE_ADVERTISING_PLACEMENT, RETIRE_ADVERTISING_PLACEMENT ->
                     changePlacement(tenantId, command, now);
             case RECORD_IMPRESSION, RECORD_CLICK, RECORD_ATTRIBUTION -> recordInteraction(tenantId, command);
+            case RECORD_ADVERTISING_LEDGER_ENTRY -> recordAdvertisingLedgerEntry(tenantId, command);
+            case UPSERT_PROMOTION_EXPERIMENT_RESULT -> upsertPromotionExperimentResult(tenantId, command, now);
         };
         appendEvent(tenantId, command, outcome);
         PromotionCommandResult result = outcome.result();
@@ -94,6 +101,10 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
                     placementMapper.selectOneById(tenantId, aggregateId), "advertising placement not found"));
             case "PROMOTION_ADVERTISING_INTERACTION" -> interactionView(requireNonNull(
                     interactionMapper.selectById(tenantId, aggregateId), "advertising interaction not found"));
+            case "PROMOTION_ADVERTISING_LEDGER_ENTRY" -> advertisingLedgerView(requireNonNull(
+                    advertisingLedgerEntryMapper.selectById(tenantId, aggregateId), "advertising ledger entry not found"));
+            case "PROMOTION_EXPERIMENT_RESULT" -> experimentResultView(requireNonNull(
+                    promotionExperimentResultMapper.selectById(tenantId, aggregateId), "promotion experiment result not found"));
             default -> throw new IllegalArgumentException("unsupported aggregateType");
         };
     }
@@ -279,8 +290,13 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
         if ("ATTRIBUTION".equals(type)) {
             require(input.getAttributionAmountMinor() != null && input.getAttributionAmountMinor() >= 0,
                     "attributionAmountMinor must be non-negative");
-            currency(input.getCurrencyCode());
+            require("CNY".equals(currency(input.getCurrencyCode())), "attribution currency must be CNY");
             requireText(input.getOrderRef(), "orderRef", 128);
+            OrderAttributionView order = orderQueryApi.requireAttributedOrder(input.getOrderRef());
+            if (input.getPrincipalId() != null) {
+                require(Objects.equals(input.getPrincipalId(), order.getBuyerId()),
+                        "attribution principalId does not match canonical order buyer");
+            }
         } else {
             require(input.getAttributionAmountMinor() == null && input.getCurrencyCode() == null,
                     "amount and currency are only valid for attribution");
@@ -298,6 +314,148 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
         Map<String, Object> payload = interactionPayload(row);
         return outcome("promotion.advertising_interaction.recorded", "promotion_advertising_interaction",
                 id, 1L, "RECORDED", payload);
+    }
+
+    private Outcome recordAdvertisingLedgerEntry(Long tenantId, PromotionCommand command) {
+        PromotionCommand.AdvertisingLedgerDefinition input = requireNonNull(command.getAdvertisingLedger(),
+                "advertisingLedger is required");
+        requireText(input.getLedgerEntryCode(), "ledgerEntryCode", 128);
+        requireText(input.getCampaignId(), "campaignId", 64);
+        requireText(input.getMerchantId(), "merchantId", 64);
+        requireText(input.getChargeModel(), "chargeModel", 32);
+        require(input.getAmountMinor() != null && input.getAmountMinor() > 0,
+                "amountMinor must be positive");
+        require(advertisingLedgerEntryMapper.selectByCode(tenantId, input.getLedgerEntryCode()) == null,
+                "ledgerEntryCode already exists");
+        PromotionCampaignDO campaign = requireCampaign(tenantId, input.getCampaignId());
+        require("ACTIVE".equals(campaign.getStatus()), "campaign must be ACTIVE");
+        requireWithin(command.getOccurredAt(), campaign.getStartsAt(), campaign.getEndsAt(), "campaign");
+        String entryType = advertisingLedgerEntryType(input.getEntryType());
+        String chargeModel = chargeModel(input.getChargeModel());
+        String revenueType = null;
+        String placementId = null;
+        if (input.getPlacementId() != null) {
+            AdvertisingPlacementDO placement = requireNonNull(
+                    placementMapper.selectForUpdate(tenantId, input.getPlacementId()), "advertising placement not found");
+            require(Objects.equals(input.getCampaignId(), placement.getCampaignId()),
+                    "advertising ledger placement must belong to campaign");
+            placementId = placement.getPlacementId();
+        }
+        String sourceInteractionId = null;
+        AdvertisingInteractionDO sourceInteraction = null;
+        if (input.getSourceInteractionId() != null) {
+            sourceInteraction = requireNonNull(
+                    interactionMapper.selectById(tenantId, input.getSourceInteractionId()), "source interaction not found");
+            require(Objects.equals(input.getCampaignId(), sourceInteraction.getCampaignId()),
+                    "advertising ledger source interaction campaign mismatch");
+            if (placementId != null) {
+                require(Objects.equals(placementId, sourceInteraction.getPlacementId()),
+                        "advertising ledger source interaction placement mismatch");
+            }
+            sourceInteractionId = sourceInteraction.getInteractionId();
+        }
+        String orderRef = null;
+        if ("REVENUE".equals(entryType)) {
+            revenueType = revenueType(input.getRevenueType());
+            if (sourceInteraction != null) {
+                require("ATTRIBUTION".equals(sourceInteraction.getInteractionType()),
+                        "REVENUE ledger entry must reference an ATTRIBUTION interaction");
+                require("ADVERTISING".equals(revenueType),
+                        "interaction-linked revenue must use ADVERTISING revenueType");
+            }
+            if (requiresOrderBoundRevenue(revenueType)) {
+                requireText(input.getOrderRef(), "orderRef", 128);
+            }
+            if (input.getOrderRef() != null) {
+                OrderAttributionView order = orderQueryApi.requireAttributedOrder(input.getOrderRef());
+                require(Objects.equals(input.getMerchantId(), order.getMerchantId()),
+                        "REVENUE ledger merchantId does not match canonical order merchant");
+                if (sourceInteraction != null && sourceInteraction.getOrderRef() != null) {
+                    require(Objects.equals(sourceInteraction.getOrderRef(), input.getOrderRef()),
+                            "REVENUE ledger orderRef does not match attribution interaction");
+                }
+                orderRef = input.getOrderRef();
+            }
+        } else {
+            require(input.getOrderRef() == null, "SPEND ledger entry must not bind orderRef");
+            require(input.getRevenueType() == null, "SPEND ledger entry must not set revenueType");
+        }
+        String id = valueOrUuid(input.getLedgerEntryId());
+        AdvertisingLedgerEntryDO row = new AdvertisingLedgerEntryDO()
+                .setLedgerEntryId(id)
+                .setTenantId(tenantId)
+                .setLedgerEntryCode(input.getLedgerEntryCode())
+                .setCampaignId(input.getCampaignId())
+                .setPlacementId(placementId)
+                .setMerchantId(input.getMerchantId())
+                .setEntryType(entryType)
+                .setChargeModel(chargeModel)
+                .setRevenueType(revenueType)
+                .setSourceInteractionId(sourceInteractionId)
+                .setOrderRef(orderRef)
+                .setAmountMinor(input.getAmountMinor())
+                .setCurrencyCode("CNY")
+                .setOccurredAt(at(command.getOccurredAt()))
+                .setCreatedAt(at(command.getOccurredAt()));
+        advertisingLedgerEntryMapper.insert(row);
+        return outcome("promotion.advertising_ledger.recorded", "promotion_advertising_ledger_entry",
+                id, 1L, "RECORDED", advertisingLedgerPayload(row));
+    }
+
+    private Outcome upsertPromotionExperimentResult(Long tenantId, PromotionCommand command, LocalDateTime now) {
+        PromotionCommand.PromotionExperimentResultDefinition input = requireNonNull(
+                command.getPromotionExperimentResult(), "promotionExperimentResult is required");
+        requireText(input.getExperimentCode(), "experimentCode", 128);
+        requireText(input.getCampaignId(), "campaignId", 64);
+        requireText(input.getMerchantId(), "merchantId", 64);
+        requireInterval(input.getMeasuredFrom(), input.getMeasuredTo(), "promotion experiment result");
+        require(input.getBaselineContributionProfitMinor() != null && input.getBaselineContributionProfitMinor() >= 0,
+                "baselineContributionProfitMinor must be non-negative");
+        require(input.getTreatmentContributionProfitMinor() != null && input.getTreatmentContributionProfitMinor() >= 0,
+                "treatmentContributionProfitMinor must be non-negative");
+        require(input.getIncrementalContributionProfitMinor() != null,
+                "incrementalContributionProfitMinor is required");
+        require(Objects.equals(input.getIncrementalContributionProfitMinor(),
+                        input.getTreatmentContributionProfitMinor() - input.getBaselineContributionProfitMinor()),
+                "incrementalContributionProfitMinor must equal treatment minus normalized baseline");
+        require(input.getPromotionCostMinor() != null && input.getPromotionCostMinor() > 0,
+                "promotionCostMinor must be positive");
+        require("CNY".equals(currency(input.getCurrencyCode())), "promotion experiment currency must be CNY");
+        requirePositivePopulation(input.getEligiblePopulationCount(), "eligiblePopulationCount");
+        requirePositivePopulation(input.getTreatmentPopulationCount(), "treatmentPopulationCount");
+        requirePositivePopulation(input.getControlPopulationCount(), "controlPopulationCount");
+        require(input.getTreatmentPopulationCount() + input.getControlPopulationCount()
+                        <= input.getEligiblePopulationCount(),
+                "treatment and control populations cannot exceed eligiblePopulationCount");
+        requireText(input.getMethodologyRef(), "methodologyRef", 256);
+        PromotionCampaignDO campaign = requireCampaign(tenantId, input.getCampaignId());
+        require(Set.of("ACTIVE", "PAUSED", "COMPLETED").contains(campaign.getStatus()),
+                "promotion experiment campaign is not measurable");
+        require(at(input.getMeasuredFrom()) != null && !at(input.getMeasuredFrom()).isBefore(campaign.getStartsAt()),
+                "promotion experiment must not start before campaign starts");
+        require(!input.getMeasuredTo().isAfter(command.getOccurredAt()),
+                "promotion experiment must not include future observations");
+        String experimentId = valueOrUuid(input.getExperimentId());
+        PromotionExperimentResultDO byCode = promotionExperimentResultMapper.selectByCode(tenantId, input.getExperimentCode());
+        PromotionExperimentResultDO existing = promotionExperimentResultMapper.selectById(tenantId, experimentId);
+        if (existing == null) {
+            require(byCode == null,
+                    "experimentCode already exists");
+            PromotionExperimentResultDO row = experimentResultRow(tenantId, experimentId, input, now, 1L);
+            promotionExperimentResultMapper.insert(row);
+            return outcome("promotion.experiment_result.upserted", "promotion_experiment_result", experimentId, 1L,
+                    "MEASURED", experimentResultPayload(row));
+        }
+        require(byCode == null || Objects.equals(byCode.getExperimentId(), existing.getExperimentId()),
+                "experimentCode already exists");
+        requireVersion(existing.getVersion(), input.getExpectedVersion());
+        PromotionExperimentResultDO row = experimentResultRow(tenantId, experimentId, input, existing.getCreatedAt(),
+                existing.getVersion());
+        require(promotionExperimentResultMapper.updateCas(tenantId, experimentId, existing.getVersion(), row, now) == 1,
+                "promotion experiment result version conflict");
+        row.setVersion(existing.getVersion() + 1).setCreatedAt(existing.getCreatedAt()).setUpdatedAt(now);
+        return outcome("promotion.experiment_result.upserted", "promotion_experiment_result", experimentId,
+                existing.getVersion() + 1, "MEASURED", experimentResultPayload(row));
     }
 
     private void validateLineage(Long tenantId, String type,
@@ -456,6 +614,30 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
         };
     }
 
+    private static String advertisingLedgerEntryType(String value) {
+        String normalized = normalized(value);
+        require(Set.of("SPEND", "REVENUE").contains(normalized), "invalid advertising ledger entryType");
+        return normalized;
+    }
+
+    private static String chargeModel(String value) {
+        String normalized = normalized(value);
+        require(Set.of("CPC", "CPM", "CPA", "FIXED", "REV_SHARE", "SETTLEMENT").contains(normalized),
+                "invalid chargeModel");
+        return normalized;
+    }
+
+    private static String revenueType(String value) {
+        String normalized = normalized(value);
+        require(Set.of("ADVERTISING", "COMMISSION", "FULFILLMENT_SERVICE", "PAYMENT_SERVICE",
+                "OTHER_PLATFORM_REVENUE").contains(normalized), "invalid revenueType");
+        return normalized;
+    }
+
+    private static boolean requiresOrderBoundRevenue(String revenueType) {
+        return Set.of("COMMISSION", "FULFILLMENT_SERVICE", "PAYMENT_SERVICE").contains(revenueType);
+    }
+
     private static Map<String, Object> campaignPayload(PromotionCampaignDO row, String previous, String current,
                                                        PromotionOperation operation) {
         Map<String, Object> p = payload("campaign_id", row.getCampaignId());
@@ -510,6 +692,67 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
         put(p, "occurred_at", instant(row.getOccurredAt())); return p;
     }
 
+    private static Map<String, Object> advertisingLedgerPayload(AdvertisingLedgerEntryDO row) {
+        Map<String, Object> p = payload("ledger_entry_id", row.getLedgerEntryId());
+        put(p, "ledger_entry_code", row.getLedgerEntryCode());
+        put(p, "campaign_id", row.getCampaignId());
+        put(p, "placement_id", row.getPlacementId());
+        put(p, "merchant_id", row.getMerchantId());
+        put(p, "entry_type", row.getEntryType());
+        put(p, "charge_model", row.getChargeModel());
+        put(p, "revenue_type", row.getRevenueType());
+        put(p, "source_interaction_id", row.getSourceInteractionId());
+        put(p, "order_ref", row.getOrderRef());
+        put(p, "amount_minor", row.getAmountMinor());
+        put(p, "currency_code", row.getCurrencyCode());
+        put(p, "occurred_at", instant(row.getOccurredAt()));
+        return p;
+    }
+
+    private static PromotionExperimentResultDO experimentResultRow(Long tenantId, String experimentId,
+                                                                   PromotionCommand.PromotionExperimentResultDefinition input,
+                                                                   LocalDateTime now, Long version) {
+        return new PromotionExperimentResultDO()
+                .setExperimentId(experimentId)
+                .setTenantId(tenantId)
+                .setExperimentCode(input.getExperimentCode())
+                .setCampaignId(input.getCampaignId())
+                .setMerchantId(input.getMerchantId())
+                .setMeasuredFrom(at(input.getMeasuredFrom()))
+                .setMeasuredTo(at(input.getMeasuredTo()))
+                .setBaselineContributionProfitMinor(input.getBaselineContributionProfitMinor())
+                .setTreatmentContributionProfitMinor(input.getTreatmentContributionProfitMinor())
+                .setIncrementalContributionProfitMinor(input.getIncrementalContributionProfitMinor())
+                .setPromotionCostMinor(input.getPromotionCostMinor())
+                .setEligiblePopulationCount(input.getEligiblePopulationCount())
+                .setTreatmentPopulationCount(input.getTreatmentPopulationCount())
+                .setControlPopulationCount(input.getControlPopulationCount())
+                .setCurrencyCode("CNY")
+                .setMethodologyRef(input.getMethodologyRef())
+                .setVersion(version)
+                .setCreatedAt(now)
+                .setUpdatedAt(now);
+    }
+
+    private static Map<String, Object> experimentResultPayload(PromotionExperimentResultDO row) {
+        Map<String, Object> p = payload("experiment_id", row.getExperimentId());
+        put(p, "experiment_code", row.getExperimentCode());
+        put(p, "campaign_id", row.getCampaignId());
+        put(p, "merchant_id", row.getMerchantId());
+        put(p, "measured_from", instant(row.getMeasuredFrom()));
+        put(p, "measured_to", instant(row.getMeasuredTo()));
+        put(p, "baseline_contribution_profit_minor", row.getBaselineContributionProfitMinor());
+        put(p, "treatment_contribution_profit_minor", row.getTreatmentContributionProfitMinor());
+        put(p, "incremental_contribution_profit_minor", row.getIncrementalContributionProfitMinor());
+        put(p, "promotion_cost_minor", row.getPromotionCostMinor());
+        put(p, "eligible_population_count", row.getEligiblePopulationCount());
+        put(p, "treatment_population_count", row.getTreatmentPopulationCount());
+        put(p, "control_population_count", row.getControlPopulationCount());
+        put(p, "currency_code", row.getCurrencyCode());
+        put(p, "methodology_ref", row.getMethodologyRef());
+        return p;
+    }
+
     private static PromotionAggregateView campaignView(PromotionCampaignDO row) {
         Map<String, Object> a = payload("campaign_kind", row.getCampaignKind()); put(a, "name", row.getName());
         put(a, "starts_at", instant(row.getStartsAt())); put(a, "ends_at", instant(row.getEndsAt()));
@@ -539,6 +782,21 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
         return view("promotion_advertising_interaction", row.getInteractionId(), row.getDeduplicationKey(), "RECORDED", 1L, a);
     }
 
+    private static PromotionAggregateView advertisingLedgerView(AdvertisingLedgerEntryDO row) {
+        Map<String, Object> a = advertisingLedgerPayload(row);
+        a.remove("ledger_entry_id");
+        return view("promotion_advertising_ledger_entry", row.getLedgerEntryId(), row.getLedgerEntryCode(),
+                "RECORDED", 1L, a);
+    }
+
+    private static PromotionAggregateView experimentResultView(PromotionExperimentResultDO row) {
+        Map<String, Object> a = experimentResultPayload(row);
+        a.remove("experiment_id");
+        a.remove("experiment_code");
+        return view("promotion_experiment_result", row.getExperimentId(), row.getExperimentCode(),
+                "MEASURED", row.getVersion(), a);
+    }
+
     private static PromotionAggregateView view(String type, String id, String code, String status, Long version,
                                                Map<String, Object> attributes) {
         return PromotionAggregateView.builder().aggregateType(type).aggregateId(id).businessCode(code)
@@ -559,6 +817,10 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
 
     private static void requireInterval(Instant from, Instant to, String name) {
         require(from != null && to != null && from.isBefore(to), name + " validity interval is invalid");
+    }
+
+    private static void requirePositivePopulation(Integer value, String name) {
+        require(value != null && value > 0, name + " must be positive");
     }
 
     private static void requireWithin(Instant occurredAt, LocalDateTime from, LocalDateTime to, String name) {

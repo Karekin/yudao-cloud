@@ -191,6 +191,8 @@ public class OrderCancellationSagaCheckpointService {
                 .setAttemptCount(saga.getAttemptCount())
                 .setExpectedReservationCount(saga.getExpectedReservationCount())
                 .setReleasedReservationCount(saga.getReleasedReservationCount())
+                .setResponsibilityParty(saga.getResponsibilityParty())
+                .setResponsibilityCode(saga.getResponsibilityCode())
                 .setErrorCode(saga.getLastErrorCode()).setErrorMessage(saga.getLastErrorMessage())
                 .setNextRetryAt(saga.getNextRetryAt()).setOccurredAt(now).setCreatedAt(now));
 
@@ -212,12 +214,18 @@ public class OrderCancellationSagaCheckpointService {
         payload.put("active_step", saga.getActiveStep());
         payload.put("attempt", saga.getAttemptCount());
         payload.put("reason", saga.getReason());
+        payload.put("responsibility_party", saga.getResponsibilityParty());
+        payload.put("responsibility_code", saga.getResponsibilityCode());
+        payload.put("counts_toward_paid_cancellation_rate",
+                "MERCHANT".equals(saga.getResponsibilityParty())
+                        && "PAID_UNSHIPPED".equals(saga.getCancellationMode()));
         payload.put("expected_reservation_count", saga.getExpectedReservationCount());
         payload.put("released_reservation_count", saga.getReleasedReservationCount());
         payload.put("reservations", reservations);
         OrderCancellationSagaFulfillmentDO fulfillment = fulfillmentMapper.selectBySaga(
                 saga.getTenantId(), saga.getSagaId());
         payload.put("cancellation_mode", saga.getCancellationMode());
+        payload.put("order_status_at_request", saga.getOrderStatusAtRequest());
         payload.put("step_ordinal", stepOrdinal(saga));
         payload.put("payment_id", saga.getPaymentId());
         payload.put("payment_refund_transaction_id", saga.getPaymentRefundTransactionId());

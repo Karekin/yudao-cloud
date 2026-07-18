@@ -262,12 +262,21 @@ public class InventoryV3CommandServiceImpl implements InventoryV3CommandApi {
         payload.put("business_no", command.businessNo());
         payload.put("reservation_id", reservationId);
         payload.put("allocation_id", allocationId);
+        if (command.costEvidence() != null) {
+            payload.put("unit_cost_amount_minor", command.costEvidence().unitCostAmountMinor());
+            payload.put("movement_cost_amount_minor", command.costEvidence().movementCostAmountMinor());
+            payload.put("currency_code", command.costEvidence().currencyCode());
+            payload.put("cost_source_system", command.costEvidence().costSourceSystem());
+            payload.put("cost_source_ref", command.costEvidence().costSourceRef());
+            payload.put("cost_policy_version", command.costEvidence().costPolicyVersion());
+        }
+        int schemaVersion = command.costEvidence() == null ? 3 : 5;
         outboxAppender.append(AppendDomainEventCommand.builder().eventType("inventory.stock.changed")
-                .schemaVersion(3).sourceSystem("cloudmold-inventory").tenantId(tenantId)
+                .schemaVersion(schemaVersion).sourceSystem("cloudmold-inventory").tenantId(tenantId)
                 .aggregateType("inventory_balance_v3").aggregateId(balance.getBalanceId())
                 .aggregateVersion(version).eventSequence((short) 1).occurredAt(command.occurredAt())
                 .correlationId(command.correlationId()).causationId(command.causationId())
-                .idempotencyKey(command.idempotencyKey() + ":event:v3").payload(payload)
+                .idempotencyKey(command.idempotencyKey() + ":event:v" + schemaVersion).payload(payload)
                 .headers(Map.of("ledger_transaction_id", ledgerTransactionId,
                         "movement_group_id", movementGroupId)).destination("lakehouse").build());
     }
@@ -277,6 +286,7 @@ public class InventoryV3CommandServiceImpl implements InventoryV3CommandApi {
                 command.ownerType(), command.ownerId(), command.canonicalSkuId(), command.warehouseId(),
                 command.locationId(), Objects.toString(command.lotId(), ""), command.stockStatus(),
                 command.qualityStatus(), command.baseUomCode(), decimal(command.quantity()),
+                command.costEvidence() == null ? "" : command.costEvidence().fingerprintPart(),
                 Objects.toString(command.reservationId(), ""), command.businessType(), command.businessId(),
                 command.businessItemId(), command.businessNo(), Objects.toString(command.sourceEventId(), ""),
                 command.occurredAt().toString()));
@@ -311,6 +321,7 @@ public class InventoryV3CommandServiceImpl implements InventoryV3CommandApi {
         BigDecimal quantity = scaled(command.getQuantity());
         require(quantity.signum() > 0 && quantity.precision() - quantity.scale() <= 18,
                 "quantity must be positive with at most 18 integer and 6 fractional digits");
+        CostEvidence costEvidence = normalizeCostEvidence(command, quantity);
         boolean closes = command.getOperation() == InventoryV3Operation.SHIP
                 || command.getOperation() == InventoryV3Operation.RELEASE;
         String reservationId = command.getReservationId();
@@ -320,7 +331,36 @@ public class InventoryV3CommandServiceImpl implements InventoryV3CommandApi {
                 ownerType, ownerId, skuId, warehouseId, locationId, lotId, stockStatus, qualityStatus, uom,
                 quantity, reservationId, command.getBusinessType(), command.getBusinessId(),
                 command.getBusinessItemId(), command.getBusinessNo(), correlationId, causationId,
-                command.getOccurredAt());
+                command.getOccurredAt(), costEvidence);
+    }
+
+    private static CostEvidence normalizeCostEvidence(InventoryV3Command command, BigDecimal quantity) {
+        boolean any = command.getUnitCostAmountMinor() != null || command.getMovementCostAmountMinor() != null
+                || command.getCurrencyCode() != null || command.getCostSourceSystem() != null
+                || command.getCostSourceRef() != null || command.getCostPolicyVersion() != null;
+        if (!any) return null;
+        require(command.getOperation() == InventoryV3Operation.RECEIVE
+                        || command.getOperation() == InventoryV3Operation.RETURN
+                        || command.getOperation() == InventoryV3Operation.SHIP,
+                "cost evidence is accepted only for RECEIVE, RETURN, and SHIP");
+        require(command.getUnitCostAmountMinor() != null && command.getUnitCostAmountMinor() >= 0,
+                "unitCostAmountMinor is required and cannot be negative");
+        require(command.getMovementCostAmountMinor() != null && command.getMovementCostAmountMinor() >= 0,
+                "movementCostAmountMinor is required and cannot be negative");
+        String currencyCode = upper(command.getCurrencyCode());
+        require(currencyCode != null && currencyCode.matches("[A-Z]{3}"),
+                "currencyCode must be a three-letter ISO currency code");
+        requireText(command.getCostSourceSystem(), "costSourceSystem", 64);
+        requireText(command.getCostSourceRef(), "costSourceRef", 128);
+        requireText(command.getCostPolicyVersion(), "costPolicyVersion", 64);
+        BigDecimal expected = quantity.multiply(BigDecimal.valueOf(command.getUnitCostAmountMinor()));
+        require(expected.scale() <= 6 && expected.stripTrailingZeros().scale() <= 0,
+                "quantity multiplied by unit cost must resolve to whole minor currency units");
+        require(expected.longValueExact() == command.getMovementCostAmountMinor(),
+                "movementCostAmountMinor must equal quantity multiplied by unitCostAmountMinor");
+        return new CostEvidence(command.getUnitCostAmountMinor(), command.getMovementCostAmountMinor(), currencyCode,
+                command.getCostSourceSystem().trim(), command.getCostSourceRef().trim(),
+                command.getCostPolicyVersion().trim());
     }
 
     private static void requireMatches(InventoryV3BalanceDO balance, NormalizedCommand command) {
@@ -403,7 +443,15 @@ public class InventoryV3CommandServiceImpl implements InventoryV3CommandApi {
                              String locationId, String lotId, String stockStatus, String qualityStatus,
                              String baseUomCode, BigDecimal quantity, String reservationId, String businessType,
                              String businessId, String businessItemId, String businessNo, String correlationId,
-                             String causationId, Instant occurredAt) {
+                             String causationId, Instant occurredAt, CostEvidence costEvidence) {
+    }
+
+    private record CostEvidence(Long unitCostAmountMinor, Long movementCostAmountMinor, String currencyCode,
+                                String costSourceSystem, String costSourceRef, String costPolicyVersion) {
+        String fingerprintPart() {
+            return String.join("|", unitCostAmountMinor.toString(), movementCostAmountMinor.toString(), currencyCode,
+                    costSourceSystem, costSourceRef, costPolicyVersion);
+        }
     }
 
     private record LockedAggregate(InventoryV3BalanceDO balance, InventoryV3ReservationDO reservation,

@@ -10,7 +10,7 @@ import java.util.List;
 public interface FulfillmentItemMapper extends BaseMapperX<FulfillmentItemDO> {
     @Select("""
             SELECT fulfillment_item_id,tenant_id,fulfillment_id,order_item_id,canonical_sku_id,quantity,
-                   reservation_id,created_at,updated_at
+                   reservation_id,variable_fulfillment_cost_minor,created_at,updated_at
             FROM cloudmold_fulfillment_item
             WHERE tenant_id=#{tenantId} AND fulfillment_id=#{fulfillmentId}
             ORDER BY order_item_id

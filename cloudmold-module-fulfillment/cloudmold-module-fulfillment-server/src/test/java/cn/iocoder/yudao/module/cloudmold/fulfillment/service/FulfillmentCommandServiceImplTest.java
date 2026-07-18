@@ -66,8 +66,25 @@ class FulfillmentCommandServiceImplTest {
         verify(itemMapper, times(2)).insert(any(FulfillmentItemDO.class));
         verify(outboxAppender).append(argThat(event -> event.getEventType().equals("fulfillment.status.changed")
                 && event.getAggregateVersion() == 1L
+                && event.getSchemaVersion() == 3
                 && event.getPayload().get("current_status").equals("CREATED")
+                && event.getPayload().get("delivery_promise_version_ref").equals("PROMISE_V1")
+                && ((List<java.util.Map<String, Object>>) event.getPayload().get("items")).stream()
+                        .map(item -> item.get("variable_fulfillment_cost_minor"))
+                        .toList().equals(List.of(12L, 18L))
                 && ((List<?>) event.getPayload().get("items")).size() == 2));
+    }
+
+    @Test
+    void shouldRejectIncompleteDeliveryPromiseSnapshot() {
+        claimNewOperation();
+        when(orderQueryApi.requireFulfillableOrder("order-1")).thenReturn(orderView());
+        FulfillmentCommand command = createCommand();
+        command.setPromisedDeliveryAt(null);
+
+        assertThatThrownBy(() -> service.execute(command)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("delivery promise version and promisedDeliveryAt must be provided together");
+        verify(fulfillmentMapper, never()).insert(any(FulfillmentOrderDO.class));
     }
 
     @Test
@@ -123,6 +140,22 @@ class FulfillmentCommandServiceImplTest {
         verify(orderQueryApi, never()).requireFulfillableOrder(anyString());
     }
 
+    @Test
+    void shouldIncludeDeliveryPromiseSnapshotInIdempotencyFingerprint() {
+        claimNewOperation();
+        when(orderQueryApi.requireFulfillableOrder("order-1")).thenReturn(orderView());
+
+        service.execute(createCommand());
+        FulfillmentCommand changedPromise = createCommand();
+        changedPromise.setPromisedDeliveryAt(Instant.parse("2026-07-12T13:00:00Z"));
+        service.execute(changedPromise);
+
+        org.mockito.ArgumentCaptor<String> hashes = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(operationMapper, times(2)).insertOrResolve(anyLong(), anyString(), anyString(),
+                hashes.capture(), anyString(), any());
+        assertThat(hashes.getAllValues()).hasSize(2).doesNotHaveDuplicates();
+    }
+
     private AtomicReference<String> claimNewOperation() {
         AtomicReference<String> attempt = new AtomicReference<>();
         when(operationMapper.insertOrResolve(anyLong(), anyString(), anyString(), anyString(), anyString(), any()))
@@ -136,8 +169,10 @@ class FulfillmentCommandServiceImplTest {
         return FulfillmentCommand.builder().operation(FulfillmentOperation.CREATE)
                 .idempotencyKey("fulfillment-run-1-create").runId("fulfillment-run-1").orderId("order-1")
                 .sellerId("INTERNAL_COMPANY").warehouseId("WH-DEMO")
-                .items(List.of(new FulfillmentLineCommand("item-1", "sku-1", BigDecimal.ONE, "res-1"),
-                        new FulfillmentLineCommand("item-2", "sku-2", BigDecimal.ONE, "res-2")))
+                .deliveryPromiseVersionRef("PROMISE_V1")
+                .promisedDeliveryAt(Instant.parse("2026-07-12T12:00:00Z"))
+                .items(List.of(new FulfillmentLineCommand("item-1", "sku-1", BigDecimal.ONE, "res-1", 12L),
+                        new FulfillmentLineCommand("item-2", "sku-2", BigDecimal.ONE, "res-2", 18L)))
                 .correlationId("6f9619ff-8b86-d011-b42d-00cf4fc964ff")
                 .occurredAt(Instant.parse("2026-07-12T00:00:00Z")).build();
     }
@@ -166,13 +201,18 @@ class FulfillmentCommandServiceImplTest {
         return new FulfillmentOrderDO().setFulfillmentId("fulfillment-1").setTenantId(1L)
                 .setFulfillmentNo("CMF1").setRunId("fulfillment-run-1").setOrderId("order-1")
                 .setOrderNo("CMO1").setSellerId("INTERNAL_COMPANY").setWarehouseId("WH-DEMO")
+                .setDeliveryPromiseVersionRef("PROMISE_V1")
+                .setPromisedDeliveryAt(java.time.LocalDateTime.parse("2026-07-12T12:00:00"))
+                .setPromiseFrozenAt(java.time.LocalDateTime.parse("2026-07-12T00:00:00"))
                 .setStatus(status).setVersion(version);
     }
 
     private static List<FulfillmentItemDO> items() {
         return List.of(new FulfillmentItemDO().setFulfillmentItemId("fi-1").setOrderItemId("item-1")
-                        .setCanonicalSkuId("sku-1").setQuantity(BigDecimal.ONE).setReservationId("res-1"),
+                        .setCanonicalSkuId("sku-1").setQuantity(BigDecimal.ONE).setReservationId("res-1")
+                        .setVariableFulfillmentCostMinor(12L),
                 new FulfillmentItemDO().setFulfillmentItemId("fi-2").setOrderItemId("item-2")
-                        .setCanonicalSkuId("sku-2").setQuantity(BigDecimal.ONE).setReservationId("res-2"));
+                        .setCanonicalSkuId("sku-2").setQuantity(BigDecimal.ONE).setReservationId("res-2")
+                        .setVariableFulfillmentCostMinor(18L));
     }
 }

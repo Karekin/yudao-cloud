@@ -19,6 +19,8 @@ public class PromotionCommand {
     private CouponEntitlementDefinition couponEntitlement;
     private AdvertisingPlacementDefinition advertisingPlacement;
     private AdvertisingInteractionDefinition advertisingInteraction;
+    private AdvertisingLedgerDefinition advertisingLedger;
+    private PromotionExperimentResultDefinition promotionExperimentResult;
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
     public static class CampaignDefinition {
@@ -87,5 +89,41 @@ public class PromotionCommand {
         private String orderRef;
         private Long attributionAmountMinor;
         private String currencyCode;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class AdvertisingLedgerDefinition {
+        private String ledgerEntryId;
+        private String ledgerEntryCode;
+        private String campaignId;
+        private String placementId;
+        private String merchantId;
+        private String entryType;
+        private String chargeModel;
+        private String revenueType;
+        private String sourceInteractionId;
+        private String orderRef;
+        private Long amountMinor;
+        private String currencyCode;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class PromotionExperimentResultDefinition {
+        private String experimentId;
+        private String experimentCode;
+        private String campaignId;
+        private String merchantId;
+        private Instant measuredFrom;
+        private Instant measuredTo;
+        private Long baselineContributionProfitMinor;
+        private Long treatmentContributionProfitMinor;
+        private Long incrementalContributionProfitMinor;
+        private Long promotionCostMinor;
+        private Integer eligiblePopulationCount;
+        private Integer treatmentPopulationCount;
+        private Integer controlPopulationCount;
+        private String currencyCode;
+        private String methodologyRef;
+        private Long expectedVersion;
     }
 }

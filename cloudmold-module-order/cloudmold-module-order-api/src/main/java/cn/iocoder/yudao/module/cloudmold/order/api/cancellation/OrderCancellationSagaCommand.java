@@ -14,6 +14,8 @@ import java.time.Instant;
 public class OrderCancellationSagaCommand {
     private OrderCancellationSagaOperation operation;
     private String cancellationMode;
+    private String responsibilityParty;
+    private String responsibilityCode;
     private String idempotencyKey;
     private String runId;
     private String sagaId;

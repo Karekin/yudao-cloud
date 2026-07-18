@@ -22,6 +22,8 @@ public class OrderCancellationSagaView {
     private Long orderVersionAtRequest;
     private String status;
     private String activeStep;
+    private String responsibilityParty;
+    private String responsibilityCode;
     private Integer expectedReservationCount;
     private Integer releasedReservationCount;
     private Integer attemptCount;

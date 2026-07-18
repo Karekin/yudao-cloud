@@ -11,7 +11,7 @@ import java.util.List;
 public interface OrderItemMapper extends BaseMapperX<OrderItemDO> {
     @Select("""
             SELECT order_item_id,tenant_id,order_id,line_key,canonical_sku_id,quantity,unit_price_minor,
-                   line_amount_minor,discount_amount_minor,net_amount_minor,
+                   line_amount_minor,discount_amount_minor,net_amount_minor,merchandise_cost_minor,
                    reservation_id,listing_id,listing_offer_id,listing_revision,listing_version,
                    channel_code,shop_id,created_at,updated_at
             FROM cloudmold_order_item

@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.cloudmold.operationsintelligence.service;
 
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.*;
+import cn.iocoder.yudao.module.cloudmold.metadata.api.*;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.*;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.dal.dataobject.OperationsIntelligenceRecords.*;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.dal.mysql.OperationsIntelligenceStoreMapper;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
 
 import java.time.*;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.*;
@@ -22,10 +24,13 @@ class OperationsIntelligenceServiceImplTest {
     private final OperationsIntelligenceStoreMapper mapper = mock(OperationsIntelligenceStoreMapper.class);
     private final OutboxAppender outboxAppender = mock(OutboxAppender.class);
     private final RiskQueryApi riskQueryApi = mock(RiskQueryApi.class);
+    private final MetadataQueryApi metadataQueryApi = mock(MetadataQueryApi.class);
     private final OperationsIntelligenceServiceImpl service =
-            new OperationsIntelligenceServiceImpl(mapper, outboxAppender, riskQueryApi);
+            new OperationsIntelligenceServiceImpl(mapper, outboxAppender, riskQueryApi, metadataQueryApi);
     private final AtomicReference<Observation> observation = new AtomicReference<>();
     private final AtomicReference<ModelResult> modelResult = new AtomicReference<>();
+    private final AtomicReference<ClueSourceVersion> clueSourceVersion = new AtomicReference<>();
+    private final AtomicReference<ClueSourceDelivery> clueSourceDelivery = new AtomicReference<>();
     private final AtomicReference<Clue> clue = new AtomicReference<>();
     private final AtomicReference<Alert> alert = new AtomicReference<>();
     private final AtomicReference<String> requestHash = new AtomicReference<>();
@@ -68,6 +73,23 @@ class OperationsIntelligenceServiceImplTest {
             ModelResult row = modelResult.get();
             return row != null && row.getModelResultId().equals(invocation.getArgument(1)) ? row : null;
         });
+        when(mapper.insertClueSourceVersion(any())).thenAnswer(invocation -> {
+            clueSourceVersion.set(invocation.getArgument(0)); return 1;
+        });
+        when(mapper.selectClueSourceVersion(eq(17L), anyString())).thenAnswer(invocation -> {
+            ClueSourceVersion row = clueSourceVersion.get();
+            return row != null && row.getSourceVersionId().equals(invocation.getArgument(1)) ? row : null;
+        });
+        when(mapper.insertClueSourceDelivery(any())).thenAnswer(invocation -> {
+            clueSourceDelivery.set(invocation.getArgument(0)); return 1;
+        });
+        when(mapper.countClueSourceDeliveries(eq(17L), anyString())).thenAnswer(invocation -> {
+            ClueSourceDelivery row = clueSourceDelivery.get();
+            return row != null && row.getSourceVersionId().equals(invocation.getArgument(1)) ? 1 : 0;
+        });
+        when(mapper.selectClueBySourceVersion(eq(17L), anyString())).thenReturn(null);
+        when(metadataQueryApi.validateDatasetVersion(eq("dataset-clues-df"), eq(1L),
+                eq("ods_intelligence_clues_df"), eq("d".repeat(64)))).thenReturn(clueSnapshotDataset());
         when(mapper.insertClue(any())).thenAnswer(invocation -> {
             clue.set(invocation.getArgument(0)); return 1;
         });
@@ -132,14 +154,44 @@ class OperationsIntelligenceServiceImplTest {
                         .resultSha256("b".repeat(64)).build()).build());
         assertThat(model.getAggregateType()).isEqualTo("intelligence_model_result");
 
+        OperationsIntelligenceResult source = service.execute(base(
+                OperationsIntelligenceOperation.RECORD_CLUE_SOURCE_VERSION, "clue-source-v1")
+                .clueSourceVersion(OperationsIntelligenceCommand.ClueSourceVersionDefinition.builder()
+                        .sourceVersionId("source-clue-1-v1").sourceSystem("YSHOPPING")
+                        .sourceBizId("10000001").businessRevision(1L).intelligenceTypeCode("TYPE_1")
+                        .sourceCode("DOUYIN").sourcePublishedAt(NOW.minusSeconds(3600))
+                        .sourceValid(true).sourceDeleted(false).titleSha256("1".repeat(64))
+                        .summarySha256("2".repeat(64)).clueInfoSha256("3".repeat(64))
+                        .clueInfoItemCount(2).sourceObservedAt(NOW.minusSeconds(60)).build()).build());
+        assertThat(source.getAggregateType()).isEqualTo("intelligence_clue_source");
+        assertThat(source.getStatus()).isEqualTo("VALID");
+
+        service.execute(base(OperationsIntelligenceOperation.RECORD_CLUE_SOURCE_DELIVERY, "clue-delivery-df-v1")
+                .clueSourceDelivery(OperationsIntelligenceCommand.ClueSourceDeliveryDefinition.builder()
+                        .deliveryId("delivery-clue-1-df-v1").sourceVersionId("source-clue-1-v1")
+                        .sourceDatasetId("dataset-clues-df").sourceDatasetVersion(1L)
+                        .declaredSourceAsset("ods_intelligence_clue_df")
+                        .physicalSourceAsset("ods_intelligence_clues_df").sourceTransport("SNAPSHOT_DF")
+                        .sourceRecordKey("10000001").sourceRecordVersion("pt-20260717-v1")
+                        .payloadSchemaVersion("YSHOPPING_CLUES_DF_V1").sourceSchemaSha256("d".repeat(64))
+                        .sourceEvidenceRef("restricted:clue_delivery_0001")
+                        .sourceEvidenceSha256("4".repeat(64)).sourceObservedAt(NOW.minusSeconds(30)).build()).build());
+
         OperationsIntelligenceResult recorded = service.execute(base(
                 OperationsIntelligenceOperation.RECORD_CLUE, "clue-record-1")
                 .clue(OperationsIntelligenceCommand.ClueDefinition.builder().clueId("clue-1")
+                        .sourceVersionId("source-clue-1-v1")
                         .observationId("observation-1").modelResultId("model-result-1")
                         .clueType("FRAUD_PROMOTION").sourceCode("DOUYIN")
                         .sourcePublishedAt(NOW.minusSeconds(3600)).evidenceRef("restricted:clue_evidence_0001")
                         .evidenceSha256("c".repeat(64)).build()).build());
         assertThat(recorded.getStatus()).isEqualTo("OBSERVED");
+        AppendDomainEventCommand recordedEvent = lastEvent();
+        assertThat(recordedEvent.getSchemaVersion()).isEqualTo(2);
+        assertThat(recordedEvent.getPayload()).containsEntry("source_version_id", "source-clue-1-v1")
+                .containsEntry("source_business_revision", 1L)
+                .containsEntry("source_biz_id", "10000001")
+                .doesNotContainKeys("title", "summary", "clues_info", "content");
 
         OperationsIntelligenceResult reviewed = service.execute(base(
                 OperationsIntelligenceOperation.REVIEW_CLUE, "clue-review-1")
@@ -227,6 +279,20 @@ class OperationsIntelligenceServiceImplTest {
                         .subjectType("CONTENT").subjectRef("content-775f28")
                         .evidenceRef("restricted:observation_0001").contentSha256("a".repeat(64))
                         .observedAt(NOW.minusSeconds(30)).build()).build();
+    }
+
+    private MetadataDatasetReference clueSnapshotDataset() {
+        List<String> codes = List.of("id", "create_time", "modify_time", "biz_id", "title", "summary",
+                "data_source", "intelligence_type", "is_valid", "publish_time", "clues_info", "is_del", "pt");
+        return MetadataDatasetReference.builder().datasetId("dataset-clues-df").datasetVersion(1L)
+                .dataSourceId("datasource-yshopping-hive").dataSourceVersion(1L).datasetType("TABLE")
+                .qualifiedName("ods_intelligence_clues_df").layerCode("ODS").grainCode("SOURCE_CLUE_DELIVERY")
+                .schemaSha256("d".repeat(64))
+                .fields(java.util.stream.IntStream.range(0, codes.size()).mapToObj(index ->
+                        MetadataDatasetReference.FieldReference.builder().ordinalPosition(index + 1)
+                                .fieldCode(codes.get(index)).dataType("STRING").nullable(true)
+                                .primaryKeyPart(index == 0).classification("INTERNAL").build()).toList())
+                .build();
     }
 
     private OperationsIntelligenceCommand.OperationsIntelligenceCommandBuilder base(

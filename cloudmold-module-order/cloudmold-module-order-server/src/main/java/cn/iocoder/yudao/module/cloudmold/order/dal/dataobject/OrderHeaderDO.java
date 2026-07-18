@@ -30,6 +30,8 @@ public class OrderHeaderDO {
     private String refundId;
     private String cancellationSagaId;
     private String preCancellationStatus;
+    private String cancellationResponsibilityParty;
+    private String cancellationResponsibilityCode;
     private Long version;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

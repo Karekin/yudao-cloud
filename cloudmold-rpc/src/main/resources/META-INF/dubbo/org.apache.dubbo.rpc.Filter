@@ -1,0 +1,2 @@
+cloudmold-rpc-security=cn.iocoder.yudao.module.cloudmold.rpc.CloudMoldProviderSecurityFilter
+cloudmold-rpc-context=cn.iocoder.yudao.module.cloudmold.rpc.CloudMoldConsumerContextFilter

@@ -16,6 +16,7 @@ public class OrderLineCommand {
     private String canonicalSkuId;
     private BigDecimal quantity;
     private Long unitPriceMinor;
+    private Long merchandiseCostMinor;
     private String listingId;
     private String listingOfferId;
 

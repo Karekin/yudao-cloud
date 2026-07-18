@@ -19,6 +19,10 @@ public class CustomerServiceTicketDO {
     private String channelCode;
     private String priority;
     private String categoryCode;
+    private String slaPolicyCode;
+    private Integer slaPolicyVersion;
+    private LocalDateTime resolutionDeadlineAt;
+    private Integer fcrWindowHours;
     private String assignedAgentPrincipalId;
     private String status;
     private Long version;

@@ -71,6 +71,22 @@ public class RiskCommand {
     private String feedbackType;
     private String recordedByPrincipalId;
 
+    private String orderId;
+    private String paymentId;
+    private String riskType;
+    private String orderRiskCaseId;
+
+    private String disputeId;
+    private String disputeType;
+    private String disputeStatus;
+    private Long amountMinor;
+    private String currencyCode;
+    private String externalRef;
+
+    private String lossEntryId;
+    private String lossEntryType;
+    private Long signedAmountMinor;
+
     @Data
     @Builder
     @NoArgsConstructor

@@ -35,6 +35,12 @@ public class RiskCommandServiceImpl implements RiskCommandApi, RiskQueryApi {
     private static final Set<String> MEMBER_TYPES = Set.of("PRINCIPAL", "RELATION");
     private static final Set<String> DECISION_TYPES = Set.of("DISMISS", "MONITOR", "ESCALATE", "CONFIRM_RISK");
     private static final Set<String> FEEDBACK_TYPES = Set.of("CONFIRMED", "CORRECTED", "NOT_ACTIONABLE", "NEEDS_REVIEW");
+    private static final Set<String> ORDER_RISK_TYPES = Set.of("FRAUD", "ABUSE", "PAYMENT_RISK", "POLICY_VIOLATION");
+    private static final Set<String> DISPUTE_TYPES = Set.of("CHARGEBACK", "PAYMENT_DISPUTE");
+    private static final Set<String> DISPUTE_STATUSES = Set.of("OPEN", "WON", "LOST", "REVERSED", "CANCELLED");
+    private static final Set<String> LOSS_ENTRY_TYPES = Set.of(
+            "CONFIRMED_RISK_LOSS", "CHARGEBACK_LOSS", "SERVICE_COMPENSATION_LOSS", "REVERSAL");
+    private static final String CURRENCY_CNY = "CNY";
 
     private final RiskStoreMapper mapper;
     private final RiskEventService eventService;
@@ -83,8 +89,13 @@ public class RiskCommandServiceImpl implements RiskCommandApi, RiskQueryApi {
             case START_REVIEW, CLOSE_REVIEW -> transitionReview(tenantId, operationId, command, occurredAt, now);
             case DECIDE_REVIEW -> decideReview(tenantId, operationId, command, occurredAt, now);
             case RECORD_FEEDBACK -> recordFeedback(tenantId, operationId, command, occurredAt, now);
+            case LINK_ORDER_REVIEW_CASE -> linkOrderReviewCase(tenantId, operationId, command, occurredAt, now);
+            case OPEN_PAYMENT_DISPUTE -> openPaymentDispute(tenantId, operationId, command, occurredAt, now);
+            case RESOLVE_PAYMENT_DISPUTE -> resolvePaymentDispute(tenantId, operationId, command, occurredAt, now);
+            case POST_LOSS_ENTRY -> postLossEntry(tenantId, operationId, command, occurredAt, now);
         };
-        String aggregateId = firstNonNull(result.getFeedbackId(), result.getDecisionId(), result.getCaseId(),
+        String aggregateId = firstNonNull(result.getFeedbackId(), result.getDecisionId(), result.getLossEntryId(),
+                result.getDisputeId(), result.getOrderRiskCaseId(), result.getCaseId(),
                 result.getClusterId(), result.getRelationId(), result.getSignalId(), result.getPolicyId());
         if (result.getTaxonomyId() != null) aggregateId = result.getTaxonomyId();
         require(mapper.markOperationSucceeded(operationId, tenantId, aggregateId, JsonUtils.toJsonString(result), now) == 1,
@@ -502,6 +513,146 @@ public class RiskCommandServiceImpl implements RiskCommandApi, RiskQueryApi {
                 .setDecisionId(decision.getDecisionId()).setCaseId(decision.getCaseId());
     }
 
+    private RiskView linkOrderReviewCase(Long tenantId, Long operationId, RiskCommand command, Instant occurredAt,
+                                         LocalDateTime now) {
+        requireId(command.getCaseId(), "caseId");
+        requireId(command.getOrderId(), "orderId");
+        require(ORDER_RISK_TYPES.contains(command.getRiskType()), "unsupported riskType");
+        requireCode(command.getReasonCode(), "reasonCode");
+        require(mapper.selectOrderRiskCaseByCaseId(tenantId, command.getCaseId()) == null,
+                "risk review case already links an order");
+        ReviewCase review = mapper.selectReviewCase(tenantId, command.getCaseId());
+        require(review != null, "risk review case does not exist");
+        OrderReference order = requireOrderReference(tenantId, command.getOrderId());
+        PaymentReference payment = requireOptionalPaymentReference(tenantId, command.getPaymentId());
+        if (payment != null) {
+            require(Objects.equals(payment.getOrderId(), order.getOrderId()), "payment does not belong to canonical order");
+        }
+        OrderRiskCase value = new OrderRiskCase().setOrderRiskCaseId(UUID.randomUUID().toString()).setTenantId(tenantId)
+                .setCaseId(review.getCaseId()).setOrderId(order.getOrderId()).setPaymentId(command.getPaymentId())
+                .setRiskType(command.getRiskType()).setReasonCode(command.getReasonCode()).setCreatedAt(now);
+        require(mapper.insertOrderRiskCase(value) == 1, "failed to persist constrained order risk case");
+        eventService.appendOrderRiskCase(value, review, command, occurredAt);
+        return reviewView(operationId, review, false).setOrderRiskCaseId(value.getOrderRiskCaseId())
+                .setOrderId(value.getOrderId()).setPaymentId(value.getPaymentId());
+    }
+
+    private RiskView openPaymentDispute(Long tenantId, Long operationId, RiskCommand command, Instant occurredAt,
+                                        LocalDateTime now) {
+        requireId(command.getOrderId(), "orderId");
+        requireId(command.getPaymentId(), "paymentId");
+        require(DISPUTE_TYPES.contains(command.getDisputeType()), "unsupported disputeType");
+        requireCode(command.getReasonCode(), "reasonCode");
+        require(command.getAmountMinor() != null && command.getAmountMinor() > 0, "amountMinor must be positive");
+        require(CURRENCY_CNY.equals(command.getCurrencyCode()), "risk commerce first slice supports CNY only");
+        requireId(command.getExternalRef(), "externalRef");
+        OrderReference order = requireOrderReference(tenantId, command.getOrderId());
+        PaymentReference payment = requirePaymentReference(tenantId, command.getPaymentId());
+        require(Objects.equals(payment.getOrderId(), order.getOrderId()), "payment does not belong to canonical order");
+        ReviewCase review = null;
+        if (command.getCaseId() != null) {
+            review = mapper.selectReviewCase(tenantId, command.getCaseId());
+            require(review != null, "linked risk review case does not exist");
+        }
+        String disputeId = command.getDisputeId() == null ? UUID.randomUUID().toString() : command.getDisputeId();
+        requireId(disputeId, "disputeId");
+        PaymentDispute dispute = new PaymentDispute().setDisputeId(disputeId).setTenantId(tenantId)
+                .setOrderId(order.getOrderId()).setPaymentId(payment.getPaymentId())
+                .setCaseId(review == null ? null : review.getCaseId()).setDecisionId(null)
+                .setDisputeType(command.getDisputeType()).setStatus("OPEN").setReasonCode(command.getReasonCode())
+                .setAmountMinor(command.getAmountMinor()).setCurrencyCode(command.getCurrencyCode())
+                .setExternalRef(command.getExternalRef()).setVersion(1L)
+                .setOpenedAt(LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC)).setResolvedAt(null)
+                .setCreatedAt(now).setUpdatedAt(now);
+        require(mapper.insertPaymentDispute(dispute) == 1, "failed to persist payment dispute");
+        eventService.appendPaymentDispute(operationId, dispute, null, command, occurredAt, now);
+        return new RiskView().setOperationId(operationId).setDuplicate(false).setOrderId(dispute.getOrderId())
+                .setPaymentId(dispute.getPaymentId()).setDisputeId(dispute.getDisputeId())
+                .setDisputeStatus(dispute.getStatus()).setCaseId(dispute.getCaseId());
+    }
+
+    private RiskView resolvePaymentDispute(Long tenantId, Long operationId, RiskCommand command, Instant occurredAt,
+                                           LocalDateTime now) {
+        requireId(command.getDisputeId(), "disputeId");
+        requireExpectedVersion(command);
+        require(DISPUTE_STATUSES.contains(command.getDisputeStatus()), "unsupported disputeStatus");
+        require(!"OPEN".equals(command.getDisputeStatus()), "payment dispute resolution requires a terminal status");
+        requireCode(command.getReasonCode(), "reasonCode");
+        PaymentDispute dispute = mapper.selectPaymentDisputeForUpdate(tenantId, command.getDisputeId());
+        require(dispute != null, "payment dispute does not exist");
+        require(Objects.equals(dispute.getVersion(), command.getExpectedVersion()), "payment dispute version conflict");
+        require("OPEN".equals(dispute.getStatus()), "payment dispute is not open");
+        Decision decision = null;
+        if (command.getDecisionId() != null) {
+            decision = mapper.selectDecision(tenantId, command.getDecisionId());
+            require(decision != null, "linked risk decision does not exist");
+            if (dispute.getCaseId() != null) {
+                require(Objects.equals(dispute.getCaseId(), decision.getCaseId()),
+                        "linked risk decision does not belong to dispute review case");
+            }
+        }
+        String before = dispute.getStatus();
+        LocalDateTime resolvedAt = LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC);
+        require(mapper.resolvePaymentDispute(tenantId, dispute.getDisputeId(), dispute.getVersion(), before,
+                command.getDisputeStatus(), command.getReasonCode(), command.getDecisionId(), resolvedAt, now) == 1,
+                "payment dispute transition conflict");
+        dispute.setDecisionId(command.getDecisionId()).setStatus(command.getDisputeStatus())
+                .setReasonCode(command.getReasonCode()).setResolvedAt(resolvedAt)
+                .setVersion(dispute.getVersion() + 1).setUpdatedAt(now);
+        eventService.appendPaymentDispute(operationId, dispute, before, command, occurredAt, now);
+        return new RiskView().setOperationId(operationId).setDuplicate(false).setOrderId(dispute.getOrderId())
+                .setPaymentId(dispute.getPaymentId()).setDisputeId(dispute.getDisputeId())
+                .setDisputeStatus(dispute.getStatus()).setDecisionId(decision == null ? null : decision.getDecisionId())
+                .setCaseId(dispute.getCaseId());
+    }
+
+    private RiskView postLossEntry(Long tenantId, Long operationId, RiskCommand command, Instant occurredAt,
+                                   LocalDateTime now) {
+        requireId(command.getOrderId(), "orderId");
+        require(LOSS_ENTRY_TYPES.contains(command.getLossEntryType()), "unsupported lossEntryType");
+        require(command.getSignedAmountMinor() != null && command.getSignedAmountMinor() != 0,
+                "signedAmountMinor must be non-zero");
+        require(CURRENCY_CNY.equals(command.getCurrencyCode()), "risk commerce first slice supports CNY only");
+        requireOrderReference(tenantId, command.getOrderId());
+        requireOptionalPaymentReference(tenantId, command.getPaymentId());
+        if (command.getPaymentId() != null) {
+            PaymentReference payment = requirePaymentReference(tenantId, command.getPaymentId());
+            require(Objects.equals(payment.getOrderId(), command.getOrderId()), "payment does not belong to canonical order");
+        }
+        if ("CHARGEBACK_LOSS".equals(command.getLossEntryType())) {
+            requireId(command.getDisputeId(), "disputeId");
+        }
+        if ("CONFIRMED_RISK_LOSS".equals(command.getLossEntryType())) {
+            requireId(command.getDecisionId(), "decisionId");
+        }
+        if (command.getDisputeId() != null) {
+            PaymentDispute dispute = mapper.selectPaymentDispute(tenantId, command.getDisputeId());
+            require(dispute != null, "linked payment dispute does not exist");
+            require(Objects.equals(dispute.getOrderId(), command.getOrderId()),
+                    "linked payment dispute does not belong to canonical order");
+            if (command.getPaymentId() != null) {
+                require(Objects.equals(dispute.getPaymentId(), command.getPaymentId()),
+                        "linked payment dispute does not belong to canonical payment");
+            }
+        }
+        if (command.getDecisionId() != null) {
+            require(mapper.selectDecision(tenantId, command.getDecisionId()) != null, "linked risk decision does not exist");
+        }
+        LossEntry value = new LossEntry().setLossEntryId(
+                        command.getLossEntryId() == null ? UUID.randomUUID().toString() : command.getLossEntryId())
+                .setTenantId(tenantId).setOrderId(command.getOrderId()).setPaymentId(command.getPaymentId())
+                .setDisputeId(command.getDisputeId()).setDecisionId(command.getDecisionId())
+                .setEntryType(command.getLossEntryType()).setSignedAmountMinor(command.getSignedAmountMinor())
+                .setCurrencyCode(command.getCurrencyCode()).setExternalRef(command.getExternalRef())
+                .setOccurredAt(LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC)).setCreatedAt(now);
+        requireId(value.getLossEntryId(), "lossEntryId");
+        require(mapper.insertLossEntry(value) == 1, "failed to persist risk loss entry");
+        eventService.appendLossEntry(value, command, occurredAt);
+        return new RiskView().setOperationId(operationId).setDuplicate(false).setOrderId(value.getOrderId())
+                .setPaymentId(value.getPaymentId()).setDisputeId(value.getDisputeId())
+                .setDecisionId(value.getDecisionId()).setLossEntryId(value.getLossEntryId());
+    }
+
     private Cluster requireMutableCluster(Long tenantId, RiskCommand command) {
         requireId(command.getClusterId(), "clusterId");
         requireExpectedVersion(command);
@@ -518,6 +669,23 @@ public class RiskCommandServiceImpl implements RiskCommandApi, RiskQueryApi {
         require(review != null, "risk review case does not exist");
         require(Objects.equals(review.getVersion(), command.getExpectedVersion()), "review case version conflict");
         return review;
+    }
+
+    private OrderReference requireOrderReference(Long tenantId, String orderId) {
+        OrderReference order = mapper.selectOrderReference(tenantId, orderId);
+        require(order != null, "canonical order does not exist");
+        return order;
+    }
+
+    private PaymentReference requirePaymentReference(Long tenantId, String paymentId) {
+        PaymentReference payment = mapper.selectPaymentReference(tenantId, paymentId);
+        require(payment != null, "canonical payment does not exist");
+        return payment;
+    }
+
+    private PaymentReference requireOptionalPaymentReference(Long tenantId, String paymentId) {
+        if (paymentId == null) return null;
+        return requirePaymentReference(tenantId, paymentId);
     }
 
     private static void validateCommon(RiskCommand command) {

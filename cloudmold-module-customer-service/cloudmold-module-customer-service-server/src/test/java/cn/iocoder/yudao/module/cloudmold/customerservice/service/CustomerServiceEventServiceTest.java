@@ -17,7 +17,7 @@ import static org.mockito.Mockito.*;
 class CustomerServiceEventServiceTest {
 
     @Test
-    void shouldAppendFiveVersionedPiiSafeEventsWithoutRawMessageOrFileLocator() {
+    void shouldAppendSixVersionedPiiSafeEventsWithoutRawMessageOrFileLocator() {
         CustomerServiceStoreMapper mapper = mock(CustomerServiceStoreMapper.class);
         OutboxAppender outboxAppender = mock(OutboxAppender.class);
         CustomerServiceEventService service = new CustomerServiceEventService(mapper, outboxAppender);
@@ -29,6 +29,8 @@ class CustomerServiceEventServiceTest {
         CustomerServiceTicketDO ticket = new CustomerServiceTicketDO().setTicketId("ticket-1").setTenantId(1L)
                 .setTicketNo("CS-1001").setRunId("csr-001").setCustomerPrincipalId("principal-customer-1")
                 .setChannelCode("APP").setPriority("NORMAL").setCategoryCode("DELIVERY")
+                .setSlaPolicyCode("SERVICE_STANDARD").setSlaPolicyVersion(1)
+                .setResolutionDeadlineAt(now.plusDays(1)).setFcrWindowHours(72)
                 .setAssignedAgentPrincipalId("principal-agent-1").setStatus("IN_PROGRESS").setVersion(2L);
         when(mapper.selectLinks(1L, "ticket-1")).thenReturn(List.of(
                 new TicketOrderLinkDO().setReferenceType("ORDER").setReferenceId("canonical-order-1"),
@@ -41,6 +43,12 @@ class CustomerServiceEventServiceTest {
                 .setTenantId(1L).setTicketId("ticket-1").setMessageId("message-1").setRunId("csr-001")
                 .setMediaType("image/png").setObjectToken("restricted:objecttoken12345678")
                 .setContentSha256("b".repeat(64)).setSizeBytes(1024L).setMalwareScanStatus("CLEAN");
+        CustomerServiceBuyerFeedbackDO feedback = new CustomerServiceBuyerFeedbackDO().setFeedbackId("feedback-1")
+                .setTenantId(1L).setTicketId("ticket-1").setRunId("csr-001")
+                .setCustomerPrincipalId("principal-customer-1").setTouchpointCode("TICKET_RESOLUTION")
+                .setSentimentCode("SATISFIED").setScoreBasisPoints(10000)
+                .setCommentToken("sha256:" + "c".repeat(64)).setOccurredAt(now.plusMinutes(15))
+                .setCreatedAt(now.plusMinutes(15));
         CustomerServiceQualityReviewDO review = new CustomerServiceQualityReviewDO().setReviewId("review-1")
                 .setTenantId(1L).setTicketId("ticket-1").setRunId("csr-001")
                 .setReviewerPrincipalId("principal-reviewer-1").setScoreBasisPoints(9500)
@@ -55,15 +63,17 @@ class CustomerServiceEventServiceTest {
         service.appendTicket(1L, ticket, "OPEN", command, occurredAt, now);
         service.appendMessage(message, command, occurredAt);
         service.appendAttachment(attachment, command, occurredAt);
+        service.appendBuyerFeedback(feedback, command, occurredAt);
         service.appendQualityReview(review, command, occurredAt);
         service.appendClaim(2L, claim, "APPROVED", command, occurredAt, now);
 
         ArgumentCaptor<AppendDomainEventCommand> captor = ArgumentCaptor.forClass(AppendDomainEventCommand.class);
-        verify(outboxAppender, times(5)).append(captor.capture());
+        verify(outboxAppender, times(6)).append(captor.capture());
         assertThat(captor.getAllValues()).extracting(AppendDomainEventCommand::getEventType).containsExactly(
                 "customer_service.ticket.status_changed",
                 "customer_service.message.recorded",
                 "customer_service.attachment.recorded",
+                "customer_service.buyer_feedback.recorded",
                 "customer_service.quality_review.recorded",
                 "customer_service.claim.status_changed");
         assertThat(captor.getAllValues()).allSatisfy(event -> {
@@ -83,6 +93,11 @@ class CustomerServiceEventServiceTest {
         AppendDomainEventCommand attachmentEvent = captor.getAllValues().get(2);
         assertThat(attachmentEvent.getPayload()).containsEntry("object_token", "restricted:objecttoken12345678")
                 .doesNotContainKeys("file_name", "object_url", "bucket", "customer_address");
+        AppendDomainEventCommand feedbackEvent = captor.getAllValues().get(3);
+        assertThat(feedbackEvent.getPayload()).containsEntry("touchpoint_code", "TICKET_RESOLUTION")
+                .containsEntry("sentiment_code", "SATISFIED")
+                .containsEntry("score_basis_points", 10000)
+                .doesNotContainKeys("reviewer_principal_id", "message_body", "customer_phone");
         verify(mapper, times(2)).insertHistory(any(CustomerServiceStatusHistoryDO.class));
     }
 }

@@ -1,6 +1,46 @@
 server:
   port: 48080
 
+--- #################### CloudMold Dubbo 内部能力总线 ####################
+
+cloudmold:
+  rpc:
+    enabled: ${CLOUDMOLD_RPC_ENABLED:true}
+    export-enabled: true
+    shared-secret: ${CLOUDMOLD_RPC_SHARED_SECRET:}
+    group: ${CLOUDMOLD_RPC_GROUP:cloudmold-internal}
+    version: ${CLOUDMOLD_RPC_VERSION:1.0.0}
+    timeout-millis: ${CLOUDMOLD_RPC_TIMEOUT_MILLIS:5000}
+    max-clock-skew-seconds: ${CLOUDMOLD_RPC_MAX_CLOCK_SKEW_SECONDS:60}
+    fail-on-missing-service: true
+
+# Dubbo 3.3 reads dubbo.hessian.allowNonSerializable only as a JVM system
+# property. The governed operator supplies it while legacy DTOs are migrated.
+dubbo:
+  application:
+    name: ${spring.application.name}-cloudmold-provider
+    qos-enable: false
+    serialize-check-status: STRICT
+    check-serializable: false
+    auto-trust-serialize-class: true
+  registry:
+    address: ${CLOUDMOLD_DUBBO_REGISTRY:nacos://127.0.0.1:8848}
+    group: ${CLOUDMOLD_DUBBO_REGISTRY_GROUP:CLOUDMOLD_DUBBO}
+    check: true
+  config-center:
+    address: ${CLOUDMOLD_DUBBO_CONFIG_CENTER:${CLOUDMOLD_DUBBO_REGISTRY:nacos://127.0.0.1:8848}}
+    group: ${CLOUDMOLD_DUBBO_REGISTRY_GROUP:CLOUDMOLD_DUBBO}
+  metadata-report:
+    address: ${CLOUDMOLD_DUBBO_METADATA_REPORT:${CLOUDMOLD_DUBBO_REGISTRY:nacos://127.0.0.1:8848}}
+    group: ${CLOUDMOLD_DUBBO_REGISTRY_GROUP:CLOUDMOLD_DUBBO}
+  protocol:
+    name: dubbo
+    port: ${CLOUDMOLD_DUBBO_PORT:20880}
+    serialization: hessian2
+  provider:
+    timeout: ${CLOUDMOLD_RPC_TIMEOUT_MILLIS:5000}
+    retries: 0
+
 --- #################### 数据库相关配置 ####################
 spring:
   autoconfigure:

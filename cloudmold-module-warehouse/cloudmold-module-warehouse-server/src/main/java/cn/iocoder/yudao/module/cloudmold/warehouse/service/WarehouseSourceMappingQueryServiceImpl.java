@@ -2,8 +2,8 @@ package cn.iocoder.yudao.module.cloudmold.warehouse.service;
 
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.warehouse.api.*;
-import cn.iocoder.yudao.module.cloudmold.warehouse.dal.dataobject.WarehouseSourceMappingDO;
-import cn.iocoder.yudao.module.cloudmold.warehouse.dal.mysql.WarehouseSourceMappingMapper;
+import cn.iocoder.yudao.module.cloudmold.warehouse.dal.dataobject.*;
+import cn.iocoder.yudao.module.cloudmold.warehouse.dal.mysql.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -16,6 +16,9 @@ import java.util.Locale;
 public class WarehouseSourceMappingQueryServiceImpl implements WarehouseSourceMappingQueryApi {
 
     private final WarehouseSourceMappingMapper mapper;
+    private final CanonicalWarehouseMapper warehouseMapper;
+    private final WarehouseZoneMapper zoneMapper;
+    private final WarehouseLocationMapper locationMapper;
 
     @Override
     public WarehouseSourceMappingView resolveActive(WarehouseSourceReference source, Instant effectiveAt) {
@@ -39,6 +42,33 @@ public class WarehouseSourceMappingQueryServiceImpl implements WarehouseSourceMa
                 .warehouseId(row.getWarehouseId()).zoneId(row.getZoneId())
                 .locationId(row.getLocationId()).validFrom(toInstant(row.getValidFrom()))
                 .validTo(toInstant(row.getValidTo())).version(row.getVersion()).build();
+    }
+
+    @Override
+    public WarehouseNetworkView resolveReadyNetwork(WarehouseSourceReference source, Instant effectiveAt) {
+        WarehouseSourceMappingView mapping = resolveActive(source, effectiveAt);
+        requireState("WAREHOUSE".equals(mapping.getCanonicalType())
+                        && mapping.getWarehouseId() != null,
+                "source does not resolve to a canonical Warehouse");
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        WarehouseDO warehouse = warehouseMapper.selectCurrent(tenantId, mapping.getWarehouseId());
+        requireState(warehouse != null && "ACTIVE".equals(warehouse.getStatus()),
+                "canonical Warehouse is not ACTIVE");
+        List<WarehouseZoneDO> zones = zoneMapper.selectActiveByWarehouse(tenantId, warehouse.getWarehouseId());
+        List<WarehouseLocationDO> locations = locationMapper.selectActiveByWarehouse(
+                tenantId, warehouse.getWarehouseId());
+        requireState(zones != null && zones.size() == 1,
+                "canonical Warehouse must have exactly one ACTIVE Zone");
+        requireState(locations != null && locations.size() == 1,
+                "canonical Warehouse must have exactly one ACTIVE Location");
+        WarehouseZoneDO zone = zones.get(0);
+        WarehouseLocationDO location = locations.get(0);
+        requireState(zone.getZoneId().equals(location.getZoneId()),
+                "canonical Location does not belong to the resolved Zone");
+        return WarehouseNetworkView.builder().mappingId(mapping.getMappingId())
+                .warehouseId(warehouse.getWarehouseId()).warehouseStatus(warehouse.getStatus())
+                .zoneId(zone.getZoneId()).zoneStatus(zone.getStatus())
+                .locationId(location.getLocationId()).locationStatus(location.getStatus()).build();
     }
 
     private static Instant toInstant(LocalDateTime value) {

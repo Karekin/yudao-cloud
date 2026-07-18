@@ -13,6 +13,9 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class CatalogSkuValidationService implements CatalogSkuValidationApi, CatalogSpuValidationApi {
 
+    private static final int SKU_STATUS_ACTIVE = 10;
+    private static final int SPU_STATUS_ACTIVE = 30;
+
     private final CatalogLifecycleMapper lifecycleMapper;
 
     @Override
@@ -25,7 +28,7 @@ public class CatalogSkuValidationService implements CatalogSkuValidationApi, Cat
         if (sku == null) {
             throw new IllegalArgumentException("canonical SKU does not exist in Catalog");
         }
-        if (sku.getStatus() == null || sku.getStatus() != 10) {
+        if (sku.getStatus() == null || sku.getStatus() != SKU_STATUS_ACTIVE) {
             throw new IllegalArgumentException("canonical SKU is not ACTIVE");
         }
     }
@@ -40,7 +43,7 @@ public class CatalogSkuValidationService implements CatalogSkuValidationApi, Cat
         if (spu == null) {
             throw new IllegalArgumentException("canonical SPU does not exist in Catalog");
         }
-        if (spu.getStatus() == null || spu.getStatus() != 10) {
+        if (spu.getStatus() == null || spu.getStatus() != SPU_STATUS_ACTIVE) {
             throw new IllegalArgumentException("canonical SPU is not ACTIVE");
         }
     }

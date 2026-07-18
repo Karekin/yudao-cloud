@@ -1,0 +1,1929 @@
+{
+  "capabilities": [
+    {
+      "id": "order-calculation",
+      "name": "订单计算能力",
+      "category": "交易核心",
+      "maturity": "成熟",
+      "contract": {
+        "input": "OrderDraft + PromotionContext",
+        "output": "SettlementQuote",
+        "stability": "向后兼容（v1.8）"
+      },
+      "monthlyCalls": 8920,
+      "health": 94,
+      "avgLatencyMs": 42,
+      "industries": [
+        "零售",
+        "电商",
+        "闪购"
+      ],
+      "configurations": [
+        {
+          "id": "tax-mode",
+          "name": "税费模式",
+          "valueType": "enum",
+          "defaultValue": "国内标准税率",
+          "description": "决定订单总额计算时的税费模型",
+          "governance": "平台白名单可配置"
+        },
+        {
+          "id": "rounding-rule",
+          "name": "金额取整规则",
+          "valueType": "enum",
+          "defaultValue": "四舍五入",
+          "description": "定义金额精度处理方式",
+          "governance": "租户可配置"
+        }
+      ],
+      "dependencies": [
+        "promotion-engine",
+        "risk-control"
+      ],
+      "dependents": [
+        "checkout-orchestration",
+        "invoice-service"
+      ],
+      "ownerAgent": "编码实现Agent"
+    },
+    {
+      "id": "inventory-validation",
+      "name": "库存校验能力",
+      "category": "库存管理",
+      "maturity": "成熟",
+      "contract": {
+        "input": "SkuRequest[] + WarehouseContext",
+        "output": "StockReservationResult",
+        "stability": "强兼容（v2.1）"
+      },
+      "monthlyCalls": 10120,
+      "health": 91,
+      "avgLatencyMs": 35,
+      "industries": [
+        "零售",
+        "电商",
+        "闪购",
+        "物流"
+      ],
+      "configurations": [
+        {
+          "id": "lock-ttl",
+          "name": "锁库存TTL",
+          "valueType": "number",
+          "defaultValue": "900s",
+          "description": "库存锁定释放时间",
+          "governance": "平台推荐区间 300~1800s"
+        },
+        {
+          "id": "reservation-mode",
+          "name": "预占模式",
+          "valueType": "enum",
+          "defaultValue": "软预占",
+          "description": "订单创建后的库存占用策略",
+          "governance": "需要业务运营Agent审批"
+        }
+      ],
+      "dependencies": [
+        "warehouse-routing"
+      ],
+      "dependents": [
+        "order-calculation",
+        "flash-sale-control"
+      ],
+      "ownerAgent": "合约校验Agent"
+    },
+    {
+      "id": "promotion-engine",
+      "name": "促销引擎",
+      "category": "营销",
+      "maturity": "演进中",
+      "contract": {
+        "input": "PromotionQuery + UserSegment",
+        "output": "PromotionPlan[]",
+        "stability": "兼容更新（v1.3）"
+      },
+      "monthlyCalls": 6140,
+      "health": 78,
+      "avgLatencyMs": 86,
+      "industries": [
+        "零售",
+        "电商"
+      ],
+      "configurations": [
+        {
+          "id": "stacking-policy",
+          "name": "优惠叠加策略",
+          "valueType": "enum",
+          "defaultValue": "互斥优先",
+          "description": "多个优惠冲突时的求解策略",
+          "governance": "租户可配置"
+        }
+      ],
+      "dependencies": [
+        "user-profile"
+      ],
+      "dependents": [
+        "order-calculation"
+      ],
+      "ownerAgent": "需求分析Agent"
+    },
+    {
+      "id": "flash-sale-control",
+      "name": "秒杀控制能力",
+      "category": "营销",
+      "maturity": "演进中",
+      "contract": {
+        "input": "FlashRequest + EligibilitySnapshot",
+        "output": "FlashDecision",
+        "stability": "实验兼容（v0.9）"
+      },
+      "monthlyCalls": 2510,
+      "health": 73,
+      "avgLatencyMs": 58,
+      "industries": [
+        "闪购"
+      ],
+      "configurations": [
+        {
+          "id": "anti-bot-level",
+          "name": "防刷等级",
+          "valueType": "enum",
+          "defaultValue": "L2",
+          "description": "防刷策略等级",
+          "governance": "平台安全策略统一下发"
+        }
+      ],
+      "dependencies": [
+        "inventory-validation",
+        "risk-control"
+      ],
+      "dependents": [
+        "flash-checkout"
+      ],
+      "ownerAgent": "运行监控Agent"
+    },
+    {
+      "id": "risk-control",
+      "name": "交易风控能力",
+      "category": "安全",
+      "maturity": "成熟",
+      "contract": {
+        "input": "TransactionEvent",
+        "output": "RiskDecision",
+        "stability": "强兼容（v3.0）"
+      },
+      "monthlyCalls": 9230,
+      "health": 96,
+      "avgLatencyMs": 27,
+      "industries": [
+        "零售",
+        "电商",
+        "闪购",
+        "物流"
+      ],
+      "configurations": [
+        {
+          "id": "risk-threshold",
+          "name": "风险阈值",
+          "valueType": "number",
+          "defaultValue": "0.76",
+          "description": "触发拦截的风险阈值",
+          "governance": "需要风控委员会审批"
+        }
+      ],
+      "dependencies": [],
+      "dependents": [
+        "order-calculation",
+        "flash-sale-control",
+        "payment-gateway"
+      ],
+      "ownerAgent": "合约校验Agent"
+    },
+    {
+      "id": "payment-gateway",
+      "name": "统一支付网关",
+      "category": "支付",
+      "maturity": "成熟",
+      "contract": {
+        "input": "PaymentCommand",
+        "output": "PaymentReceipt",
+        "stability": "强兼容（v2.6）"
+      },
+      "monthlyCalls": 11150,
+      "health": 95,
+      "avgLatencyMs": 39,
+      "industries": [
+        "零售",
+        "电商",
+        "闪购",
+        "物流"
+      ],
+      "configurations": [
+        {
+          "id": "retry-policy",
+          "name": "失败重试策略",
+          "valueType": "enum",
+          "defaultValue": "指数退避",
+          "description": "支付失败后的重试模式",
+          "governance": "平台默认策略"
+        }
+      ],
+      "dependencies": [
+        "risk-control"
+      ],
+      "dependents": [
+        "order-fulfillment"
+      ],
+      "ownerAgent": "编码实现Agent"
+    },
+    {
+      "id": "warehouse-routing",
+      "name": "仓网路由能力",
+      "category": "物流",
+      "maturity": "试验中",
+      "contract": {
+        "input": "FulfillmentRequest",
+        "output": "WarehousePlan",
+        "stability": "实验接口（v0.4）"
+      },
+      "monthlyCalls": 860,
+      "health": 64,
+      "avgLatencyMs": 108,
+      "industries": [
+        "物流",
+        "电商"
+      ],
+      "configurations": [
+        {
+          "id": "route-priority",
+          "name": "路由优先级策略",
+          "valueType": "enum",
+          "defaultValue": "时效优先",
+          "description": "仓配决策时效/成本权重",
+          "governance": "需灰度开关控制"
+        }
+      ],
+      "dependencies": [],
+      "dependents": [
+        "inventory-validation"
+      ],
+      "ownerAgent": "影响分析Agent"
+    },
+    {
+      "id": "user-profile",
+      "name": "用户画像能力",
+      "category": "用户",
+      "maturity": "成熟",
+      "contract": {
+        "input": "UserId + SessionContext",
+        "output": "UserTagSet",
+        "stability": "向后兼容（v1.9）"
+      },
+      "monthlyCalls": 5420,
+      "health": 89,
+      "avgLatencyMs": 31,
+      "industries": [
+        "零售",
+        "电商"
+      ],
+      "configurations": [
+        {
+          "id": "tag-refresh-window",
+          "name": "标签刷新窗口",
+          "valueType": "number",
+          "defaultValue": "24h",
+          "description": "用户标签重算周期",
+          "governance": "租户可配置"
+        }
+      ],
+      "dependencies": [],
+      "dependents": [
+        "promotion-engine"
+      ],
+      "ownerAgent": "需求分析Agent"
+    }
+  ],
+  "products": [
+    {
+      "id": "trade-core",
+      "name": "交易内核产品",
+      "description": "承接订单到支付的核心交易链路，保障高可用与高一致性。",
+      "capabilityIds": [
+        "order-calculation",
+        "risk-control",
+        "payment-gateway"
+      ],
+      "productAssets": {
+        "summary": {
+          "valueNarrative": "统一交易计算、风控与支付收敛能力，支撑多场景稳定成交。",
+          "scenarios": [
+            "全渠道零售结算",
+            "电商多活动并发支付",
+            "闪购交易风控联动"
+          ],
+          "kpi": "交易成功率 >= 99.2%，支付失败重试成功率 >= 96%",
+          "riskLevel": "中",
+          "configurableBoundary": "税费模式、支付重试、风控阈值可配置；核心支付契约不可改写。"
+        },
+        "profile": {
+          "domainModels": [
+            "OrderAggregate",
+            "SettlementQuote",
+            "TransactionEvent"
+          ],
+          "usageScenarios": [
+            "标准零售下单",
+            "多渠道电商结算",
+            "闪购支付结算"
+          ],
+          "businessProcesses": [
+            "下单计算流程",
+            "风控决策流程",
+            "支付受理流程"
+          ],
+          "dataContracts": [
+            {
+              "id": "contract-order-settlement",
+              "name": "订单结算契约",
+              "purpose": "定义订单结算输入输出与校验规则",
+              "schema": "OrderDraft -> SettlementQuote(v1.8)"
+            },
+            {
+              "id": "contract-payment-receipt",
+              "name": "支付回执契约",
+              "purpose": "统一支付结果返回结构",
+              "schema": "PaymentCommand -> PaymentReceipt(v2.6)"
+            }
+          ]
+        },
+        "anchors": [
+          {
+            "middlewareType": "流程引擎",
+            "externalRefId": "flow.trade.checkout.v18",
+            "deepLink": "/middleware/flow/trade.checkout.v18",
+            "lastSyncedAt": "2026-02-06 22:05",
+            "syncStatus": "正常",
+            "changeTicket": "DP-4201"
+          },
+          {
+            "middlewareType": "契约中心",
+            "externalRefId": "api.trade.payment-receipt.v26",
+            "deepLink": "/middleware/contract/payment-receipt/v26",
+            "lastSyncedAt": "2026-02-06 22:06",
+            "syncStatus": "正常"
+          }
+        ],
+        "generated": {
+          "inspection": {
+            "mode": "readonly",
+            "agentRunId": "agent-run-trade-20260206-2208",
+            "commitSha": "a13f9c7",
+            "scannedAt": "2026-02-06 22:08",
+            "confidence": 0.94,
+            "syncStatus": "正常",
+            "driftStatus": "一致",
+            "sourceEvidences": [
+              {
+                "filePath": "trade/domain/OrderAggregate.ts",
+                "symbol": "OrderAggregate",
+                "line": 18,
+                "kind": "model"
+              },
+              {
+                "filePath": "trade/domain/SettlementQuote.ts",
+                "symbol": "SettlementQuote",
+                "line": 9,
+                "kind": "model"
+              },
+              {
+                "filePath": "trade/flow/checkout.bpmn",
+                "symbol": "wf-trade-checkout",
+                "line": 1,
+                "kind": "process"
+              },
+              {
+                "filePath": "trade/api/contracts/settlement.yaml",
+                "symbol": "contract-order-settlement",
+                "line": 12,
+                "kind": "contract"
+              },
+              {
+                "filePath": "trade/config/retry-policy.ts",
+                "symbol": "retry-policy",
+                "line": 7,
+                "kind": "configuration"
+              },
+              {
+                "filePath": "trade/app/TradeOrchestrator.ts",
+                "symbol": "dependsOn: risk,payment",
+                "line": 42,
+                "kind": "dependency"
+              }
+            ]
+          },
+          "uml": {
+            "classes": [
+              {
+                "id": "order-aggregate",
+                "name": "OrderAggregate",
+                "stereotype": "<<Aggregate>>",
+                "attributes": [
+                  {
+                    "name": "orderId",
+                    "type": "OrderId"
+                  },
+                  {
+                    "name": "items",
+                    "type": "OrderItem[]"
+                  },
+                  {
+                    "name": "status",
+                    "type": "OrderStatus"
+                  }
+                ],
+                "methods": [
+                  {
+                    "name": "calculateTotal",
+                    "signature": "(ctx: PromotionContext): SettlementQuote"
+                  },
+                  {
+                    "name": "lockInventory",
+                    "signature": "(): void"
+                  }
+                ]
+              },
+              {
+                "id": "settlement-quote",
+                "name": "SettlementQuote",
+                "stereotype": "<<ValueObject>>",
+                "attributes": [
+                  {
+                    "name": "subtotal",
+                    "type": "Money"
+                  },
+                  {
+                    "name": "discount",
+                    "type": "Money"
+                  },
+                  {
+                    "name": "payableAmount",
+                    "type": "Money"
+                  }
+                ],
+                "methods": [
+                  {
+                    "name": "toPayload",
+                    "signature": "(): QuotePayload"
+                  }
+                ]
+              },
+              {
+                "id": "transaction-event",
+                "name": "TransactionEvent",
+                "stereotype": "<<DomainEvent>>",
+                "attributes": [
+                  {
+                    "name": "eventId",
+                    "type": "string"
+                  },
+                  {
+                    "name": "riskScore",
+                    "type": "number"
+                  },
+                  {
+                    "name": "occurredAt",
+                    "type": "DateTime"
+                  }
+                ],
+                "methods": [
+                  {
+                    "name": "publish",
+                    "signature": "(): void"
+                  }
+                ]
+              }
+            ],
+            "relations": [
+              {
+                "from": "order-aggregate",
+                "to": "settlement-quote",
+                "type": "composition",
+                "label": "produces"
+              },
+              {
+                "from": "order-aggregate",
+                "to": "transaction-event",
+                "type": "dependency",
+                "label": "emits"
+              }
+            ]
+          },
+          "bpmnProcesses": [
+            {
+              "id": "wf-trade-checkout",
+              "name": "下单计算流程",
+              "nodes": [
+                {
+                  "id": "n1",
+                  "label": "开始",
+                  "type": "start"
+                },
+                {
+                  "id": "n2",
+                  "label": "订单计算",
+                  "type": "task"
+                },
+                {
+                  "id": "n3",
+                  "label": "风控决策",
+                  "type": "gateway"
+                },
+                {
+                  "id": "n4",
+                  "label": "支付受理",
+                  "type": "task"
+                },
+                {
+                  "id": "n5",
+                  "label": "结束",
+                  "type": "end"
+                }
+              ],
+              "edges": [
+                {
+                  "from": "n1",
+                  "to": "n2"
+                },
+                {
+                  "from": "n2",
+                  "to": "n3"
+                },
+                {
+                  "from": "n3",
+                  "to": "n4",
+                  "label": "通过"
+                },
+                {
+                  "from": "n4",
+                  "to": "n5"
+                }
+              ]
+            },
+            {
+              "id": "wf-trade-risk-decision",
+              "name": "风控决策流程",
+              "nodes": [
+                {
+                  "id": "r1",
+                  "label": "开始",
+                  "type": "start"
+                },
+                {
+                  "id": "r2",
+                  "label": "规则评估",
+                  "type": "task"
+                },
+                {
+                  "id": "r3",
+                  "label": "命中高风险?",
+                  "type": "gateway"
+                },
+                {
+                  "id": "r4",
+                  "label": "人工复核",
+                  "type": "task"
+                },
+                {
+                  "id": "r5",
+                  "label": "风险放行",
+                  "type": "task"
+                },
+                {
+                  "id": "r6",
+                  "label": "结束",
+                  "type": "end"
+                }
+              ],
+              "edges": [
+                {
+                  "from": "r1",
+                  "to": "r2"
+                },
+                {
+                  "from": "r2",
+                  "to": "r3"
+                },
+                {
+                  "from": "r3",
+                  "to": "r4",
+                  "label": "是"
+                },
+                {
+                  "from": "r3",
+                  "to": "r5",
+                  "label": "否"
+                },
+                {
+                  "from": "r4",
+                  "to": "r6"
+                },
+                {
+                  "from": "r5",
+                  "to": "r6"
+                }
+              ]
+            },
+            {
+              "id": "wf-trade-payment-acceptance",
+              "name": "支付受理流程",
+              "nodes": [
+                {
+                  "id": "p1",
+                  "label": "开始",
+                  "type": "start"
+                },
+                {
+                  "id": "p2",
+                  "label": "路由支付通道",
+                  "type": "task"
+                },
+                {
+                  "id": "p3",
+                  "label": "支付成功?",
+                  "type": "gateway"
+                },
+                {
+                  "id": "p4",
+                  "label": "写入回执",
+                  "type": "task"
+                },
+                {
+                  "id": "p5",
+                  "label": "重试补偿",
+                  "type": "task"
+                },
+                {
+                  "id": "p6",
+                  "label": "结束",
+                  "type": "end"
+                }
+              ],
+              "edges": [
+                {
+                  "from": "p1",
+                  "to": "p2"
+                },
+                {
+                  "from": "p2",
+                  "to": "p3"
+                },
+                {
+                  "from": "p3",
+                  "to": "p4",
+                  "label": "是"
+                },
+                {
+                  "from": "p3",
+                  "to": "p5",
+                  "label": "否"
+                },
+                {
+                  "from": "p5",
+                  "to": "p2",
+                  "label": "重试"
+                },
+                {
+                  "from": "p4",
+                  "to": "p6"
+                }
+              ]
+            }
+          ],
+          "contractDependencies": [
+            {
+              "contractId": "contract-order-settlement",
+              "upstreamSystems": [
+                "promotion-engine",
+                "inventory-validation"
+              ],
+              "downstreamSystems": [
+                "payment-gateway",
+                "invoice-service"
+              ],
+              "fieldRules": [
+                {
+                  "field": "orderId",
+                  "upstream": "OrderDraft.orderId",
+                  "current": "SettlementInput.orderId",
+                  "downstream": "PaymentCommand.orderId",
+                  "passthrough": true,
+                  "validations": [
+                    "必填",
+                    "UUID格式"
+                  ]
+                },
+                {
+                  "field": "payableAmount",
+                  "upstream": "PromotionPlan.finalAmount",
+                  "current": "SettlementQuote.payableAmount",
+                  "downstream": "PaymentCommand.amount",
+                  "passthrough": true,
+                  "validations": [
+                    "金额>=0",
+                    "小数位<=2"
+                  ]
+                }
+              ]
+            },
+            {
+              "contractId": "contract-payment-receipt",
+              "upstreamSystems": [
+                "payment-channel-adapter"
+              ],
+              "downstreamSystems": [
+                "order-fulfillment",
+                "billing-service"
+              ],
+              "fieldRules": [
+                {
+                  "field": "paymentStatus",
+                  "upstream": "ChannelReceipt.statusCode",
+                  "current": "PaymentReceipt.status",
+                  "downstream": "OrderFulfillmentCommand.paymentStatus",
+                  "passthrough": false,
+                  "validations": [
+                    "枚举映射",
+                    "未知状态拒绝"
+                  ]
+                }
+              ]
+            }
+          ],
+          "liftedAssets": {
+            "capabilities": [
+              "订单计算能力",
+              "交易风控能力",
+              "统一支付网关"
+            ],
+            "configurations": [
+              "tax-mode",
+              "rounding-rule",
+              "retry-policy",
+              "risk-threshold"
+            ],
+            "dependencies": [
+              "promotion-engine -> order-calculation",
+              "risk-control -> payment-gateway"
+            ]
+          }
+        }
+      },
+      "technicalAssets": {
+        "summary": {
+          "valueNarrative": "交易内核技术栈以契约稳定与高可用为先，面向高并发交易链路。",
+          "scenarios": [
+            "核心交易链路容灾",
+            "支付失败补偿",
+            "风控联动拦截"
+          ],
+          "kpi": "核心服务可用性 >= 99.95%，P95 < 80ms",
+          "riskLevel": "中",
+          "configurableBoundary": "规则可调，SPI方法签名需经过兼容审计。"
+        },
+        "profile": {
+          "services": [
+            "trade-orchestrator",
+            "payment-gateway-service",
+            "risk-decision-service"
+          ],
+          "pages": [
+            "/trade/orders",
+            "/trade/checkout",
+            "/trade/risk-console"
+          ],
+          "configurations": [
+            "tax-mode",
+            "rounding-rule",
+            "retry-policy",
+            "risk-threshold"
+          ],
+          "businessRules": [
+            "金额必须>=0",
+            "风险评分超过阈值禁止支付",
+            "支付失败按指数退避重试3次"
+          ],
+          "stateMachines": [
+            "订单状态机",
+            "支付状态机"
+          ],
+          "domainEvents": [
+            "OrderCreated",
+            "SettlementQuoted",
+            "PaymentSucceeded",
+            "PaymentFailed"
+          ],
+          "scheduledJobs": [
+            "trade-settlement-reconcile-job",
+            "payment-timeout-compensation-job"
+          ],
+          "workflowDefinitions": [
+            "wf-trade-checkout",
+            "wf-payment-compensation"
+          ],
+          "rulesets": [
+            "rules-trade-risk",
+            "rules-payment-retry"
+          ],
+          "pluginExtensionPoints": [
+            "CheckoutPreHookSPI",
+            "PaymentPostHookSPI"
+          ],
+          "dependencyTopology": [
+            "trade-orchestrator -> risk-decision-service",
+            "trade-orchestrator -> payment-gateway-service"
+          ]
+        },
+        "anchors": [
+          {
+            "middlewareType": "规则引擎",
+            "externalRefId": "ruleset.trade.risk.v12",
+            "deepLink": "/middleware/rules/trade/risk/v12",
+            "lastSyncedAt": "2026-02-06 21:58",
+            "syncStatus": "正常"
+          },
+          {
+            "middlewareType": "插件系统",
+            "externalRefId": "spi.checkout.prehook.v3",
+            "deepLink": "/middleware/plugin/spi/checkout-prehook/v3",
+            "lastSyncedAt": "2026-02-06 21:51",
+            "syncStatus": "延迟",
+            "changeTicket": "DP-4210"
+          }
+        ]
+      },
+      "dataAssets": {
+        "summary": {
+          "valueNarrative": "交易离线数据支持结算分析、支付健康与转化评估。",
+          "scenarios": [
+            "交易转化日报",
+            "支付时延监控",
+            "账实核对分析"
+          ],
+          "kpi": "D+1报表及时率 >= 99%，关键指标口径一致率 100%",
+          "riskLevel": "低",
+          "configurableBoundary": "ETL窗口与告警阈值可调，口径字段变更需审批。"
+        },
+        "profile": {
+          "offlineTables": [
+            "dwd_trade_order",
+            "dwd_trade_payment",
+            "ads_trade_conversion_daily"
+          ],
+          "taskBaselines": [
+            "trade_payment_latency_baseline",
+            "trade_success_rate_baseline"
+          ],
+          "etlTasks": [
+            "etl_trade_order_hourly",
+            "etl_trade_payment_daily"
+          ],
+          "lineageLinks": [
+            "ods_trade_order -> dwd_trade_order -> ads_trade_conversion_daily"
+          ],
+          "qualityRules": [
+            "支付成功金额不得为负",
+            "支付成功率日波动不可超过15%"
+          ],
+          "scheduleWindows": [
+            "小时任务: 每小时+8分",
+            "日报任务: 每日 02:15"
+          ]
+        },
+        "anchors": [
+          {
+            "middlewareType": "调度平台",
+            "externalRefId": "dag.trade.payment.daily",
+            "deepLink": "/middleware/scheduler/dag/trade-payment-daily",
+            "lastSyncedAt": "2026-02-06 22:00",
+            "syncStatus": "正常"
+          },
+          {
+            "middlewareType": "数据质量平台",
+            "externalRefId": "dq.trade.success-rate.rule03",
+            "deepLink": "/middleware/dq/trade/success-rate/rule03",
+            "lastSyncedAt": "2026-02-06 21:47",
+            "syncStatus": "正常"
+          }
+        ]
+      },
+      "memoryProfile": {
+        "namespace": "dreamplant.trade-core",
+        "chunkCount": 486,
+        "freshness": "2026-02-06 22:10",
+        "embeddingsReady": true,
+        "retrievalQuality": 93,
+        "chunkBreakdown": {
+          "business": 122,
+          "technical": 204,
+          "data": 110,
+          "trace": 50
+        },
+        "lastVerifiedAt": "2026-02-06 22:12",
+        "sourceRefs": 18
+      }
+    },
+    {
+      "id": "inventory-core",
+      "name": "库存中台产品",
+      "description": "提供库存锁定、预占、路由能力，支撑履约稳定性。",
+      "capabilityIds": [
+        "inventory-validation",
+        "warehouse-routing"
+      ],
+      "productAssets": {
+        "summary": {
+          "valueNarrative": "以库存锁定与仓配路由保障履约确定性，降低超卖风险。",
+          "scenarios": [
+            "多仓库存校验",
+            "秒杀库存预占",
+            "跨仓履约路由"
+          ],
+          "kpi": "库存一致性 >= 99.99%，锁库存超时率 < 0.2%",
+          "riskLevel": "高",
+          "configurableBoundary": "锁库存TTL、预占策略可调；路由核心算法需灰度发布。"
+        },
+        "profile": {
+          "domainModels": [
+            "StockReservation",
+            "WarehousePlan",
+            "InventorySnapshot"
+          ],
+          "usageScenarios": [
+            "多仓库存锁定",
+            "秒杀库存预占",
+            "仓网智能路由"
+          ],
+          "businessProcesses": [
+            "库存校验流程",
+            "库存释放流程",
+            "履约路由流程"
+          ],
+          "dataContracts": [
+            {
+              "id": "contract-stock-reserve",
+              "name": "库存预占契约",
+              "purpose": "统一库存校验与锁定的输入输出",
+              "schema": "SkuRequest[] -> StockReservationResult(v2.1)"
+            }
+          ]
+        },
+        "anchors": [
+          {
+            "middlewareType": "流程引擎",
+            "externalRefId": "flow.inventory.reserve.v21",
+            "deepLink": "/middleware/flow/inventory.reserve.v21",
+            "lastSyncedAt": "2026-02-06 21:39",
+            "syncStatus": "正常"
+          }
+        ],
+        "generated": {
+          "inspection": {
+            "mode": "readonly",
+            "agentRunId": "agent-run-inventory-20260206-2137",
+            "commitSha": "9b7d1e2",
+            "scannedAt": "2026-02-06 21:37",
+            "confidence": 0.91,
+            "syncStatus": "正常",
+            "driftStatus": "一致",
+            "sourceEvidences": [
+              {
+                "filePath": "inventory/domain/StockReservation.ts",
+                "symbol": "StockReservation",
+                "line": 11,
+                "kind": "model"
+              },
+              {
+                "filePath": "inventory/domain/WarehousePlan.ts",
+                "symbol": "WarehousePlan",
+                "line": 14,
+                "kind": "model"
+              },
+              {
+                "filePath": "inventory/flow/reserve-release.bpmn",
+                "symbol": "wf-inventory-reserve",
+                "line": 1,
+                "kind": "process"
+              },
+              {
+                "filePath": "inventory/contracts/stock-reserve.yaml",
+                "symbol": "contract-stock-reserve",
+                "line": 8,
+                "kind": "contract"
+              },
+              {
+                "filePath": "inventory/config/reservation-mode.ts",
+                "symbol": "reservation-mode",
+                "line": 6,
+                "kind": "configuration"
+              },
+              {
+                "filePath": "inventory/app/InventoryValidationService.ts",
+                "symbol": "dependsOn: warehouse-routing",
+                "line": 26,
+                "kind": "dependency"
+              }
+            ]
+          },
+          "uml": {
+            "classes": [
+              {
+                "id": "stock-reservation",
+                "name": "StockReservation",
+                "stereotype": "<<Aggregate>>",
+                "attributes": [
+                  {
+                    "name": "reservationId",
+                    "type": "string"
+                  },
+                  {
+                    "name": "skuId",
+                    "type": "string"
+                  },
+                  {
+                    "name": "reservedQty",
+                    "type": "number"
+                  }
+                ],
+                "methods": [
+                  {
+                    "name": "releaseIfTimeout",
+                    "signature": "(ttl: number): boolean"
+                  }
+                ]
+              },
+              {
+                "id": "warehouse-plan",
+                "name": "WarehousePlan",
+                "stereotype": "<<Entity>>",
+                "attributes": [
+                  {
+                    "name": "planId",
+                    "type": "string"
+                  },
+                  {
+                    "name": "warehouseCode",
+                    "type": "string"
+                  },
+                  {
+                    "name": "priorityScore",
+                    "type": "number"
+                  }
+                ],
+                "methods": [
+                  {
+                    "name": "rank",
+                    "signature": "(mode: RouteMode): void"
+                  }
+                ]
+              },
+              {
+                "id": "inventory-snapshot",
+                "name": "InventorySnapshot",
+                "stereotype": "<<ReadModel>>",
+                "attributes": [
+                  {
+                    "name": "availableQty",
+                    "type": "number"
+                  },
+                  {
+                    "name": "lockedQty",
+                    "type": "number"
+                  },
+                  {
+                    "name": "updatedAt",
+                    "type": "DateTime"
+                  }
+                ],
+                "methods": [
+                  {
+                    "name": "isEnough",
+                    "signature": "(qty: number): boolean"
+                  }
+                ]
+              }
+            ],
+            "relations": [
+              {
+                "from": "stock-reservation",
+                "to": "inventory-snapshot",
+                "type": "dependency",
+                "label": "reads"
+              },
+              {
+                "from": "stock-reservation",
+                "to": "warehouse-plan",
+                "type": "association",
+                "label": "selects"
+              }
+            ]
+          },
+          "bpmnProcesses": [
+            {
+              "id": "wf-inventory-reserve",
+              "name": "库存校验流程",
+              "nodes": [
+                {
+                  "id": "n1",
+                  "label": "开始",
+                  "type": "start"
+                },
+                {
+                  "id": "n2",
+                  "label": "库存查询",
+                  "type": "task"
+                },
+                {
+                  "id": "n3",
+                  "label": "可用量判断",
+                  "type": "gateway"
+                },
+                {
+                  "id": "n4",
+                  "label": "锁库存",
+                  "type": "task"
+                },
+                {
+                  "id": "n5",
+                  "label": "结束",
+                  "type": "end"
+                }
+              ],
+              "edges": [
+                {
+                  "from": "n1",
+                  "to": "n2"
+                },
+                {
+                  "from": "n2",
+                  "to": "n3"
+                },
+                {
+                  "from": "n3",
+                  "to": "n4",
+                  "label": "可用"
+                },
+                {
+                  "from": "n4",
+                  "to": "n5"
+                }
+              ]
+            }
+          ],
+          "contractDependencies": [
+            {
+              "contractId": "contract-stock-reserve",
+              "upstreamSystems": [
+                "warehouse-routing",
+                "sku-master"
+              ],
+              "downstreamSystems": [
+                "order-calculation",
+                "flash-sale-control"
+              ],
+              "fieldRules": [
+                {
+                  "field": "skuId",
+                  "upstream": "SkuRequest.skuId",
+                  "current": "StockReservationInput.skuId",
+                  "downstream": "StockReservationResult.skuId",
+                  "passthrough": true,
+                  "validations": [
+                    "必填",
+                    "SKU格式校验"
+                  ]
+                },
+                {
+                  "field": "warehouseCode",
+                  "upstream": "WarehousePlan.warehouseCode",
+                  "current": "StockReservationInput.warehouseCode",
+                  "downstream": "StockReservationResult.warehouseCode",
+                  "passthrough": true,
+                  "validations": [
+                    "仓编码存在性校验"
+                  ]
+                }
+              ]
+            }
+          ],
+          "liftedAssets": {
+            "capabilities": [
+              "库存校验能力",
+              "仓网路由能力"
+            ],
+            "configurations": [
+              "lock-ttl",
+              "reservation-mode",
+              "route-priority"
+            ],
+            "dependencies": [
+              "warehouse-routing -> inventory-validation",
+              "inventory-validation -> order-calculation"
+            ]
+          }
+        }
+      },
+      "technicalAssets": {
+        "summary": {
+          "valueNarrative": "库存中台依赖强一致策略与路由引擎协同，技术风险集中在高峰期。",
+          "scenarios": [
+            "峰值锁库存",
+            "库存释放补偿",
+            "路由策略切换"
+          ],
+          "kpi": "库存服务可用性 >= 99.9%，超卖事故 0 容忍",
+          "riskLevel": "高",
+          "configurableBoundary": "预占策略与路由权重可调，底层库存扣减规则需审批。"
+        },
+        "profile": {
+          "services": [
+            "inventory-validation-service",
+            "warehouse-routing-service"
+          ],
+          "pages": [
+            "/inventory/availability",
+            "/inventory/routing"
+          ],
+          "configurations": [
+            "lock-ttl",
+            "reservation-mode",
+            "route-priority"
+          ],
+          "businessRules": [
+            "库存不足必须返回原因码",
+            "锁库存超时自动释放",
+            "路由策略支持时效优先/成本优先"
+          ],
+          "stateMachines": [
+            "库存锁定状态机",
+            "路由任务状态机"
+          ],
+          "domainEvents": [
+            "StockReserved",
+            "StockReleased",
+            "RoutePlanGenerated"
+          ],
+          "scheduledJobs": [
+            "inventory-lock-cleaner-job",
+            "warehouse-route-refresh-job"
+          ],
+          "workflowDefinitions": [
+            "wf-inventory-reserve",
+            "wf-inventory-release"
+          ],
+          "rulesets": [
+            "rules-inventory-threshold",
+            "rules-route-priority"
+          ],
+          "pluginExtensionPoints": [
+            "WarehouseRoutePolicySPI"
+          ],
+          "dependencyTopology": [
+            "inventory-validation-service -> warehouse-routing-service"
+          ]
+        },
+        "anchors": [
+          {
+            "middlewareType": "规则引擎",
+            "externalRefId": "ruleset.inventory.route.v7",
+            "deepLink": "/middleware/rules/inventory/route/v7",
+            "lastSyncedAt": "2026-02-06 21:21",
+            "syncStatus": "正常"
+          },
+          {
+            "middlewareType": "插件系统",
+            "externalRefId": "spi.route.policy.v2",
+            "deepLink": "/middleware/plugin/spi/route-policy/v2",
+            "lastSyncedAt": "2026-02-06 20:59",
+            "syncStatus": "延迟",
+            "changeTicket": "DP-4194"
+          }
+        ]
+      },
+      "dataAssets": {
+        "summary": {
+          "valueNarrative": "库存离线资产用于周转效率与锁库存行为分析。",
+          "scenarios": [
+            "锁库存超时分析",
+            "仓网命中率分析",
+            "库存健康预警"
+          ],
+          "kpi": "库存日报稳定产出，关键质量规则通过率 >= 99.5%",
+          "riskLevel": "中",
+          "configurableBoundary": "告警阈值可调，关键口径字段受治理规则约束。"
+        },
+        "profile": {
+          "offlineTables": [
+            "dwd_inventory_snapshot",
+            "dwd_inventory_reservation",
+            "ads_inventory_turnover"
+          ],
+          "taskBaselines": [
+            "inventory_lock_timeout_baseline",
+            "inventory_route_hit_rate_baseline"
+          ],
+          "etlTasks": [
+            "etl_inventory_snapshot_hourly",
+            "etl_inventory_route_daily"
+          ],
+          "lineageLinks": [
+            "ods_inventory_log -> dwd_inventory_reservation -> ads_inventory_turnover"
+          ],
+          "qualityRules": [
+            "锁库存超时率不可连续3天超基线",
+            "路由命中率日均不可低于85%"
+          ],
+          "scheduleWindows": [
+            "小时任务: 每小时+5分",
+            "日报任务: 每日 01:40"
+          ]
+        },
+        "anchors": [
+          {
+            "middlewareType": "调度平台",
+            "externalRefId": "dag.inventory.route.daily",
+            "deepLink": "/middleware/scheduler/dag/inventory-route-daily",
+            "lastSyncedAt": "2026-02-06 21:34",
+            "syncStatus": "正常"
+          }
+        ]
+      },
+      "memoryProfile": {
+        "namespace": "dreamplant.inventory-core",
+        "chunkCount": 372,
+        "freshness": "2026-02-06 21:45",
+        "embeddingsReady": true,
+        "retrievalQuality": 89,
+        "chunkBreakdown": {
+          "business": 88,
+          "technical": 166,
+          "data": 82,
+          "trace": 36
+        },
+        "lastVerifiedAt": "2026-02-06 21:46",
+        "sourceRefs": 14
+      }
+    },
+    {
+      "id": "marketing-core",
+      "name": "营销中台产品",
+      "description": "沉淀促销与秒杀能力，快速支持行业增长玩法。",
+      "capabilityIds": [
+        "promotion-engine",
+        "flash-sale-control",
+        "user-profile"
+      ],
+      "productAssets": {
+        "summary": {
+          "valueNarrative": "快速编排促销与秒杀玩法，提升活动转化与用户运营效率。",
+          "scenarios": [
+            "大促策略组合",
+            "秒杀资格控制",
+            "用户标签驱动营销"
+          ],
+          "kpi": "营销转化率提升 >= 15%，活动稳定性 >= 99.5%",
+          "riskLevel": "中",
+          "configurableBoundary": "活动策略、标签窗口可配；防刷等级由平台统一约束。"
+        },
+        "profile": {
+          "domainModels": [
+            "PromotionPlan",
+            "FlashDecision",
+            "UserTagSet"
+          ],
+          "usageScenarios": [
+            "大促满减活动",
+            "秒杀资格控制",
+            "用户分层营销"
+          ],
+          "businessProcesses": [
+            "促销命中流程",
+            "秒杀管控流程",
+            "画像更新流程"
+          ],
+          "dataContracts": [
+            {
+              "id": "contract-promotion-plan",
+              "name": "促销计划契约",
+              "purpose": "定义促销引擎策略输出",
+              "schema": "PromotionQuery -> PromotionPlan[](v1.3)"
+            }
+          ]
+        },
+        "anchors": [
+          {
+            "middlewareType": "流程引擎",
+            "externalRefId": "flow.marketing.promotion.v13",
+            "deepLink": "/middleware/flow/marketing.promotion.v13",
+            "lastSyncedAt": "2026-02-06 22:01",
+            "syncStatus": "正常"
+          }
+        ],
+        "generated": {
+          "inspection": {
+            "mode": "readonly",
+            "agentRunId": "agent-run-marketing-20260206-2200",
+            "commitSha": "cf29a41",
+            "scannedAt": "2026-02-06 22:00",
+            "confidence": 0.92,
+            "syncStatus": "正常",
+            "driftStatus": "一致",
+            "sourceEvidences": [
+              {
+                "filePath": "marketing/domain/PromotionPlan.ts",
+                "symbol": "PromotionPlan",
+                "line": 10,
+                "kind": "model"
+              },
+              {
+                "filePath": "marketing/domain/FlashDecision.ts",
+                "symbol": "FlashDecision",
+                "line": 8,
+                "kind": "model"
+              },
+              {
+                "filePath": "marketing/flow/promotion-hit.bpmn",
+                "symbol": "wf-promotion-campaign",
+                "line": 1,
+                "kind": "process"
+              },
+              {
+                "filePath": "marketing/contracts/promotion-plan.yaml",
+                "symbol": "contract-promotion-plan",
+                "line": 7,
+                "kind": "contract"
+              },
+              {
+                "filePath": "marketing/config/stacking-policy.ts",
+                "symbol": "stacking-policy",
+                "line": 5,
+                "kind": "configuration"
+              },
+              {
+                "filePath": "marketing/app/PromotionEngineService.ts",
+                "symbol": "dependsOn: user-profile",
+                "line": 31,
+                "kind": "dependency"
+              }
+            ]
+          },
+          "uml": {
+            "classes": [
+              {
+                "id": "promotion-plan",
+                "name": "PromotionPlan",
+                "stereotype": "<<Entity>>",
+                "attributes": [
+                  {
+                    "name": "planId",
+                    "type": "string"
+                  },
+                  {
+                    "name": "stackingPolicy",
+                    "type": "PolicyType"
+                  },
+                  {
+                    "name": "discountValue",
+                    "type": "Money"
+                  }
+                ],
+                "methods": [
+                  {
+                    "name": "resolve",
+                    "signature": "(ctx: UserTagSet): PromotionResult"
+                  }
+                ]
+              },
+              {
+                "id": "flash-decision",
+                "name": "FlashDecision",
+                "stereotype": "<<ValueObject>>",
+                "attributes": [
+                  {
+                    "name": "eligible",
+                    "type": "boolean"
+                  },
+                  {
+                    "name": "reasonCode",
+                    "type": "string"
+                  },
+                  {
+                    "name": "antiBotLevel",
+                    "type": "string"
+                  }
+                ],
+                "methods": [
+                  {
+                    "name": "denyReason",
+                    "signature": "(): string"
+                  }
+                ]
+              },
+              {
+                "id": "user-tag-set",
+                "name": "UserTagSet",
+                "stereotype": "<<ReadModel>>",
+                "attributes": [
+                  {
+                    "name": "userId",
+                    "type": "string"
+                  },
+                  {
+                    "name": "tags",
+                    "type": "string[]"
+                  },
+                  {
+                    "name": "refreshAt",
+                    "type": "DateTime"
+                  }
+                ],
+                "methods": [
+                  {
+                    "name": "hasTag",
+                    "signature": "(tag: string): boolean"
+                  }
+                ]
+              }
+            ],
+            "relations": [
+              {
+                "from": "promotion-plan",
+                "to": "user-tag-set",
+                "type": "dependency",
+                "label": "reads"
+              },
+              {
+                "from": "promotion-plan",
+                "to": "flash-decision",
+                "type": "association",
+                "label": "produces"
+              }
+            ]
+          },
+          "bpmnProcesses": [
+            {
+              "id": "wf-promotion-campaign",
+              "name": "促销命中流程",
+              "nodes": [
+                {
+                  "id": "n1",
+                  "label": "开始",
+                  "type": "start"
+                },
+                {
+                  "id": "n2",
+                  "label": "读取标签",
+                  "type": "task"
+                },
+                {
+                  "id": "n3",
+                  "label": "策略求解",
+                  "type": "task"
+                },
+                {
+                  "id": "n4",
+                  "label": "命中判断",
+                  "type": "gateway"
+                },
+                {
+                  "id": "n5",
+                  "label": "结束",
+                  "type": "end"
+                }
+              ],
+              "edges": [
+                {
+                  "from": "n1",
+                  "to": "n2"
+                },
+                {
+                  "from": "n2",
+                  "to": "n3"
+                },
+                {
+                  "from": "n3",
+                  "to": "n4"
+                },
+                {
+                  "from": "n4",
+                  "to": "n5",
+                  "label": "命中"
+                }
+              ]
+            }
+          ],
+          "contractDependencies": [
+            {
+              "contractId": "contract-promotion-plan",
+              "upstreamSystems": [
+                "user-profile",
+                "campaign-center"
+              ],
+              "downstreamSystems": [
+                "order-calculation",
+                "checkout-orchestrator"
+              ],
+              "fieldRules": [
+                {
+                  "field": "userSegment",
+                  "upstream": "UserTagSet.tags",
+                  "current": "PromotionQuery.userSegment",
+                  "downstream": "PromotionPlan.userSegment",
+                  "passthrough": true,
+                  "validations": [
+                    "标签存在性校验",
+                    "标签黑白名单过滤"
+                  ]
+                },
+                {
+                  "field": "discountAmount",
+                  "upstream": "CampaignRule.discountValue",
+                  "current": "PromotionPlan.discountValue",
+                  "downstream": "SettlementInput.promotionDiscount",
+                  "passthrough": false,
+                  "validations": [
+                    "金额>=0",
+                    "优惠上限校验"
+                  ]
+                }
+              ]
+            }
+          ],
+          "liftedAssets": {
+            "capabilities": [
+              "促销引擎",
+              "秒杀控制能力",
+              "用户画像能力"
+            ],
+            "configurations": [
+              "stacking-policy",
+              "anti-bot-level",
+              "tag-refresh-window"
+            ],
+            "dependencies": [
+              "user-profile -> promotion-engine",
+              "inventory-validation -> flash-sale-control"
+            ]
+          }
+        }
+      },
+      "technicalAssets": {
+        "summary": {
+          "valueNarrative": "营销技术资产强调策略灵活和活动安全，依赖规则引擎与反作弊机制。",
+          "scenarios": [
+            "促销冲突求解",
+            "秒杀防刷",
+            "标签定时刷新"
+          ],
+          "kpi": "活动故障率 < 0.5%，规则冲突处理成功率 >= 98%",
+          "riskLevel": "中",
+          "configurableBoundary": "促销策略可扩展，防刷级别与核心风控策略不可降级。"
+        },
+        "profile": {
+          "services": [
+            "promotion-engine-service",
+            "flash-sale-control-service",
+            "user-profile-service"
+          ],
+          "pages": [
+            "/marketing/promotions",
+            "/marketing/flash",
+            "/marketing/user-segments"
+          ],
+          "configurations": [
+            "stacking-policy",
+            "anti-bot-level",
+            "tag-refresh-window"
+          ],
+          "businessRules": [
+            "促销互斥冲突按策略求解",
+            "秒杀防刷等级不允许租户降级",
+            "用户标签计算窗口可租户级配置"
+          ],
+          "stateMachines": [
+            "促销活动状态机",
+            "秒杀活动状态机",
+            "标签计算状态机"
+          ],
+          "domainEvents": [
+            "PromotionMatched",
+            "FlashEligibilityPassed",
+            "UserTagsRefreshed"
+          ],
+          "scheduledJobs": [
+            "promotion-expire-job",
+            "user-tags-refresh-job"
+          ],
+          "workflowDefinitions": [
+            "wf-promotion-campaign",
+            "wf-flash-event"
+          ],
+          "rulesets": [
+            "rules-promotion-stacking",
+            "rules-flash-antibot"
+          ],
+          "pluginExtensionPoints": [
+            "PromotionResolverSPI",
+            "FlashEligibilitySPI"
+          ],
+          "dependencyTopology": [
+            "promotion-engine-service -> user-profile-service",
+            "flash-sale-control-service -> inventory-validation"
+          ]
+        },
+        "anchors": [
+          {
+            "middlewareType": "规则引擎",
+            "externalRefId": "ruleset.marketing.stacking.v9",
+            "deepLink": "/middleware/rules/marketing/stacking/v9",
+            "lastSyncedAt": "2026-02-06 21:55",
+            "syncStatus": "正常"
+          },
+          {
+            "middlewareType": "插件系统",
+            "externalRefId": "spi.promotion.resolver.v4",
+            "deepLink": "/middleware/plugin/spi/promotion-resolver/v4",
+            "lastSyncedAt": "2026-02-06 21:08",
+            "syncStatus": "正常"
+          }
+        ]
+      },
+      "dataAssets": {
+        "summary": {
+          "valueNarrative": "营销数据资产用于ROI评估与活动复盘，支撑增长策略迭代。",
+          "scenarios": [
+            "活动ROI分析",
+            "秒杀成功率监控",
+            "人群策略复盘"
+          ],
+          "kpi": "ROI日报产出准时率 >= 99%，指标偏差 < 1%",
+          "riskLevel": "低",
+          "configurableBoundary": "统计窗口可调，核心ROI指标口径需统一治理。"
+        },
+        "profile": {
+          "offlineTables": [
+            "dwd_marketing_promotion_hit",
+            "dwd_marketing_flash_event",
+            "ads_marketing_roi_daily"
+          ],
+          "taskBaselines": [
+            "promotion_hit_rate_baseline",
+            "flash_success_rate_baseline"
+          ],
+          "etlTasks": [
+            "etl_marketing_promotion_hourly",
+            "etl_marketing_roi_daily"
+          ],
+          "lineageLinks": [
+            "ods_marketing_event -> dwd_marketing_promotion_hit -> ads_marketing_roi_daily"
+          ],
+          "qualityRules": [
+            "活动ROI不得出现无穷值",
+            "促销命中率周同比异常需告警"
+          ],
+          "scheduleWindows": [
+            "小时任务: 每小时+6分",
+            "日报任务: 每日 02:00"
+          ]
+        },
+        "anchors": [
+          {
+            "middlewareType": "调度平台",
+            "externalRefId": "dag.marketing.roi.daily",
+            "deepLink": "/middleware/scheduler/dag/marketing-roi-daily",
+            "lastSyncedAt": "2026-02-06 22:02",
+            "syncStatus": "正常"
+          }
+        ]
+      },
+      "memoryProfile": {
+        "namespace": "dreamplant.marketing-core",
+        "chunkCount": 418,
+        "freshness": "2026-02-06 22:05",
+        "embeddingsReady": true,
+        "retrievalQuality": 91,
+        "chunkBreakdown": {
+          "business": 104,
+          "technical": 173,
+          "data": 97,
+          "trace": 44
+        },
+        "lastVerifiedAt": "2026-02-06 22:07",
+        "sourceRefs": 16
+      }
+    }
+  ],
+  "operationAgents": [
+    {
+      "id": "ops-agent-fulfillment",
+      "name": "履约运营Agent",
+      "mission": "保障从下单到支付履约链路稳定运行",
+      "kpi": "履约成功率>=98%",
+      "productIds": [
+        "trade-core",
+        "inventory-core"
+      ],
+      "lifecycleStage": "灰度发布",
+      "owner": "履约运营负责人"
+    },
+    {
+      "id": "ops-agent-growth",
+      "name": "增长运营Agent",
+      "mission": "推动促销玩法沉淀与全行业复用",
+      "kpi": "活动转化提升>=15%",
+      "productIds": [
+        "marketing-core",
+        "trade-core"
+      ],
+      "lifecycleStage": "编码验证",
+      "owner": "增长运营负责人"
+    }
+  ],
+  "solutions": [
+    {
+      "id": "retail-omni",
+      "name": "全渠道零售增长方案",
+      "valueNarrative": "统一线上线下交易、库存、会员营销能力，缩短项目交付周期",
+      "operationAgentIds": [
+        "ops-agent-fulfillment",
+        "ops-agent-growth"
+      ],
+      "kpi": "交付周期缩短 36%，履约成功率 98.2%",
+      "status": "运行中"
+    },
+    {
+      "id": "flash-commerce",
+      "name": "高并发闪购运营方案",
+      "valueNarrative": "面向峰值场景的风控、库存、支付一体化解决方案",
+      "operationAgentIds": [
+        "ops-agent-fulfillment"
+      ],
+      "kpi": "峰值QPS提升 2.1 倍，故障率下降 42%",
+      "status": "灰度中"
+    }
+  ],
+  "agentRoles": [
+    {
+      "id": "requirement-agent",
+      "name": "需求分析Agent",
+      "responsibility": "将业务意图映射为结构化规格，补齐缺失上下文",
+      "signal": "今日处理 12 条需求，待确认 2 条"
+    },
+    {
+      "id": "spec-agent",
+      "name": "规格产出Agent",
+      "responsibility": "基于 Spec 模板生成能力契约、领域模型与验收标准",
+      "signal": "规格一致性 97%"
+    },
+    {
+      "id": "coding-agent",
+      "name": "编码实现Agent",
+      "responsibility": "依据规格产出代码与测试，并提交沙箱验证结果",
+      "signal": "近24小时合并 6 个变更"
+    },
+    {
+      "id": "contract-agent",
+      "name": "合约校验Agent",
+      "responsibility": "执行宪法规则与兼容性检查，拦截破坏性变更",
+      "signal": "拦截高风险变更 1 次"
+    },
+    {
+      "id": "health-agent",
+      "name": "资产健康Agent",
+      "responsibility": "持续监控能力健康度、成本与收益，给出退役建议",
+      "signal": "识别低活跃能力 3 个"
+    }
+  ],
+  "phaseRoadmap": [
+    {
+      "phase": "Phase 1",
+      "title": "基础资产数字化",
+      "target": "建立统一资产目录与规范模板",
+      "milestone": "能力项 100% 入库并绑定契约",
+      "progress": 100
+    },
+    {
+      "phase": "Phase 2",
+      "title": "Agent 局部自动化",
+      "target": "需求到代码链路引入多 Agent 协同",
+      "milestone": "80% 新需求使用规格驱动开发",
+      "progress": 74
+    },
+    {
+      "phase": "Phase 3",
+      "title": "自治运营",
+      "target": "形成需求-实现-运营闭环自优化",
+      "milestone": "关键决策自动化率 > 95%",
+      "progress": 38
+    }
+  ]
+}

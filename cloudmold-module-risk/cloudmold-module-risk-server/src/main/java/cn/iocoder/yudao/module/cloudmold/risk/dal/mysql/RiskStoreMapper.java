@@ -311,6 +311,79 @@ public interface RiskStoreMapper {
                     #{recordedByPrincipalId},#{occurredAt},#{createdAt})
             """) int insertFeedback(Feedback value);
 
+    @Select("""
+            SELECT order_id,tenant_id,payment_id,status,payable_amount_minor,currency_code
+            FROM cloudmold_order_header WHERE tenant_id=#{tenantId} AND order_id=#{orderId}
+            """)
+    OrderReference selectOrderReference(@Param("tenantId") Long tenantId, @Param("orderId") String orderId);
+
+    @Select("""
+            SELECT payment_id,tenant_id,order_id,status,captured_amount_minor,refunded_amount_minor,currency_code,
+                   provider_code,test_mode
+            FROM cloudmold_payment WHERE tenant_id=#{tenantId} AND payment_id=#{paymentId}
+            """)
+    PaymentReference selectPaymentReference(@Param("tenantId") Long tenantId, @Param("paymentId") String paymentId);
+
+    @Insert("""
+            INSERT INTO cloudmold_risk_order_case
+              (order_risk_case_id,tenant_id,case_id,order_id,payment_id,risk_type,reason_code,created_at)
+            VALUES (#{orderRiskCaseId},#{tenantId},#{caseId},#{orderId},#{paymentId},#{riskType},#{reasonCode},
+                    #{createdAt})
+            """)
+    int insertOrderRiskCase(OrderRiskCase value);
+
+    @Select("""
+            SELECT order_risk_case_id,tenant_id,case_id,order_id,payment_id,risk_type,reason_code,created_at
+            FROM cloudmold_risk_order_case WHERE tenant_id=#{tenantId} AND case_id=#{caseId}
+            """)
+    OrderRiskCase selectOrderRiskCaseByCaseId(@Param("tenantId") Long tenantId, @Param("caseId") String caseId);
+
+    @Insert("""
+            INSERT INTO cloudmold_risk_payment_dispute
+              (dispute_id,tenant_id,order_id,payment_id,case_id,decision_id,dispute_type,status,reason_code,
+               amount_minor,currency_code,external_ref,version,opened_at,resolved_at,created_at,updated_at)
+            VALUES (#{disputeId},#{tenantId},#{orderId},#{paymentId},#{caseId},#{decisionId},#{disputeType},
+                    #{status},#{reasonCode},#{amountMinor},#{currencyCode},#{externalRef},#{version},#{openedAt},
+                    #{resolvedAt},#{createdAt},#{updatedAt})
+            """)
+    int insertPaymentDispute(PaymentDispute value);
+
+    @Select("""
+            SELECT dispute_id,tenant_id,order_id,payment_id,case_id,decision_id,dispute_type,status,reason_code,
+                   amount_minor,currency_code,external_ref,version,opened_at,resolved_at,created_at,updated_at
+            FROM cloudmold_risk_payment_dispute WHERE tenant_id=#{tenantId} AND dispute_id=#{disputeId} FOR UPDATE
+            """)
+    PaymentDispute selectPaymentDisputeForUpdate(@Param("tenantId") Long tenantId, @Param("disputeId") String disputeId);
+
+    @Select("""
+            SELECT dispute_id,tenant_id,order_id,payment_id,case_id,decision_id,dispute_type,status,reason_code,
+                   amount_minor,currency_code,external_ref,version,opened_at,resolved_at,created_at,updated_at
+            FROM cloudmold_risk_payment_dispute WHERE tenant_id=#{tenantId} AND dispute_id=#{disputeId}
+            """)
+    PaymentDispute selectPaymentDispute(@Param("tenantId") Long tenantId, @Param("disputeId") String disputeId);
+
+    @Update("""
+            UPDATE cloudmold_risk_payment_dispute
+            SET decision_id=#{decisionId},status=#{after},reason_code=#{reasonCode},resolved_at=#{resolvedAt},
+                version=version+1,updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND dispute_id=#{disputeId} AND status=#{before}
+              AND version=#{expectedVersion}
+            """)
+    int resolvePaymentDispute(@Param("tenantId") Long tenantId, @Param("disputeId") String disputeId,
+                              @Param("expectedVersion") Long expectedVersion, @Param("before") String before,
+                              @Param("after") String after, @Param("reasonCode") String reasonCode,
+                              @Param("decisionId") String decisionId, @Param("resolvedAt") LocalDateTime resolvedAt,
+                              @Param("now") LocalDateTime now);
+
+    @Insert("""
+            INSERT INTO cloudmold_risk_loss_entry
+              (loss_entry_id,tenant_id,order_id,payment_id,dispute_id,decision_id,entry_type,signed_amount_minor,
+               currency_code,external_ref,occurred_at,created_at)
+            VALUES (#{lossEntryId},#{tenantId},#{orderId},#{paymentId},#{disputeId},#{decisionId},#{entryType},
+                    #{signedAmountMinor},#{currencyCode},#{externalRef},#{occurredAt},#{createdAt})
+            """)
+    int insertLossEntry(LossEntry value);
+
     @Insert("""
             INSERT INTO cloudmold_risk_status_history
               (tenant_id,aggregate_type,aggregate_id,aggregate_version,previous_status,current_status,operation_id,

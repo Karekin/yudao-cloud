@@ -21,6 +21,12 @@
     <url>https://github.com/YunaiV/ruoyi-vue-pro</url>
 
     <dependencies>
+        <!-- CloudMold internal Dubbo capability bus. Existing REST/Feign remains compatibility-only. -->
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-rpc</artifactId>
+            <version>${revision}</version>
+        </dependency>
         <!-- CloudMold 领域事件契约与事务 Outbox（红区模块） -->
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
@@ -89,6 +95,11 @@
         </dependency>
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-commerce-behavior-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
             <artifactId>cloudmold-module-customer-service-server</artifactId>
             <version>${revision}</version>
         </dependency>
@@ -120,6 +131,11 @@
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
             <artifactId>cloudmold-module-metadata-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-dreamplant-server</artifactId>
             <version>${revision}</version>
         </dependency>
         <dependency>

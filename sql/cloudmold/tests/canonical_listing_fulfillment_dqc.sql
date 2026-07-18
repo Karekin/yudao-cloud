@@ -39,6 +39,12 @@ WHERE h.aggregate_version <> (
     AND x.aggregate_version <= h.aggregate_version
 );
 
+SELECT COUNT(*) AS fulfillment_delivery_promise_pair_violation
+FROM cloudmold_fulfillment_order
+WHERE (`delivery_promise_version_ref` IS NULL AND (`promised_delivery_at` IS NOT NULL OR `promise_frozen_at` IS NOT NULL))
+   OR (`delivery_promise_version_ref` IS NOT NULL
+       AND (`promised_delivery_at` IS NULL OR `promise_frozen_at` IS NULL OR `promise_frozen_at` > `promised_delivery_at`));
+
 SELECT COUNT(*) AS fulfillment_item_order_mismatch
 FROM cloudmold_fulfillment_item f
 LEFT JOIN cloudmold_fulfillment_order h

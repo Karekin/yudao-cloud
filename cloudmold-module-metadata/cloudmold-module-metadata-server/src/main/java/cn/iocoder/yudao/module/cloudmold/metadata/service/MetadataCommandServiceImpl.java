@@ -90,6 +90,36 @@ public class MetadataCommandServiceImpl implements MetadataCommandApi, MetadataQ
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public MetadataDatasetReference validateDatasetVersion(String datasetId, Long datasetVersion,
+                                                            String qualifiedName, String schemaSha256) {
+        requireId(datasetId, "datasetId");
+        require(datasetVersion != null && datasetVersion > 0, "datasetVersion must be positive");
+        require(qualifiedName != null && QUALIFIED_NAME.matcher(qualifiedName).matches(),
+                "qualifiedName must be a safe physical dataset name");
+        requireSha256(schemaSha256, "schemaSha256");
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        DatasetVersion dataset = mapper.selectDatasetVersion(tenantId, datasetId, datasetVersion);
+        require(dataset != null, "metadata dataset version does not exist in the same tenant");
+        require(qualifiedName.equals(dataset.getQualifiedName()), "metadata dataset qualifiedName mismatch");
+        require(schemaSha256.equals(dataset.getSchemaSha256()), "metadata dataset schemaSha256 mismatch");
+        List<MetadataDatasetReference.FieldReference> fields = mapper
+                .selectDatasetFields(tenantId, datasetId, datasetVersion).stream()
+                .map(field -> MetadataDatasetReference.FieldReference.builder()
+                        .ordinalPosition(field.getOrdinalPosition()).fieldCode(field.getFieldCode())
+                        .dataType(field.getDataType()).nullable(field.getNullable())
+                        .primaryKeyPart(field.getPrimaryKeyPart()).semanticType(field.getSemanticType())
+                        .classification(field.getClassification()).build())
+                .toList();
+        require(!fields.isEmpty(), "metadata dataset version has no fields");
+        return MetadataDatasetReference.builder().datasetId(dataset.getDefinitionId())
+                .datasetVersion(dataset.getDefinitionVersion()).dataSourceId(dataset.getDataSourceId())
+                .dataSourceVersion(dataset.getDataSourceVersion()).datasetType(dataset.getDatasetType())
+                .qualifiedName(dataset.getQualifiedName()).layerCode(dataset.getLayerCode())
+                .grainCode(dataset.getGrainCode()).schemaSha256(dataset.getSchemaSha256()).fields(fields).build();
+    }
+
+    @Override
     public MetadataView getTaskRun(String runId) {
         requireId(runId, "runId");
         TaskRunObservation run = mapper.selectLatestTaskRun(TenantContextHolder.getRequiredTenantId(), runId);

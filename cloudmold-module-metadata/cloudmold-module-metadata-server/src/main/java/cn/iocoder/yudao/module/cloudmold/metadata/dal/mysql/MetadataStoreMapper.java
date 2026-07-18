@@ -120,6 +120,26 @@ public interface MetadataStoreMapper {
     int countFieldVersion(@Param("tenantId") Long tenantId, @Param("datasetId") String datasetId,
                           @Param("datasetVersion") Long datasetVersion, @Param("fieldCode") String fieldCode);
 
+    @Select("""
+            SELECT tenant_id,definition_id,definition_version,data_source_id,data_source_version,dataset_type,
+                   qualified_name,layer_code,grain_code,schema_sha256,storage_location_ref,retention_days
+            FROM cloudmold_metadata_dataset_version
+            WHERE tenant_id=#{tenantId} AND definition_id=#{datasetId} AND definition_version=#{datasetVersion}
+            """)
+    DatasetVersion selectDatasetVersion(@Param("tenantId") Long tenantId, @Param("datasetId") String datasetId,
+                                        @Param("datasetVersion") Long datasetVersion);
+
+    @Select("""
+            SELECT tenant_id,dataset_id,dataset_version,ordinal_position,field_code,data_type,nullable,
+                   primary_key_part,semantic_type,classification
+            FROM cloudmold_metadata_field_version
+            WHERE tenant_id=#{tenantId} AND dataset_id=#{datasetId} AND dataset_version=#{datasetVersion}
+            ORDER BY ordinal_position
+            """)
+    java.util.List<FieldVersion> selectDatasetFields(@Param("tenantId") Long tenantId,
+                                                     @Param("datasetId") String datasetId,
+                                                     @Param("datasetVersion") Long datasetVersion);
+
     @Insert("""
             INSERT INTO cloudmold_metadata_data_source_version
               (tenant_id,definition_id,definition_version,source_type,environment,endpoint_ref,credential_ref,namespace_ref)

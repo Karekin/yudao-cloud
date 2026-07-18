@@ -69,7 +69,9 @@ public class OutboxAppenderImpl implements OutboxAppender {
                     && Objects.equals(existing.getAggregateId(), command.getAggregateId())) {
                 return new AppendDomainEventResult(existing.getEventId(), existing.getPayloadHash(), true);
             }
-            throw new IllegalStateException("event uniqueness conflict with different semantic content", duplicate);
+            String databaseCause = duplicate.getMostSpecificCause().getMessage();
+            throw new IllegalStateException("event uniqueness conflict with different semantic content: "
+                    + databaseCause, duplicate);
         }
     }
 

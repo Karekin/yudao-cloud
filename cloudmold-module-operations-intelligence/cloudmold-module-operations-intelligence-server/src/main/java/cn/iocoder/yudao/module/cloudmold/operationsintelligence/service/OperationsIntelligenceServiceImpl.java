@@ -5,6 +5,8 @@ import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventCommand;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
+import cn.iocoder.yudao.module.cloudmold.metadata.api.MetadataDatasetReference;
+import cn.iocoder.yudao.module.cloudmold.metadata.api.MetadataQueryApi;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.*;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.dal.dataobject.OperationsIntelligenceRecords.*;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.dal.mysql.OperationsIntelligenceStoreMapper;
@@ -33,6 +35,7 @@ public class OperationsIntelligenceServiceImpl
     private static final Set<String> SUBJECT_TYPES = Set.of(
             "PRINCIPAL", "ORDER", "TICKET", "MERCHANT", "CONTENT", "TASK", "DATASET", "EXTERNAL_SUBJECT");
     private static final Set<String> MODEL_OUTCOMES = Set.of("SUCCEEDED", "FAILED", "PARTIAL");
+    private static final Set<String> CLUE_SOURCE_TRANSPORTS = Set.of("SNAPSHOT_DF", "KAFKA_RI");
     private static final Set<String> CLUE_DECISIONS = Set.of("ACCEPT", "REJECT");
     private static final Set<String> ALERT_SOURCE_TYPES = Set.of("OBSERVATION", "CLUE", "METADATA_TASK", "METRIC");
     private static final Set<String> ALERT_SEVERITIES = Set.of("LOW", "MEDIUM", "HIGH", "CRITICAL");
@@ -41,6 +44,7 @@ public class OperationsIntelligenceServiceImpl
     private final OperationsIntelligenceStoreMapper mapper;
     private final OutboxAppender outboxAppender;
     private final RiskQueryApi riskQueryApi;
+    private final MetadataQueryApi metadataQueryApi;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -70,6 +74,8 @@ public class OperationsIntelligenceServiceImpl
         Outcome outcome = switch (command.getOperation()) {
             case RECORD_OBSERVATION -> recordObservation(tenantId, command, now);
             case RECORD_MODEL_RESULT -> recordModelResult(tenantId, command, now);
+            case RECORD_CLUE_SOURCE_VERSION -> recordClueSourceVersion(tenantId, command, now);
+            case RECORD_CLUE_SOURCE_DELIVERY -> recordClueSourceDelivery(tenantId, command, now);
             case RECORD_CLUE -> recordClue(tenantId, command, now);
             case REVIEW_CLUE -> reviewClue(tenantId, command, now);
             case OPEN_ALERT -> openAlert(tenantId, operationId, command, now);
@@ -102,6 +108,18 @@ public class OperationsIntelligenceServiceImpl
         requireRef(clueId, "clueId", 128);
         Clue row = requireNonNull(mapper.selectClue(tenantId, clueId), "clue not found");
         return view("intelligence_clue", row.getClueId(), row.getVersion(), row.getStatus());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public OperationsIntelligenceResult getClueSourceVersion(String sourceVersionId) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        requireRef(sourceVersionId, "sourceVersionId", 128);
+        ClueSourceVersion row = requireNonNull(mapper.selectClueSourceVersion(tenantId, sourceVersionId),
+                "clue source version not found");
+        String status = Boolean.TRUE.equals(row.getSourceDeleted()) ? "DELETED"
+                : Boolean.TRUE.equals(row.getSourceValid()) ? "VALID" : "INVALID";
+        return view("intelligence_clue_source", row.getSourceVersionId(), row.getBusinessRevision(), status);
     }
 
     @Override
@@ -186,8 +204,151 @@ public class OperationsIntelligenceServiceImpl
                 1L, "RECORDED", payload);
     }
 
+    private Outcome recordClueSourceVersion(Long tenantId, OperationsIntelligenceCommand command,
+                                            LocalDateTime now) {
+        OperationsIntelligenceCommand.ClueSourceVersionDefinition input = requireNonNull(
+                command.getClueSourceVersion(), "clueSourceVersion is required");
+        String id = valueOrUuid(input.getSourceVersionId());
+        requireCode(input.getSourceSystem(), "sourceSystem");
+        requireRef(input.getSourceBizId(), "sourceBizId", 128);
+        require(input.getBusinessRevision() != null && input.getBusinessRevision() > 0
+                        && input.getBusinessRevision() < Integer.MAX_VALUE,
+                "businessRevision must be a positive bounded version");
+        requireCode(input.getIntelligenceTypeCode(), "intelligenceTypeCode");
+        requireCode(input.getSourceCode(), "sourceCode");
+        require(input.getSourcePublishedAt() != null && input.getSourceObservedAt() != null,
+                "sourcePublishedAt and sourceObservedAt are required");
+        require(!input.getSourcePublishedAt().isAfter(input.getSourceObservedAt()),
+                "sourcePublishedAt must not follow sourceObservedAt");
+        require(!input.getSourceObservedAt().isAfter(command.getOccurredAt()),
+                "sourceObservedAt must not follow occurredAt");
+        require(input.getSourceValid() != null && input.getSourceDeleted() != null,
+                "sourceValid and sourceDeleted are required");
+        require(!Boolean.TRUE.equals(input.getSourceDeleted()) || !Boolean.TRUE.equals(input.getSourceValid()),
+                "a deleted source version cannot be valid");
+        requireSha256(input.getTitleSha256(), "titleSha256");
+        requireSha256(input.getSummarySha256(), "summarySha256");
+        requireSha256(input.getClueInfoSha256(), "clueInfoSha256");
+        require(input.getClueInfoItemCount() != null && input.getClueInfoItemCount() >= 0
+                        && input.getClueInfoItemCount() <= 10_000,
+                "clueInfoItemCount must be between 0 and 10000");
+        if (input.getBusinessRevision() == 1L) {
+            require(input.getSupersedesSourceVersionId() == null,
+                    "the first source business revision cannot supersede another version");
+        } else {
+            requireRef(input.getSupersedesSourceVersionId(), "supersedesSourceVersionId", 128);
+            ClueSourceVersion previous = requireNonNull(mapper.selectClueSourceVersion(
+                    tenantId, input.getSupersedesSourceVersionId()), "superseded clue source version not found");
+            require(previous.getSourceSystem().equals(input.getSourceSystem())
+                            && previous.getSourceBizId().equals(input.getSourceBizId()),
+                    "superseded source version belongs to a different business clue");
+            require(previous.getBusinessRevision() + 1 == input.getBusinessRevision(),
+                    "source business revisions must be contiguous");
+            require(!Boolean.TRUE.equals(previous.getSourceDeleted()),
+                    "a deleted source business clue cannot publish another version");
+            require(!input.getSourceObservedAt().isBefore(previous.getSourceObservedAt().toInstant(ZoneOffset.UTC)),
+                    "sourceObservedAt must not move backwards");
+        }
+        Map<String, Object> semanticPayload = payload("source_system", input.getSourceSystem(),
+                "source_biz_id", input.getSourceBizId(), "business_revision", input.getBusinessRevision(),
+                "intelligence_type_code", input.getIntelligenceTypeCode(), "source_code", input.getSourceCode(),
+                "source_published_at", input.getSourcePublishedAt().toString(),
+                "source_valid", input.getSourceValid(), "source_deleted", input.getSourceDeleted(),
+                "title_sha256", input.getTitleSha256(), "summary_sha256", input.getSummarySha256(),
+                "clue_info_sha256", input.getClueInfoSha256(),
+                "clue_info_item_count", input.getClueInfoItemCount());
+        String semanticSha256 = DigestUtil.sha256Hex(JsonUtils.toJsonString(semanticPayload));
+        ClueSourceVersion row = new ClueSourceVersion().setSourceVersionId(id).setTenantId(tenantId)
+                .setSourceSystem(input.getSourceSystem()).setSourceBizId(input.getSourceBizId())
+                .setBusinessRevision(input.getBusinessRevision())
+                .setSupersedesSourceVersionId(input.getSupersedesSourceVersionId())
+                .setIntelligenceTypeCode(input.getIntelligenceTypeCode()).setSourceCode(input.getSourceCode())
+                .setSourcePublishedAt(at(input.getSourcePublishedAt())).setSourceValid(input.getSourceValid())
+                .setSourceDeleted(input.getSourceDeleted()).setTitleSha256(input.getTitleSha256())
+                .setSummarySha256(input.getSummarySha256()).setClueInfoSha256(input.getClueInfoSha256())
+                .setClueInfoItemCount(input.getClueInfoItemCount()).setSemanticPayloadSha256(semanticSha256)
+                .setSourceObservedAt(at(input.getSourceObservedAt())).setCreatedAt(now);
+        require(mapper.insertClueSourceVersion(row) == 1, "failed to persist immutable clue source version");
+        Map<String, Object> eventPayload = payload("source_version_id", id,
+                "source_system", row.getSourceSystem(), "source_biz_id", row.getSourceBizId(),
+                "business_revision", row.getBusinessRevision(),
+                "supersedes_source_version_id", row.getSupersedesSourceVersionId(),
+                "intelligence_type_code", row.getIntelligenceTypeCode(), "source_code", row.getSourceCode(),
+                "source_published_at", input.getSourcePublishedAt().toString(),
+                "source_valid", row.getSourceValid(), "source_deleted", row.getSourceDeleted(),
+                "title_sha256", row.getTitleSha256(), "summary_sha256", row.getSummarySha256(),
+                "clue_info_sha256", row.getClueInfoSha256(), "clue_info_item_count", row.getClueInfoItemCount(),
+                "semantic_payload_sha256", row.getSemanticPayloadSha256(),
+                "source_observed_at", input.getSourceObservedAt().toString());
+        String status = Boolean.TRUE.equals(row.getSourceDeleted()) ? "DELETED"
+                : Boolean.TRUE.equals(row.getSourceValid()) ? "VALID" : "INVALID";
+        return new Outcome("operations_intelligence.clue_source.version_recorded", 1,
+                "intelligence_clue_source", id, row.getBusinessRevision(), status, eventPayload);
+    }
+
+    private Outcome recordClueSourceDelivery(Long tenantId, OperationsIntelligenceCommand command,
+                                             LocalDateTime now) {
+        OperationsIntelligenceCommand.ClueSourceDeliveryDefinition input = requireNonNull(
+                command.getClueSourceDelivery(), "clueSourceDelivery is required");
+        String id = valueOrUuid(input.getDeliveryId());
+        requireRef(input.getSourceVersionId(), "sourceVersionId", 128);
+        ClueSourceVersion source = requireNonNull(mapper.selectClueSourceVersion(tenantId, input.getSourceVersionId()),
+                "clue source version not found");
+        requireRef(input.getSourceDatasetId(), "sourceDatasetId", 128);
+        require(input.getSourceDatasetVersion() != null && input.getSourceDatasetVersion() > 0,
+                "sourceDatasetVersion must be positive");
+        requireRef(input.getDeclaredSourceAsset(), "declaredSourceAsset", 128);
+        requireRef(input.getPhysicalSourceAsset(), "physicalSourceAsset", 128);
+        require(CLUE_SOURCE_TRANSPORTS.contains(input.getSourceTransport()), "unsupported sourceTransport");
+        requireRef(input.getSourceRecordKey(), "sourceRecordKey", 128);
+        requireRef(input.getSourceRecordVersion(), "sourceRecordVersion", 128);
+        requireCode(input.getPayloadSchemaVersion(), "payloadSchemaVersion");
+        requireSha256(input.getSourceSchemaSha256(), "sourceSchemaSha256");
+        requireEvidence(input.getSourceEvidenceRef(), "sourceEvidenceRef");
+        requireSha256(input.getSourceEvidenceSha256(), "sourceEvidenceSha256");
+        require(input.getSourceObservedAt() != null && !input.getSourceObservedAt().isAfter(command.getOccurredAt()),
+                "sourceObservedAt must not follow occurredAt");
+        require(!input.getSourceObservedAt().isBefore(source.getSourceObservedAt().toInstant(ZoneOffset.UTC)),
+                "delivery sourceObservedAt must not precede the semantic source observation");
+        MetadataDatasetReference dataset = metadataQueryApi.validateDatasetVersion(input.getSourceDatasetId(),
+                input.getSourceDatasetVersion(), input.getPhysicalSourceAsset(), input.getSourceSchemaSha256());
+        validateYShoppingClueDelivery(source, dataset, input);
+        ClueSourceDelivery row = new ClueSourceDelivery().setDeliveryId(id).setTenantId(tenantId)
+                .setSourceVersionId(source.getSourceVersionId()).setSourceDatasetId(dataset.getDatasetId())
+                .setSourceDatasetVersion(dataset.getDatasetVersion())
+                .setDeclaredSourceAsset(input.getDeclaredSourceAsset())
+                .setPhysicalSourceAsset(dataset.getQualifiedName()).setSourceTransport(input.getSourceTransport())
+                .setSourceRecordKey(input.getSourceRecordKey()).setSourceRecordVersion(input.getSourceRecordVersion())
+                .setPayloadSchemaVersion(input.getPayloadSchemaVersion())
+                .setSourceSchemaSha256(dataset.getSchemaSha256()).setSourceEvidenceRef(input.getSourceEvidenceRef())
+                .setSourceEvidenceSha256(input.getSourceEvidenceSha256())
+                .setSourceObservedAt(at(input.getSourceObservedAt())).setCreatedAt(now);
+        require(mapper.insertClueSourceDelivery(row) == 1, "failed to persist immutable clue source delivery");
+        Map<String, Object> eventPayload = payload("delivery_id", id, "source_version_id", row.getSourceVersionId(),
+                "source_dataset_id", row.getSourceDatasetId(), "source_dataset_version", row.getSourceDatasetVersion(),
+                "declared_source_asset", row.getDeclaredSourceAsset(),
+                "physical_source_asset", row.getPhysicalSourceAsset(), "source_transport", row.getSourceTransport(),
+                "source_record_key", row.getSourceRecordKey(), "source_record_version", row.getSourceRecordVersion(),
+                "payload_schema_version", row.getPayloadSchemaVersion(),
+                "source_schema_sha256", row.getSourceSchemaSha256(),
+                "source_evidence_ref", row.getSourceEvidenceRef(),
+                "source_evidence_sha256", row.getSourceEvidenceSha256(),
+                "source_observed_at", input.getSourceObservedAt().toString());
+        return new Outcome("operations_intelligence.clue_source.delivery_recorded", 1,
+                "intelligence_clue_source_delivery", id, 1L, "RECORDED", eventPayload);
+    }
+
     private Outcome recordClue(Long tenantId, OperationsIntelligenceCommand command, LocalDateTime now) {
         OperationsIntelligenceCommand.ClueDefinition input = requireNonNull(command.getClue(), "clue is required");
+        requireRef(input.getSourceVersionId(), "sourceVersionId", 128);
+        ClueSourceVersion source = requireNonNull(mapper.selectClueSourceVersion(tenantId, input.getSourceVersionId()),
+                "clue source version not found");
+        require(Boolean.TRUE.equals(source.getSourceValid()) && !Boolean.TRUE.equals(source.getSourceDeleted()),
+                "only a valid non-deleted source version can create a canonical clue");
+        require(mapper.countClueSourceDeliveries(tenantId, source.getSourceVersionId()) > 0,
+                "clue source version requires at least one governed physical delivery");
+        require(mapper.selectClueBySourceVersion(tenantId, source.getSourceVersionId()) == null,
+                "clue source version already has a canonical clue");
         requireRef(input.getObservationId(), "observationId", 128);
         requireNonNull(mapper.selectObservation(tenantId, input.getObservationId()), "observation not found");
         if (input.getModelResultId() != null) {
@@ -197,25 +358,51 @@ public class OperationsIntelligenceServiceImpl
                     "model result belongs to a different observation");
         }
         requireCode(input.getClueType(), "clueType");
-        requireCode(input.getSourceCode(), "sourceCode");
-        require(input.getSourcePublishedAt() != null && !input.getSourcePublishedAt().isAfter(command.getOccurredAt()),
-                "sourcePublishedAt must not follow occurredAt");
+        if (input.getSourceCode() != null) require(input.getSourceCode().equals(source.getSourceCode()),
+                "sourceCode must match the exact source business version");
+        if (input.getSourcePublishedAt() != null) require(input.getSourcePublishedAt()
+                        .equals(source.getSourcePublishedAt().toInstant(ZoneOffset.UTC)),
+                "sourcePublishedAt must match the exact source business version");
         requireEvidence(input.getEvidenceRef(), "evidenceRef");
         requireSha256(input.getEvidenceSha256(), "evidenceSha256");
         String id = valueOrUuid(input.getClueId());
-        Clue row = new Clue().setClueId(id).setTenantId(tenantId).setObservationId(input.getObservationId())
+        Clue row = new Clue().setClueId(id).setTenantId(tenantId).setSourceVersionId(source.getSourceVersionId())
+                .setObservationId(input.getObservationId())
                 .setModelResultId(input.getModelResultId()).setClueType(input.getClueType())
-                .setSourceCode(input.getSourceCode()).setSourcePublishedAt(at(input.getSourcePublishedAt()))
+                .setSourceCode(source.getSourceCode()).setSourcePublishedAt(source.getSourcePublishedAt())
                 .setEvidenceRef(input.getEvidenceRef()).setEvidenceSha256(input.getEvidenceSha256())
                 .setStatus("OBSERVED").setVersion(1L).setCreatedAt(now).setUpdatedAt(now);
         require(mapper.insertClue(row) == 1, "failed to persist intelligence clue");
-        Map<String, Object> payload = payload("clue_id", id, "observation_id", row.getObservationId(),
+        Map<String, Object> payload = payload("clue_id", id, "source_version_id", row.getSourceVersionId(),
+                "source_system", source.getSourceSystem(), "source_biz_id", source.getSourceBizId(),
+                "source_business_revision", source.getBusinessRevision(),
+                "source_semantic_payload_sha256", source.getSemanticPayloadSha256(),
+                "observation_id", row.getObservationId(),
                 "model_result_id", row.getModelResultId(), "clue_type", row.getClueType(),
-                "source_code", row.getSourceCode(), "source_published_at", input.getSourcePublishedAt().toString(),
+                "source_code", row.getSourceCode(),
+                "source_published_at", source.getSourcePublishedAt().toInstant(ZoneOffset.UTC).toString(),
                 "evidence_ref", row.getEvidenceRef(), "evidence_sha256", row.getEvidenceSha256(),
                 "current_status", row.getStatus());
-        return new Outcome("operations_intelligence.clue.recorded", 1, "intelligence_clue", id,
+        return new Outcome("operations_intelligence.clue.recorded", 2, "intelligence_clue", id,
                 1L, row.getStatus(), payload);
+    }
+
+    private static void validateYShoppingClueDelivery(ClueSourceVersion source,
+                                                       MetadataDatasetReference dataset,
+                                                       OperationsIntelligenceCommand.ClueSourceDeliveryDefinition input) {
+        if (!"YSHOPPING".equals(source.getSourceSystem())) return;
+        if ("SNAPSHOT_DF".equals(input.getSourceTransport())) {
+            require("ods_intelligence_clue_df".equals(input.getDeclaredSourceAsset()),
+                    "Y-Shopping snapshot must retain the advertised singular source asset");
+            require("ods_intelligence_clues_df".equals(dataset.getQualifiedName()),
+                    "Y-Shopping snapshot physical dataset must be ods_intelligence_clues_df");
+            require("TABLE".equals(dataset.getDatasetType()), "Y-Shopping snapshot metadata must be a TABLE");
+        } else {
+            require("ods_intelligence_clue_ri".equals(input.getDeclaredSourceAsset())
+                            && "ods_intelligence_clue_ri".equals(dataset.getQualifiedName()),
+                    "Y-Shopping realtime clue delivery must bind the exact clue_ri stream");
+            require("STREAM".equals(dataset.getDatasetType()), "Y-Shopping realtime metadata must be a STREAM");
+        }
     }
 
     private Outcome reviewClue(Long tenantId, OperationsIntelligenceCommand command, LocalDateTime now) {

@@ -90,18 +90,23 @@ class OrderCancellationSagaCommandServiceImplTest {
                 .operation(OrderCancellationSagaOperation.START).idempotencyKey("saga-run-1-start")
                 .runId("saga-run-1").orderId("70000000-0000-4000-8000-000000000010")
                 .reason("buyer cancelled before payment")
+                .responsibilityParty("MERCHANT").responsibilityCode("MERCHANT_STOCKOUT")
                 .correlationId("70000000-0000-4000-8000-000000000001")
                 .occurredAt(Instant.parse("2026-07-12T16:00:00Z")).build());
 
         assertThat(result.getStatus()).isEqualTo("REQUESTED");
         assertThat(result.getExpectedReservationCount()).isEqualTo(1);
         assertThat(storedSaga.get().getOrderStatusAtRequest()).isEqualTo("INVENTORY_RESERVED");
+        assertThat(storedSaga.get().getResponsibilityParty()).isEqualTo("MERCHANT");
+        assertThat(storedSaga.get().getResponsibilityCode()).isEqualTo("MERCHANT_STOCKOUT");
         assertThat(storedItems).singleElement().satisfies(item -> {
             assertThat(item.getStatus()).isEqualTo("PENDING");
             assertThat(item.getReleaseIdempotencyKey()).contains(result.getSagaId());
         });
         verify(orderApi).execute(argThat(command -> command.getOperation() == OrderOperation.REQUEST_CANCELLATION
                 && command.getExpectedVersion() == 2L
+                && "MERCHANT".equals(command.getResponsibilityParty())
+                && "MERCHANT_STOCKOUT".equals(command.getResponsibilityCode())
                 && command.getCancellationSagaId().equals(result.getSagaId())));
         verify(checkpoint).appendInitial(same(storedSaga.get()), any());
     }

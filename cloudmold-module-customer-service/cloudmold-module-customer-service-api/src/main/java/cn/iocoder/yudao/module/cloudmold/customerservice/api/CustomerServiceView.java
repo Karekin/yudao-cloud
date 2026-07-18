@@ -19,6 +19,7 @@ public class CustomerServiceView {
     private String linkId;
     private String messageId;
     private String attachmentId;
+    private String feedbackId;
     private String reviewId;
     private String claimId;
     private String claimCode;

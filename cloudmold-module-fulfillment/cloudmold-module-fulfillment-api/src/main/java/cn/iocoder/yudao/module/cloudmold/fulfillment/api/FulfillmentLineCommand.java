@@ -14,4 +14,5 @@ public class FulfillmentLineCommand {
     private String canonicalSkuId;
     private BigDecimal quantity;
     private String reservationId;
+    private Long variableFulfillmentCostMinor;
 }

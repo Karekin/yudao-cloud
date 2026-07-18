@@ -91,6 +91,7 @@ public class OrderCancellationSagaCommandServiceImpl
         require(command.getExpectedVersion() == null, "START does not accept expectedVersion");
         requireText(command.getOrderId(), "orderId", 36);
         requireText(command.getReason(), "reason", 256);
+        requireResponsibility(command.getResponsibilityParty(), command.getResponsibilityCode());
         OrderHeaderDO order = orderMapper.selectForUpdate(tenantId, command.getOrderId());
         require(order != null, "canonical order does not exist");
         String mode = Objects.requireNonNullElse(command.getCancellationMode(), "UNPAID_RESERVED");
@@ -160,6 +161,8 @@ public class OrderCancellationSagaCommandServiceImpl
                 .setExpectedFulfillmentCount(fulfillment == null ? 0 : 1).setCancelledFulfillmentCount(0)
                 .setAttemptCount(0).setMaxAttempts(DEFAULT_MAX_ATTEMPTS).setVersion(1L)
                 .setReason(command.getReason()).setCorrelationId(command.getCorrelationId())
+                .setResponsibilityParty(command.getResponsibilityParty())
+                .setResponsibilityCode(command.getResponsibilityCode())
                 .setCausationId(command.getCausationId()).setOccurredAt(occurredAt)
                 .setFinalizeOccurredAt(LocalDateTime.ofInstant(command.getOccurredAt().plusSeconds(
                         orderItems.size() + ("PAID_UNSHIPPED".equals(mode) ? 4L : 2L)), ZoneOffset.UTC))
@@ -191,6 +194,8 @@ public class OrderCancellationSagaCommandServiceImpl
                 .idempotencyKey("cancel-saga:" + sagaId + ":request")
                 .runId(command.getRunId()).orderId(order.getOrderId()).expectedVersion(order.getVersion())
                 .cancellationSagaId(sagaId).reason(command.getReason())
+                .responsibilityParty(command.getResponsibilityParty())
+                .responsibilityCode(command.getResponsibilityCode())
                 .cancellationMode(mode).cancellationStepOrdinal(0)
                 .fulfillmentId(fulfillment == null ? null : fulfillment.getFulfillmentId())
                 .correlationId(command.getCorrelationId()).causationId(command.getCausationId())
@@ -259,7 +264,10 @@ public class OrderCancellationSagaCommandServiceImpl
                 .orderId(saga.getOrderId()).orderNo(saga.getOrderNo())
                 .orderStatusAtRequest(saga.getOrderStatusAtRequest())
                 .orderVersionAtRequest(saga.getOrderVersionAtRequest()).status(saga.getStatus())
-                .activeStep(saga.getActiveStep()).expectedReservationCount(saga.getExpectedReservationCount())
+                .activeStep(saga.getActiveStep())
+                .responsibilityParty(saga.getResponsibilityParty())
+                .responsibilityCode(saga.getResponsibilityCode())
+                .expectedReservationCount(saga.getExpectedReservationCount())
                 .releasedReservationCount(saga.getReleasedReservationCount()).attemptCount(saga.getAttemptCount())
                 .maxAttempts(saga.getMaxAttempts()).aggregateVersion(saga.getVersion()).reason(saga.getReason())
                 .lastErrorCode(saga.getLastErrorCode()).lastErrorMessage(saga.getLastErrorMessage())
@@ -287,6 +295,8 @@ public class OrderCancellationSagaCommandServiceImpl
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("tenant_id", tenantId); value.put("operation", command.getOperation());
         value.put("cancellation_mode", command.getCancellationMode());
+        value.put("responsibility_party", command.getResponsibilityParty());
+        value.put("responsibility_code", command.getResponsibilityCode());
         value.put("run_id", command.getRunId()); value.put("saga_id", command.getSagaId());
         value.put("expected_version", command.getExpectedVersion()); value.put("order_id", command.getOrderId());
         value.put("reason", command.getReason()); value.put("correlation_id", command.getCorrelationId());
@@ -307,6 +317,13 @@ public class OrderCancellationSagaCommandServiceImpl
 
     private static void requireText(String value, String field, int maxLength) {
         require(value != null && !value.isBlank() && value.length() <= maxLength, field + " is required");
+    }
+
+    private static void requireResponsibility(String party, String code) {
+        require(OrderCancellationResponsibilityParty.isSupported(party),
+                "responsibilityParty is unsupported");
+        require(OrderCancellationResponsibilityCode.matches(party, code),
+                "responsibilityCode does not belong to responsibilityParty");
     }
 
     private static void require(boolean condition, String message) {

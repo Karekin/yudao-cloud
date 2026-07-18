@@ -17,6 +17,8 @@ public class OperationsIntelligenceCommand {
     private Instant occurredAt;
     private ObservationDefinition observation;
     private ModelResultDefinition modelResult;
+    private ClueSourceVersionDefinition clueSourceVersion;
+    private ClueSourceDeliveryDefinition clueSourceDelivery;
     private ClueDefinition clue;
     private AlertDefinition alert;
 
@@ -53,6 +55,7 @@ public class OperationsIntelligenceCommand {
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
     public static class ClueDefinition {
         private String clueId;
+        private String sourceVersionId;
         private String observationId;
         private String modelResultId;
         private String clueType;
@@ -64,6 +67,43 @@ public class OperationsIntelligenceCommand {
         private String reviewerPrincipalId;
         private String reviewDecision;
         private String reasonCode;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class ClueSourceVersionDefinition {
+        private String sourceVersionId;
+        private String sourceSystem;
+        private String sourceBizId;
+        private Long businessRevision;
+        private String supersedesSourceVersionId;
+        private String intelligenceTypeCode;
+        private String sourceCode;
+        private Instant sourcePublishedAt;
+        private Boolean sourceValid;
+        private Boolean sourceDeleted;
+        private String titleSha256;
+        private String summarySha256;
+        private String clueInfoSha256;
+        private Integer clueInfoItemCount;
+        private Instant sourceObservedAt;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class ClueSourceDeliveryDefinition {
+        private String deliveryId;
+        private String sourceVersionId;
+        private String sourceDatasetId;
+        private Long sourceDatasetVersion;
+        private String declaredSourceAsset;
+        private String physicalSourceAsset;
+        private String sourceTransport;
+        private String sourceRecordKey;
+        private String sourceRecordVersion;
+        private String payloadSchemaVersion;
+        private String sourceSchemaSha256;
+        private String sourceEvidenceRef;
+        private String sourceEvidenceSha256;
+        private Instant sourceObservedAt;
     }
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor

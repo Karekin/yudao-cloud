@@ -92,6 +92,47 @@ class InventoryV3CommandServiceImplTest {
     }
 
     @Test
+    void shouldEmitSchema5WhenProcurementCostEvidenceIsComplete() {
+        prepareNewOperation("RECEIVE");
+        prepareBalanceWrite(balance(null, "SELLABLE", "QUALIFIED", "0.000000", "0.000000", 0L));
+        InventoryV3Command command = command(InventoryV3Operation.RECEIVE,
+                "10.000000", null, null, "SELLABLE", "QUALIFIED")
+                .setUnitCostAmountMinor(12000L).setMovementCostAmountMinor(120000L)
+                .setCurrencyCode("cny").setCostSourceSystem("cloudmold-procurement")
+                .setCostSourceRef("receipt-line:PRL-001").setCostPolicyVersion("FIFO-V1");
+
+        service.execute(command);
+
+        verify(outboxAppender).append(argThat(event -> event.getSchemaVersion() == 5
+                && event.getPayload().get("unit_cost_amount_minor").equals(12000L)
+                && event.getPayload().get("movement_cost_amount_minor").equals(120000L)
+                && event.getPayload().get("currency_code").equals("CNY")
+                && event.getPayload().get("cost_source_ref").equals("receipt-line:PRL-001")
+                && event.getIdempotencyKey().endsWith(":event:v5")));
+    }
+
+    @Test
+    void shouldRejectPartialOrInconsistentCostEvidenceBeforeBalanceMutation() {
+        InventoryV3Command partial = command(InventoryV3Operation.RECEIVE,
+                "2.000000", null, null, "SELLABLE", "QUALIFIED")
+                .setUnitCostAmountMinor(100L);
+        assertThatThrownBy(() -> service.execute(partial))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("movementCostAmountMinor is required and cannot be negative");
+
+        InventoryV3Command inconsistent = command(InventoryV3Operation.RECEIVE,
+                "2.000000", null, null, "SELLABLE", "QUALIFIED")
+                .setUnitCostAmountMinor(100L).setMovementCostAmountMinor(199L).setCurrencyCode("CNY")
+                .setCostSourceSystem("cloudmold-procurement").setCostSourceRef("receipt-line:bad")
+                .setCostPolicyVersion("FIFO-V1");
+        assertThatThrownBy(() -> service.execute(inconsistent))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("movementCostAmountMinor must equal quantity multiplied by unitCostAmountMinor");
+        verifyNoInteractions(balanceMapper, reservationMapper, ledgerTransactionMapper, ledgerEntryMapper,
+                outboxAppender);
+    }
+
+    @Test
     void shouldFailClosedBeforeWritingForInactiveMerchantOrLocation() {
         prepareNewOperation("RECEIVE");
         doThrow(new IllegalArgumentException("merchant is not ACTIVE"))

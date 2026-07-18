@@ -12,7 +12,8 @@ public interface OrderHeaderMapper extends BaseMapperX<OrderHeaderDO> {
             SELECT order_id,tenant_id,order_no,run_id,buyer_id,status,total_quantity,product_amount_minor,
                    shipping_amount_minor,discount_amount_minor,payable_amount_minor,currency_code,
                    payment_id,fulfillment_id,shipment_id,refund_id,cancellation_saga_id,
-                   pre_cancellation_status,version,created_at,updated_at
+                   pre_cancellation_status,cancellation_responsibility_party,
+                   cancellation_responsibility_code,version,created_at,updated_at
             FROM cloudmold_order_header
             WHERE tenant_id=#{tenantId} AND order_id=#{orderId}
             FOR UPDATE
@@ -23,7 +24,8 @@ public interface OrderHeaderMapper extends BaseMapperX<OrderHeaderDO> {
             SELECT order_id,tenant_id,order_no,run_id,buyer_id,status,total_quantity,product_amount_minor,
                    shipping_amount_minor,discount_amount_minor,payable_amount_minor,currency_code,
                    payment_id,fulfillment_id,shipment_id,refund_id,cancellation_saga_id,
-                   pre_cancellation_status,version,created_at,updated_at
+                   pre_cancellation_status,cancellation_responsibility_party,
+                   cancellation_responsibility_code,version,created_at,updated_at
             FROM cloudmold_order_header
             WHERE tenant_id=#{tenantId} AND order_id=#{orderId}
             """)
@@ -38,6 +40,8 @@ public interface OrderHeaderMapper extends BaseMapperX<OrderHeaderDO> {
                 refund_id=COALESCE(#{refundId},refund_id),
                 cancellation_saga_id=COALESCE(#{cancellationSagaId},cancellation_saga_id),
                 pre_cancellation_status=COALESCE(#{preCancellationStatus},pre_cancellation_status),
+                cancellation_responsibility_party=COALESCE(#{responsibilityParty},cancellation_responsibility_party),
+                cancellation_responsibility_code=COALESCE(#{responsibilityCode},cancellation_responsibility_code),
                 updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND order_id=#{orderId}
               AND version=#{expectedVersion} AND status=#{expectedStatus}
@@ -48,5 +52,7 @@ public interface OrderHeaderMapper extends BaseMapperX<OrderHeaderDO> {
                    @Param("fulfillmentId") String fulfillmentId, @Param("shipmentId") String shipmentId,
                    @Param("refundId") String refundId, @Param("cancellationSagaId") String cancellationSagaId,
                    @Param("preCancellationStatus") String preCancellationStatus,
+                   @Param("responsibilityParty") String responsibilityParty,
+                   @Param("responsibilityCode") String responsibilityCode,
                    @Param("now") LocalDateTime now);
 }

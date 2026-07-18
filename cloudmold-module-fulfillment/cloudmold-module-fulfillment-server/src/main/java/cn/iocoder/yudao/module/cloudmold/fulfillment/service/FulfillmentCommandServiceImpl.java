@@ -88,14 +88,21 @@ public class FulfillmentCommandServiceImpl implements FulfillmentCommandApi {
         FulfillmentOrderDO fulfillment = new FulfillmentOrderDO().setFulfillmentId(fulfillmentId)
                 .setTenantId(tenantId).setFulfillmentNo(fulfillmentNo).setRunId(command.getRunId())
                 .setOrderId(order.getOrderId()).setOrderNo(order.getOrderNo()).setSellerId(command.getSellerId())
-                .setWarehouseId(command.getWarehouseId()).setStatus("CREATED").setVersion(1L)
-                .setCreatedAt(now).setUpdatedAt(now);
+                .setWarehouseId(command.getWarehouseId())
+                .setDeliveryPromiseVersionRef(command.getDeliveryPromiseVersionRef())
+                .setPromisedDeliveryAt(command.getPromisedDeliveryAt() == null ? null
+                        : LocalDateTime.ofInstant(command.getPromisedDeliveryAt(), ZoneOffset.UTC))
+                .setPromiseFrozenAt(command.getPromisedDeliveryAt() == null ? null
+                        : LocalDateTime.ofInstant(command.getOccurredAt(), ZoneOffset.UTC))
+                .setStatus("CREATED").setVersion(1L).setCreatedAt(now).setUpdatedAt(now);
         fulfillmentMapper.insert(fulfillment);
         List<FulfillmentItemDO> items = command.getItems().stream().map(item -> new FulfillmentItemDO()
                 .setFulfillmentItemId(UUID.randomUUID().toString()).setTenantId(tenantId)
                 .setFulfillmentId(fulfillmentId).setOrderItemId(item.getOrderItemId())
                 .setCanonicalSkuId(item.getCanonicalSkuId()).setQuantity(item.getQuantity())
-                .setReservationId(item.getReservationId()).setCreatedAt(now).setUpdatedAt(now)).toList();
+                .setReservationId(item.getReservationId())
+                .setVariableFulfillmentCostMinor(item.getVariableFulfillmentCostMinor())
+                .setCreatedAt(now).setUpdatedAt(now)).toList();
         items.forEach(itemMapper::insert);
         appendHistory(tenantId, operationId, fulfillmentId, 1L, null, "CREATED", command, now);
         appendEvent(tenantId, fulfillment, items, null, null, "CREATED", command);
@@ -209,6 +216,7 @@ public class FulfillmentCommandServiceImpl implements FulfillmentCommandApi {
             value.put("canonical_sku_id", item.getCanonicalSkuId());
             value.put("quantity", item.getQuantity().toPlainString());
             value.put("reservation_id", item.getReservationId());
+            value.put("variable_fulfillment_cost_minor", item.getVariableFulfillmentCostMinor());
             return value;
         }).toList();
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -219,6 +227,11 @@ public class FulfillmentCommandServiceImpl implements FulfillmentCommandApi {
         payload.put("order_no", fulfillment.getOrderNo());
         payload.put("seller_id", fulfillment.getSellerId());
         payload.put("warehouse_id", fulfillment.getWarehouseId());
+        payload.put("delivery_promise_version_ref", fulfillment.getDeliveryPromiseVersionRef());
+        payload.put("promised_delivery_at", fulfillment.getPromisedDeliveryAt() == null
+                ? null : fulfillment.getPromisedDeliveryAt().toInstant(ZoneOffset.UTC).toString());
+        payload.put("promise_frozen_at", fulfillment.getPromiseFrozenAt() == null
+                ? null : fulfillment.getPromiseFrozenAt().toInstant(ZoneOffset.UTC).toString());
         payload.put("previous_status", previous);
         payload.put("current_status", current);
         payload.put("shipment_id", shipment == null ? null : shipment.getShipmentId());
@@ -235,7 +248,7 @@ public class FulfillmentCommandServiceImpl implements FulfillmentCommandApi {
         payload.put("cancellation_saga_id", command.getCancellationSagaId());
         payload.put("step_ordinal", command.getCancellationStepOrdinal());
         outboxAppender.append(AppendDomainEventCommand.builder().eventType("fulfillment.status.changed")
-                .schemaVersion(command.getCancellationSagaId() == null ? 1 : 2)
+                .schemaVersion(resolveSchemaVersion(fulfillment, command))
                 .sourceSystem("cloudmold-fulfillment").tenantId(tenantId)
                 .aggregateType("fulfillment_order").aggregateId(fulfillment.getFulfillmentId())
                 .aggregateVersion(fulfillment.getVersion()).eventSequence((short) 1)
@@ -315,9 +328,18 @@ public class FulfillmentCommandServiceImpl implements FulfillmentCommandApi {
         requireText(command.getOrderId(), "orderId", 36);
         requireText(command.getSellerId(), "sellerId", 128);
         requireText(command.getWarehouseId(), "warehouseId", 128);
+        require((command.getDeliveryPromiseVersionRef() == null) == (command.getPromisedDeliveryAt() == null),
+                "delivery promise version and promisedDeliveryAt must be provided together");
+        if (command.getPromisedDeliveryAt() != null) {
+            requireText(command.getDeliveryPromiseVersionRef(), "deliveryPromiseVersionRef", 64);
+            require(command.getPromisedDeliveryAt().isAfter(command.getOccurredAt()),
+                    "promisedDeliveryAt must be after occurredAt");
+        }
         require(command.getItems() != null && !command.getItems().isEmpty() && command.getItems().size() <= 100,
                 "CREATE requires 1 to 100 items");
         Set<String> orderItemIds = new HashSet<>();
+        boolean anyVariableCost = command.getItems().stream()
+                .anyMatch(item -> item != null && item.getVariableFulfillmentCostMinor() != null);
         for (FulfillmentLineCommand item : command.getItems()) {
             require(item != null, "fulfillment item is required");
             requireText(item.getOrderItemId(), "orderItemId", 36);
@@ -327,6 +349,11 @@ public class FulfillmentCommandServiceImpl implements FulfillmentCommandApi {
             require(item.getQuantity() != null && item.getQuantity().signum() > 0
                             && item.getQuantity().stripTrailingZeros().scale() <= 0,
                     "first slice requires positive whole-piece quantity");
+            if (anyVariableCost || item.getVariableFulfillmentCostMinor() != null) {
+                require(item.getVariableFulfillmentCostMinor() != null
+                                && item.getVariableFulfillmentCostMinor() >= 0,
+                        "variableFulfillmentCostMinor must be nonnegative when profitability inputs are provided");
+            }
         }
     }
 
@@ -336,6 +363,8 @@ public class FulfillmentCommandServiceImpl implements FulfillmentCommandApi {
         value.put("run_id", command.getRunId()); value.put("fulfillment_id", command.getFulfillmentId());
         value.put("expected_version", command.getExpectedVersion()); value.put("order_id", command.getOrderId());
         value.put("seller_id", command.getSellerId()); value.put("warehouse_id", command.getWarehouseId());
+        value.put("delivery_promise_version_ref", command.getDeliveryPromiseVersionRef());
+        value.put("promised_delivery_at", command.getPromisedDeliveryAt());
         value.put("items", command.getItems()); value.put("carrier_code", command.getCarrierCode());
         value.put("waybill_no", command.getWaybillNo()); value.put("reason", command.getReason());
         value.put("cancellation_saga_id", command.getCancellationSagaId());
@@ -360,4 +389,11 @@ public class FulfillmentCommandServiceImpl implements FulfillmentCommandApi {
     }
 
     private record Transition(String expectedStatus, String nextStatus) {}
+
+    private static int resolveSchemaVersion(FulfillmentOrderDO fulfillment, FulfillmentCommand command) {
+        if (command.getCancellationSagaId() != null) {
+            return 2;
+        }
+        return fulfillment.getPromisedDeliveryAt() == null ? 1 : 3;
+    }
 }

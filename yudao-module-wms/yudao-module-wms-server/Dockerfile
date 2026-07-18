@@ -6,7 +6,7 @@ FROM eclipse-temurin:21-jre
 RUN mkdir -p /yudao-module-wms-server
 WORKDIR /yudao-module-wms-server
 ## 将后端项目的 Jar 文件，复制到镜像中
-COPY ./target/yudao-module-wms-server.jar app.jar
+COPY ./target/yudao-module-wms-server-exec.jar app.jar
 
 ## 设置 TZ 时区
 ## 设置 JAVA_OPTS 环境变量，可通过 docker run -e "JAVA_OPTS=" 进行覆盖

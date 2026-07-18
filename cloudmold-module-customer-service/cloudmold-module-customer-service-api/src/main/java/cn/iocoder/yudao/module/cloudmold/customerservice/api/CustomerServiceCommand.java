@@ -21,6 +21,10 @@ public class CustomerServiceCommand {
     private String channelCode;
     private String priority;
     private String categoryCode;
+    private String slaPolicyCode;
+    private Integer slaPolicyVersion;
+    private Instant resolutionDeadlineAt;
+    private Integer fcrWindowHours;
     private String assignedAgentPrincipalId;
     private String referenceSourceSystem;
     private String referenceType;
@@ -36,6 +40,9 @@ public class CustomerServiceCommand {
     private String contentSha256;
     private Long sizeBytes;
     private String malwareScanStatus;
+    private String touchpointCode;
+    private String sentimentCode;
+    private String commentToken;
     private String reviewerPrincipalId;
     private Integer scoreBasisPoints;
     private String outcomeCode;

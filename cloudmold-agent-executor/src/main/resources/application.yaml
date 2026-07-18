@@ -1,0 +1,56 @@
+spring:
+  application:
+    name: cloudmold-agent-executor
+  autoconfigure:
+    exclude:
+      - cn.iocoder.yudao.framework.security.config.YudaoSecurityRpcAutoConfiguration
+      - cn.iocoder.yudao.framework.security.config.YudaoSecurityAutoConfiguration
+      - cn.iocoder.yudao.framework.security.config.YudaoWebSecurityConfigurerAdapter
+      - cn.iocoder.yudao.framework.operatelog.config.YudaoOperateLogConfiguration
+      - cn.iocoder.yudao.framework.operatelog.config.YudaoOperateLogRpcAutoConfiguration
+      - cn.iocoder.yudao.framework.tenant.config.YudaoTenantRpcAutoConfiguration
+      - cn.iocoder.yudao.framework.tenant.config.YudaoTenantAutoConfiguration
+      - cn.iocoder.yudao.framework.datasource.config.YudaoDataSourceAutoConfiguration
+      - cn.iocoder.yudao.framework.mybatis.config.YudaoMybatisAutoConfiguration
+      - cn.iocoder.yudao.framework.translate.config.YudaoTranslateAutoConfiguration
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - cn.iocoder.yudao.framework.apilog.config.YudaoApiLogAutoConfiguration
+      - cn.iocoder.yudao.framework.apilog.config.YudaoApiLogRpcAutoConfiguration
+      - cn.iocoder.yudao.framework.swagger.config.YudaoSwaggerAutoConfiguration
+      - cn.iocoder.yudao.framework.web.config.YudaoWebAutoConfiguration
+      - cn.iocoder.yudao.framework.xss.config.YudaoXssAutoConfiguration
+      - cn.iocoder.yudao.framework.banner.config.YudaoBannerAutoConfiguration
+      - cn.iocoder.yudao.framework.encrypt.config.YudaoApiEncryptAutoConfiguration
+      - cn.iocoder.yudao.framework.redis.config.YudaoRedisAutoConfiguration
+      - cn.iocoder.yudao.framework.redis.config.YudaoCacheAutoConfiguration
+  main:
+    web-application-type: none
+    banner-mode: off
+
+cloudmold:
+  rpc:
+    enabled: true
+    export-enabled: false
+    shared-secret: ${CLOUDMOLD_RPC_SHARED_SECRET:}
+    group: ${CLOUDMOLD_RPC_GROUP:cloudmold-internal}
+    version: ${CLOUDMOLD_RPC_VERSION:1.0.0}
+    timeout-millis: ${CLOUDMOLD_RPC_TIMEOUT_MILLIS:5000}
+    max-clock-skew-seconds: ${CLOUDMOLD_RPC_MAX_CLOCK_SKEW_SECONDS:60}
+
+# Dubbo 3.3 reads dubbo.hessian.allowNonSerializable only as a JVM system
+# property. The governed operator supplies it while legacy DTOs are migrated.
+dubbo:
+  application:
+    name: cloudmold-agent-executor
+    qos-enable: false
+    serialize-check-status: STRICT
+    check-serializable: false
+    auto-trust-serialize-class: true
+  registry:
+    address: ${CLOUDMOLD_DUBBO_REGISTRY:nacos://127.0.0.1:8848}
+    group: ${CLOUDMOLD_DUBBO_REGISTRY_GROUP:CLOUDMOLD_DUBBO}
+    check: true
+  consumer:
+    check: true
+    timeout: ${CLOUDMOLD_RPC_TIMEOUT_MILLIS:5000}
+    retries: 0

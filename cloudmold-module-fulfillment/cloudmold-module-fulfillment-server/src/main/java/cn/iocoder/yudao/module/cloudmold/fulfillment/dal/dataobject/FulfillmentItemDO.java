@@ -19,6 +19,7 @@ public class FulfillmentItemDO {
     private String canonicalSkuId;
     private BigDecimal quantity;
     private String reservationId;
+    private Long variableFulfillmentCostMinor;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -35,6 +35,12 @@ public class RiskView {
     private String caseId;
     private Long caseVersion;
     private String reviewStatus;
+    private String orderRiskCaseId;
+    private String orderId;
+    private String paymentId;
+    private String disputeId;
+    private String disputeStatus;
+    private String lossEntryId;
     private String decisionId;
     private String feedbackId;
 }

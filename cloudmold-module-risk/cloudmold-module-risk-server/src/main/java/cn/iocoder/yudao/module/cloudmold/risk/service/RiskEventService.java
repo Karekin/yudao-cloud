@@ -188,6 +188,61 @@ public class RiskEventService {
                 feedback.getTenantId(), command, occurredAt, payload);
     }
 
+    public void appendOrderRiskCase(OrderRiskCase value, ReviewCase review, RiskCommand command, Instant occurredAt) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("order_risk_case_id", value.getOrderRiskCaseId());
+        payload.put("case_id", value.getCaseId());
+        payload.put("order_id", value.getOrderId());
+        payload.put("payment_id", value.getPaymentId());
+        payload.put("risk_type", value.getRiskType());
+        payload.put("reason_code", value.getReasonCode());
+        payload.put("review_status", review.getStatus());
+        payload.put("occurred_at", occurredAt.toString());
+        append("risk.order_review.linked", "risk_order_case", value.getOrderRiskCaseId(), 1L,
+                value.getTenantId(), command, occurredAt, payload);
+    }
+
+    public void appendPaymentDispute(Long operationId, PaymentDispute value, String previousStatus,
+                                     RiskCommand command, Instant occurredAt, LocalDateTime now) {
+        history(operationId, value.getTenantId(), "PAYMENT_DISPUTE", value.getDisputeId(), value.getVersion(),
+                previousStatus, value.getStatus(), value.getReasonCode(), occurredAt, now);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("dispute_id", value.getDisputeId());
+        payload.put("order_id", value.getOrderId());
+        payload.put("payment_id", value.getPaymentId());
+        payload.put("case_id", value.getCaseId());
+        payload.put("decision_id", value.getDecisionId());
+        payload.put("dispute_type", value.getDisputeType());
+        payload.put("previous_status", previousStatus);
+        payload.put("current_status", value.getStatus());
+        payload.put("reason_code", value.getReasonCode());
+        payload.put("amount_minor", value.getAmountMinor());
+        payload.put("currency_code", value.getCurrencyCode());
+        payload.put("external_ref", value.getExternalRef());
+        payload.put("opened_at", value.getOpenedAt().toInstant(ZoneOffset.UTC).toString());
+        payload.put("resolved_at", value.getResolvedAt() == null ? null
+                : value.getResolvedAt().toInstant(ZoneOffset.UTC).toString());
+        payload.put("occurred_at", occurredAt.toString());
+        append("risk.payment_dispute.status_changed", "risk_payment_dispute", value.getDisputeId(), value.getVersion(),
+                value.getTenantId(), command, occurredAt, payload);
+    }
+
+    public void appendLossEntry(LossEntry value, RiskCommand command, Instant occurredAt) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("loss_entry_id", value.getLossEntryId());
+        payload.put("order_id", value.getOrderId());
+        payload.put("payment_id", value.getPaymentId());
+        payload.put("dispute_id", value.getDisputeId());
+        payload.put("decision_id", value.getDecisionId());
+        payload.put("entry_type", value.getEntryType());
+        payload.put("signed_amount_minor", value.getSignedAmountMinor());
+        payload.put("currency_code", value.getCurrencyCode());
+        payload.put("external_ref", value.getExternalRef());
+        payload.put("occurred_at", occurredAt.toString());
+        append("risk.loss_entry.posted", "risk_loss_entry", value.getLossEntryId(), 1L,
+                value.getTenantId(), command, occurredAt, payload);
+    }
+
     private void history(Long operationId, Long tenantId, String aggregateType, String aggregateId, Long version,
                          String previousStatus, String currentStatus, String reasonCode, Instant occurredAt,
                          LocalDateTime now) {

@@ -24,6 +24,8 @@ class MetadataCommandServiceImplTest {
     private final Map<String, Definition> definitions = new HashMap<>();
     private final Set<String> versions = new HashSet<>();
     private final Set<String> fields = new HashSet<>();
+    private final Map<String, DatasetVersion> datasetVersions = new HashMap<>();
+    private final Map<String, List<FieldVersion>> datasetFields = new HashMap<>();
     private final Map<String, TaskRunObservation> runObservations = new HashMap<>();
     private final Map<String, DqcResult> dqcResults = new HashMap<>();
     private final AtomicLong operationSequence = new AtomicLong();
@@ -71,6 +73,33 @@ class MetadataCommandServiceImplTest {
         TenantContextHolder.setTenantId(2L);
         assertThatThrownBy(() -> service.getDefinition("dataset-orders"))
                 .hasMessage("metadata definition does not exist");
+    }
+
+    @Test
+    void shouldExposeOnlyAnExactTenantScopedDatasetVersionWithoutConnectionSecrets() {
+        service.execute(dataSource("reference-source", "reference-source-def").build());
+        service.execute(dataset("reference-dataset", "reference-dataset-def", "reference-source-def").build());
+
+        MetadataDatasetReference reference = service.validateDatasetVersion(
+                "reference-dataset-def", 1L, "yshopping.reference_dataset_def", hash('c'));
+        assertThat(reference).extracting(MetadataDatasetReference::getDatasetId,
+                        MetadataDatasetReference::getDatasetVersion, MetadataDatasetReference::getDataSourceId,
+                        MetadataDatasetReference::getQualifiedName, MetadataDatasetReference::getSchemaSha256)
+                .containsExactly("reference-dataset-def", 1L, "reference-source-def",
+                        "yshopping.reference_dataset_def", hash('c'));
+        assertThat(reference.getFields()).extracting(MetadataDatasetReference.FieldReference::getFieldCode)
+                .containsExactly("order_id", "amount_minor");
+
+        assertThatThrownBy(() -> service.validateDatasetVersion(
+                "reference-dataset-def", 1L, "yshopping.wrong_table", hash('c')))
+                .hasMessage("metadata dataset qualifiedName mismatch");
+        assertThatThrownBy(() -> service.validateDatasetVersion(
+                "reference-dataset-def", 1L, "yshopping.reference_dataset_def", hash('d')))
+                .hasMessage("metadata dataset schemaSha256 mismatch");
+        TenantContextHolder.setTenantId(2L);
+        assertThatThrownBy(() -> service.validateDatasetVersion(
+                "reference-dataset-def", 1L, "yshopping.reference_dataset_def", hash('c')))
+                .hasMessage("metadata dataset version does not exist in the same tenant");
     }
 
     @Test
@@ -198,12 +227,23 @@ class MetadataCommandServiceImplTest {
         when(mapper.publishDefinition(anyLong(), anyString(), anyString(), anyLong(), anyString(), anyString(), any()))
                 .thenReturn(1);
         when(mapper.insertDataSourceVersion(any())).thenReturn(1);
-        when(mapper.insertDatasetVersion(any())).thenReturn(1);
+        when(mapper.insertDatasetVersion(any())).thenAnswer(invocation -> {
+            DatasetVersion value = invocation.getArgument(0);
+            datasetVersions.put(versionKey(value.getTenantId(), value.getDefinitionId(), value.getDefinitionVersion()), value);
+            return 1;
+        });
+        when(mapper.selectDatasetVersion(anyLong(), anyString(), anyLong())).thenAnswer(invocation ->
+                datasetVersions.get(versionKey(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2))));
         when(mapper.insertFieldVersion(any())).thenAnswer(invocation -> {
             FieldVersion value = invocation.getArgument(0);
             fields.add(fieldKey(value.getTenantId(), value.getDatasetId(), value.getDatasetVersion(), value.getFieldCode()));
+            datasetFields.computeIfAbsent(versionKey(value.getTenantId(), value.getDatasetId(), value.getDatasetVersion()),
+                    ignored -> new ArrayList<>()).add(value);
             return 1;
         });
+        when(mapper.selectDatasetFields(anyLong(), anyString(), anyLong())).thenAnswer(invocation ->
+                datasetFields.getOrDefault(versionKey(invocation.getArgument(0), invocation.getArgument(1),
+                        invocation.getArgument(2)), List.of()));
         when(mapper.countFieldVersion(anyLong(), anyString(), anyLong(), anyString())).thenAnswer(invocation ->
                 fields.contains(fieldKey(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2), invocation.getArgument(3))) ? 1 : 0);
         when(mapper.insertTaskVersion(any())).thenReturn(1);

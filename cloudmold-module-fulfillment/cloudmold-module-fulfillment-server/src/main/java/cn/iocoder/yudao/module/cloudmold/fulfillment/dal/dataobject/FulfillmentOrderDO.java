@@ -19,6 +19,9 @@ public class FulfillmentOrderDO {
     private String orderNo;
     private String sellerId;
     private String warehouseId;
+    private String deliveryPromiseVersionRef;
+    private LocalDateTime promisedDeliveryAt;
+    private LocalDateTime promiseFrozenAt;
     private String status;
     private String cancellationSagaId;
     private String preCancellationStatus;

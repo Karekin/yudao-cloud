@@ -43,6 +43,8 @@ public class OrderCancellationSagaDO {
     private LocalDateTime leaseUntil;
     private Long version;
     private String reason;
+    private String responsibilityParty;
+    private String responsibilityCode;
     private String correlationId;
     private String causationId;
     private LocalDateTime occurredAt;

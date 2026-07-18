@@ -19,6 +19,8 @@ public class OrderStatusHistoryDO {
     private String currentStatus;
     private Long operationId;
     private String reason;
+    private String cancellationResponsibilityParty;
+    private String cancellationResponsibilityCode;
     private LocalDateTime occurredAt;
     private LocalDateTime createdAt;
 }

@@ -3,6 +3,8 @@ package cn.iocoder.yudao.module.cloudmold.promotion.service;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.*;
+import cn.iocoder.yudao.module.cloudmold.order.api.OrderAttributionView;
+import cn.iocoder.yudao.module.cloudmold.order.api.OrderQueryApi;
 import cn.iocoder.yudao.module.cloudmold.promotion.api.*;
 import cn.iocoder.yudao.module.cloudmold.promotion.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.promotion.dal.mysql.*;
@@ -25,9 +27,13 @@ class PromotionServiceImplTest {
     private final CouponEntitlementLedgerMapper ledgerMapper = mock(CouponEntitlementLedgerMapper.class);
     private final AdvertisingPlacementMapper placementMapper = mock(AdvertisingPlacementMapper.class);
     private final AdvertisingInteractionMapper interactionMapper = mock(AdvertisingInteractionMapper.class);
+    private final AdvertisingLedgerEntryMapper advertisingLedgerEntryMapper = mock(AdvertisingLedgerEntryMapper.class);
+    private final PromotionExperimentResultMapper promotionExperimentResultMapper = mock(PromotionExperimentResultMapper.class);
+    private final OrderQueryApi orderQueryApi = mock(OrderQueryApi.class);
     private final OutboxAppender outboxAppender = mock(OutboxAppender.class);
     private final PromotionServiceImpl service = new PromotionServiceImpl(operationMapper, campaignMapper,
-            templateMapper, entitlementMapper, ledgerMapper, placementMapper, interactionMapper, outboxAppender);
+            templateMapper, entitlementMapper, ledgerMapper, placementMapper, interactionMapper,
+            advertisingLedgerEntryMapper, promotionExperimentResultMapper, orderQueryApi, outboxAppender);
 
     @BeforeEach
     void setUp() {
@@ -149,6 +155,133 @@ class PromotionServiceImplTest {
                 .hasMessage("aggregate version conflict");
         verify(campaignMapper, never()).updateStatusCas(anyLong(), anyString(), anyLong(), anyString(), any());
         verifyNoInteractions(outboxAppender);
+    }
+
+    @Test
+    void recordsAdvertisingRevenueLedgerEntryWithCampaignScopedMoneyFact() {
+        prepareNewOperation(PromotionOperation.RECORD_ADVERTISING_LEDGER_ENTRY);
+        LocalDateTime from = LocalDateTime.parse("2026-07-01T00:00:00");
+        LocalDateTime to = LocalDateTime.parse("2026-08-01T00:00:00");
+        when(campaignMapper.selectForUpdate(7L, "campaign-1")).thenReturn(new PromotionCampaignDO()
+                .setCampaignId("campaign-1").setStatus("ACTIVE").setStartsAt(from).setEndsAt(to));
+        when(interactionMapper.selectById(7L, "attribution-1")).thenReturn(new AdvertisingInteractionDO()
+                .setInteractionId("attribution-1").setInteractionType("ATTRIBUTION").setCampaignId("campaign-1")
+                .setPlacementId("placement-1"));
+        when(orderQueryApi.requireAttributedOrder("order-1")).thenReturn(OrderAttributionView.builder()
+                .orderId("order-1").orderNo("CMO1").buyerId("buyer-1").paymentId("pay-1")
+                .status("PAYMENT_CONFIRMED").aggregateVersion(3L).merchantId("merchant-1").build());
+        PromotionCommand command = envelope(PromotionOperation.RECORD_ADVERTISING_LEDGER_ENTRY)
+                .advertisingLedger(PromotionCommand.AdvertisingLedgerDefinition.builder()
+                        .ledgerEntryCode("ad-ledger-001").campaignId("campaign-1").merchantId("merchant-1")
+                        .entryType("REVENUE").chargeModel("SETTLEMENT").revenueType("ADVERTISING")
+                        .sourceInteractionId("attribution-1")
+                        .orderRef("order-1").amountMinor(1900L).currencyCode("cny").build())
+                .build();
+
+        PromotionCommandResult result = service.execute(command);
+
+        assertThat(result.getAggregateType()).isEqualTo("promotion_advertising_ledger_entry");
+        verify(advertisingLedgerEntryMapper).insert(argThat((AdvertisingLedgerEntryDO row) ->
+                row.getCampaignId().equals("campaign-1")
+                        && row.getMerchantId().equals("merchant-1")
+                        && row.getEntryType().equals("REVENUE")
+                        && row.getRevenueType().equals("ADVERTISING")
+                        && row.getAmountMinor().equals(1900L)
+                        && row.getCurrencyCode().equals("CNY")
+                        && row.getOrderRef().equals("order-1")));
+        verify(outboxAppender).append(argThat(event ->
+                event.getEventType().equals("promotion.advertising_ledger.recorded")
+                        && Long.valueOf(1900L).equals(event.getPayload().get("amount_minor"))
+                        && "REVENUE".equals(event.getPayload().get("entry_type"))
+                        && "ADVERTISING".equals(event.getPayload().get("revenue_type"))));
+    }
+
+    @Test
+    void rejectsAdvertisingRevenueWhenMerchantDoesNotOwnAttributedOrder() {
+        prepareNewOperation(PromotionOperation.RECORD_ADVERTISING_LEDGER_ENTRY);
+        when(campaignMapper.selectForUpdate(7L, "campaign-1")).thenReturn(new PromotionCampaignDO()
+                .setCampaignId("campaign-1").setStatus("ACTIVE")
+                .setStartsAt(LocalDateTime.parse("2026-07-01T00:00:00"))
+                .setEndsAt(LocalDateTime.parse("2026-08-01T00:00:00")));
+        when(orderQueryApi.requireAttributedOrder("order-1")).thenReturn(OrderAttributionView.builder()
+                .orderId("order-1").buyerId("buyer-1").paymentId("pay-1")
+                .status("PAYMENT_CONFIRMED").merchantId("merchant-owner").build());
+        PromotionCommand command = envelope(PromotionOperation.RECORD_ADVERTISING_LEDGER_ENTRY)
+                .advertisingLedger(PromotionCommand.AdvertisingLedgerDefinition.builder()
+                        .ledgerEntryCode("ad-ledger-wrong-merchant").campaignId("campaign-1")
+                        .merchantId("merchant-other").entryType("REVENUE").chargeModel("SETTLEMENT")
+                        .revenueType("COMMISSION").orderRef("order-1")
+                        .amountMinor(1900L).currencyCode("CNY").build())
+                .build();
+
+        assertThatThrownBy(() -> service.execute(command)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("REVENUE ledger merchantId does not match canonical order merchant");
+        verify(advertisingLedgerEntryMapper, never()).insert(any(AdvertisingLedgerEntryDO.class));
+        verifyNoInteractions(outboxAppender);
+    }
+
+    @Test
+    void rejectsPromotionExperimentWithoutBaselineContributionProfit() {
+        prepareNewOperation(PromotionOperation.UPSERT_PROMOTION_EXPERIMENT_RESULT);
+        when(campaignMapper.selectForUpdate(7L, "campaign-1")).thenReturn(new PromotionCampaignDO()
+                .setCampaignId("campaign-1").setStatus("ACTIVE")
+                .setStartsAt(LocalDateTime.parse("2026-07-01T00:00:00"))
+                .setEndsAt(LocalDateTime.parse("2026-08-01T00:00:00")));
+        PromotionCommand command = envelope(PromotionOperation.UPSERT_PROMOTION_EXPERIMENT_RESULT)
+                .occurredAt(Instant.parse("2026-07-18T10:00:00Z"))
+                .promotionExperimentResult(PromotionCommand.PromotionExperimentResultDefinition.builder()
+                        .experimentCode("exp-merchant-001").campaignId("campaign-1").merchantId("merchant-1")
+                        .measuredFrom(Instant.parse("2026-07-10T00:00:00Z"))
+                        .measuredTo(Instant.parse("2026-07-17T00:00:00Z"))
+                        .treatmentContributionProfitMinor(18000L)
+                        .incrementalContributionProfitMinor(3200L)
+                        .promotionCostMinor(8000L).currencyCode("CNY").build())
+                .build();
+
+        assertThatThrownBy(() -> service.execute(command)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("baselineContributionProfitMinor must be non-negative");
+        verifyNoInteractions(promotionExperimentResultMapper, outboxAppender);
+    }
+
+    @Test
+    void upsertsPromotionExperimentResultAsVersionedCurrentFact() {
+        prepareNewOperation(PromotionOperation.UPSERT_PROMOTION_EXPERIMENT_RESULT);
+        when(campaignMapper.selectForUpdate(7L, "campaign-1")).thenReturn(new PromotionCampaignDO()
+                .setCampaignId("campaign-1").setStatus("ACTIVE")
+                .setStartsAt(LocalDateTime.parse("2026-07-01T00:00:00"))
+                .setEndsAt(LocalDateTime.parse("2026-08-01T00:00:00")));
+        PromotionCommand command = envelope(PromotionOperation.UPSERT_PROMOTION_EXPERIMENT_RESULT)
+                .occurredAt(Instant.parse("2026-07-18T10:00:00Z"))
+                .promotionExperimentResult(PromotionCommand.PromotionExperimentResultDefinition.builder()
+                        .experimentCode("exp-merchant-001").campaignId("campaign-1").merchantId("merchant-1")
+                        .measuredFrom(Instant.parse("2026-07-10T00:00:00Z"))
+                        .measuredTo(Instant.parse("2026-07-17T00:00:00Z"))
+                        .baselineContributionProfitMinor(12000L)
+                        .treatmentContributionProfitMinor(18000L)
+                        .incrementalContributionProfitMinor(6000L)
+                        .promotionCostMinor(8000L)
+                        .eligiblePopulationCount(1000)
+                        .treatmentPopulationCount(500)
+                        .controlPopulationCount(500)
+                        .currencyCode("CNY")
+                        .methodologyRef("holdout-v1").build())
+                .build();
+
+        PromotionCommandResult result = service.execute(command);
+
+        assertThat(result.getAggregateType()).isEqualTo("promotion_experiment_result");
+        assertThat(result.getAggregateVersion()).isEqualTo(1L);
+        verify(promotionExperimentResultMapper).insert(argThat((PromotionExperimentResultDO row) ->
+                row.getExperimentCode().equals("exp-merchant-001")
+                        && row.getBaselineContributionProfitMinor().equals(12000L)
+                        && row.getIncrementalContributionProfitMinor().equals(6000L)
+                        && row.getPromotionCostMinor().equals(8000L)
+                        && row.getCurrencyCode().equals("CNY")
+                        && row.getVersion().equals(1L)));
+        verify(outboxAppender).append(argThat(event ->
+                event.getEventType().equals("promotion.experiment_result.upserted")
+                        && Long.valueOf(12000L).equals(event.getPayload().get("baseline_contribution_profit_minor"))
+                        && Long.valueOf(6000L).equals(event.getPayload().get("incremental_contribution_profit_minor"))));
     }
 
     private void prepareNewOperation(PromotionOperation operation) {

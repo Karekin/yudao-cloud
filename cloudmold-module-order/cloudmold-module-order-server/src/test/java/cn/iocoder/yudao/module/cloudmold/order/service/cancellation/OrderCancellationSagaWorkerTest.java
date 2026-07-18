@@ -126,6 +126,7 @@ class OrderCancellationSagaWorkerTest {
                 .setOrderVersionAtRequest(2L).setStatus("RELEASING_RESERVATIONS")
                 .setActiveStep("RELEASE_RESERVATIONS").setExpectedReservationCount(1)
                 .setReleasedReservationCount(released).setAttemptCount(1).setMaxAttempts(8).setVersion(2L)
+                .setResponsibilityParty("MERCHANT").setResponsibilityCode("MERCHANT_STOCKOUT")
                 .setReason("buyer cancel").setCorrelationId("70000000-0000-4000-8000-000000000001")
                 .setOccurredAt(LocalDateTime.of(2026, 7, 12, 16, 0))
                 .setFinalizeOccurredAt(LocalDateTime.of(2026, 7, 12, 16, 0, 3));

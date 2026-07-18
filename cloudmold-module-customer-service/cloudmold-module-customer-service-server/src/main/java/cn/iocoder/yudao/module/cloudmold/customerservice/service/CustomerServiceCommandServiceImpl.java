@@ -25,6 +25,9 @@ public class CustomerServiceCommandServiceImpl implements CustomerServiceCommand
     private static final Set<String> SENDER_TYPES = Set.of("CUSTOMER", "AGENT", "SYSTEM");
     private static final Set<String> MESSAGE_TYPES = Set.of("TEXT", "IMAGE", "FILE", "SYSTEM_NOTE");
     private static final Set<String> SCAN_STATUSES = Set.of("PENDING", "CLEAN", "BLOCKED");
+    private static final Set<String> FEEDBACK_TOUCHPOINTS = Set.of("TICKET_RESOLUTION", "CLAIM_COMPENSATION",
+            "AFTER_SALE_HANDLING");
+    private static final Set<String> FEEDBACK_SENTIMENTS = Set.of("SATISFIED", "NEUTRAL", "DISSATISFIED");
     private static final Set<String> CLAIM_TYPES = Set.of("SERVICE_COMPENSATION", "LOGISTICS_DAMAGE", "PRICE_PROTECTION");
     private static final Pattern CODE = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]{1,63}");
     private static final Pattern DOMAIN_CODE = Pattern.compile("[A-Z][A-Z0-9_]{1,63}");
@@ -70,13 +73,14 @@ public class CustomerServiceCommandServiceImpl implements CustomerServiceCommand
                     transitionTicket(tenantId, operationId, command, occurredAt, now);
             case RECORD_MESSAGE -> recordMessage(tenantId, operationId, command, occurredAt, now);
             case RECORD_ATTACHMENT -> recordAttachment(tenantId, operationId, command, occurredAt, now);
+            case RECORD_BUYER_FEEDBACK -> recordBuyerFeedback(tenantId, operationId, command, occurredAt, now);
             case RECORD_QUALITY_REVIEW -> recordQualityReview(tenantId, operationId, command, occurredAt, now);
             case REQUEST_CLAIM -> requestClaim(tenantId, operationId, command, occurredAt, now);
             case APPROVE_CLAIM, REJECT_CLAIM, PAY_COMPENSATION ->
                     transitionClaim(tenantId, operationId, command, occurredAt, now);
         };
         String aggregateId = firstNonNull(result.getClaimId(), result.getAttachmentId(), result.getMessageId(),
-                result.getReviewId(), result.getLinkId(), result.getTicketId());
+                result.getFeedbackId(), result.getReviewId(), result.getLinkId(), result.getTicketId());
         require(mapper.markOperationSucceeded(operationId, tenantId, aggregateId, JsonUtils.toJsonString(result), now) == 1,
                 "customer-service operation completion conflict");
         return result;
@@ -105,12 +109,16 @@ public class CustomerServiceCommandServiceImpl implements CustomerServiceCommand
         require(CHANNELS.contains(command.getChannelCode()), "unsupported channelCode");
         require(PRIORITIES.contains(command.getPriority()), "unsupported priority");
         requireDomainCode(command.getCategoryCode(), "categoryCode");
+        validateExperienceSnapshot(command, occurredAt);
         String ticketId = UUID.randomUUID().toString();
         CustomerServiceTicketDO ticket = new CustomerServiceTicketDO().setTicketId(ticketId).setTenantId(tenantId)
                 .setTicketNo(command.getTicketNo()).setRunId(command.getRunId())
                 .setCustomerPrincipalId(command.getCustomerPrincipalId()).setChannelCode(command.getChannelCode())
-                .setPriority(command.getPriority()).setCategoryCode(command.getCategoryCode()).setStatus("OPEN")
-                .setVersion(1L).setCreatedAt(now).setUpdatedAt(now);
+                .setPriority(command.getPriority()).setCategoryCode(command.getCategoryCode())
+                .setSlaPolicyCode(command.getSlaPolicyCode()).setSlaPolicyVersion(command.getSlaPolicyVersion())
+                .setResolutionDeadlineAt(asUtcDateTime(command.getResolutionDeadlineAt()))
+                .setFcrWindowHours(command.getFcrWindowHours()).setStatus("OPEN").setVersion(1L)
+                .setCreatedAt(now).setUpdatedAt(now);
         require(mapper.insertTicket(ticket) == 1, "failed to create customer-service ticket");
         eventService.appendTicket(operationId, ticket, null, command, occurredAt, now);
         return ticketView(operationId, ticket, false);
@@ -201,6 +209,33 @@ public class CustomerServiceCommandServiceImpl implements CustomerServiceCommand
         eventService.appendAttachment(attachment, command, occurredAt);
         return ticketView(operationId, ticket, false).setMessageId(message.getMessageId())
                 .setAttachmentId(attachment.getAttachmentId());
+    }
+
+    private CustomerServiceView recordBuyerFeedback(Long tenantId, Long operationId, CustomerServiceCommand command,
+                                                    Instant occurredAt, LocalDateTime now) {
+        CustomerServiceTicketDO ticket = requireMutableTicket(tenantId, command);
+        require(Set.of("RESOLVED", "CLOSED").contains(ticket.getStatus()),
+                "buyer feedback requires a resolved or closed ticket");
+        require(ticket.getCustomerPrincipalId().equals(command.getCustomerPrincipalId()),
+                "buyer feedback must be authored by the ticket customer");
+        require(FEEDBACK_TOUCHPOINTS.contains(command.getTouchpointCode()), "unsupported touchpointCode");
+        require(FEEDBACK_SENTIMENTS.contains(command.getSentimentCode()), "unsupported sentimentCode");
+        if (!"SATISFIED".equals(command.getSentimentCode())) {
+            requireDomainCode(command.getReasonCode(), "reasonCode");
+        }
+        if (command.getCommentToken() != null) {
+            requireSafeToken(command.getCommentToken(), "commentToken");
+        }
+        CustomerServiceBuyerFeedbackDO feedback = new CustomerServiceBuyerFeedbackDO()
+                .setFeedbackId(UUID.randomUUID().toString()).setTenantId(tenantId).setTicketId(ticket.getTicketId())
+                .setRunId(command.getRunId()).setCustomerPrincipalId(command.getCustomerPrincipalId())
+                .setTouchpointCode(command.getTouchpointCode()).setSentimentCode(command.getSentimentCode())
+                .setScoreBasisPoints(feedbackScore(command.getSentimentCode())).setReasonCode(command.getReasonCode())
+                .setCommentToken(command.getCommentToken())
+                .setOccurredAt(LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC)).setCreatedAt(now);
+        require(mapper.insertBuyerFeedback(feedback) == 1, "failed to record buyer feedback");
+        eventService.appendBuyerFeedback(feedback, command, occurredAt);
+        return ticketView(operationId, ticket, false).setFeedbackId(feedback.getFeedbackId());
     }
 
     private CustomerServiceView recordQualityReview(Long tenantId, Long operationId, CustomerServiceCommand command,
@@ -331,6 +366,34 @@ public class CustomerServiceCommandServiceImpl implements CustomerServiceCommand
         return after;
     }
 
+    private static void validateExperienceSnapshot(CustomerServiceCommand command, Instant occurredAt) {
+        boolean anyConfigured = command.getSlaPolicyCode() != null || command.getSlaPolicyVersion() != null
+                || command.getResolutionDeadlineAt() != null || command.getFcrWindowHours() != null;
+        if (!anyConfigured) return;
+        requireDomainCode(command.getSlaPolicyCode(), "slaPolicyCode");
+        require(command.getSlaPolicyVersion() != null && command.getSlaPolicyVersion() > 0,
+                "slaPolicyVersion must be positive");
+        require(command.getResolutionDeadlineAt() != null
+                        && !command.getResolutionDeadlineAt().isBefore(occurredAt),
+                "resolutionDeadlineAt must be present and not before occurredAt");
+        require(command.getFcrWindowHours() != null && command.getFcrWindowHours() >= 1
+                        && command.getFcrWindowHours() <= 720,
+                "fcrWindowHours must be between 1 and 720");
+    }
+
+    private static int feedbackScore(String sentimentCode) {
+        return switch (sentimentCode) {
+            case "SATISFIED" -> 10_000;
+            case "NEUTRAL" -> 5_000;
+            case "DISSATISFIED" -> 0;
+            default -> throw new IllegalStateException("unsupported sentimentCode");
+        };
+    }
+
+    private static LocalDateTime asUtcDateTime(Instant value) {
+        return value == null ? null : LocalDateTime.ofInstant(value, ZoneOffset.UTC);
+    }
+
     private static void requireQualifiedReference(String sourceSystem, String referenceType, String referenceId) {
         requireId(referenceId, "referenceId");
         if ("ORDER".equals(referenceType)) {
@@ -369,6 +432,7 @@ public class CustomerServiceCommandServiceImpl implements CustomerServiceCommand
         require(command.getOperation() != null, "customer-service operation is required");
         requireText(command.getIdempotencyKey(), "idempotencyKey", 128);
         requireText(command.getRunId(), "runId", 128);
+        requireUuid(command.getRunId(), "runId");
         requireText(command.getCorrelationId(), "correlationId", 128);
     }
 
@@ -397,6 +461,14 @@ public class CustomerServiceCommandServiceImpl implements CustomerServiceCommand
     private static void requireText(String value, String field, int maxLength) {
         require(value != null && !value.isBlank() && value.length() <= maxLength,
                 field + " is required and must be at most " + maxLength + " characters");
+    }
+
+    private static void requireUuid(String value, String field) {
+        try {
+            UUID.fromString(value);
+        } catch (IllegalArgumentException error) {
+            throw new IllegalStateException(field + " must be a UUID", error);
+        }
     }
 
     private static String firstNonNull(String... values) {

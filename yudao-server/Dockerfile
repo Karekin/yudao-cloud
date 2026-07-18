@@ -1,12 +1,18 @@
 ## AdoptOpenJDK 停止发布 OpenJDK 二进制，而 Eclipse Temurin 是它的延伸，提供更好的稳定性
 ## 感谢复旦核博士的建议！灰子哥，牛皮！
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:17-jre-jammy
 
-## 创建目录，并使用它作为工作目录
-RUN mkdir -p /yudao-server
-WORKDIR /yudao-server
+## 使用固定的非 root 运行身份，目录同时承载应用和运行日志
+RUN groupadd --system --gid 10002 cloudmold-provider \
+    && useradd --system --uid 10002 --gid cloudmold-provider --home-dir /opt/cloudmold-provider \
+       --shell /usr/sbin/nologin cloudmold-provider \
+    && mkdir -p /opt/cloudmold-provider/logs/nacos \
+    && chown -R cloudmold-provider:cloudmold-provider /opt/cloudmold-provider
+WORKDIR /opt/cloudmold-provider
 ## 将后端项目的 Jar 文件，复制到镜像中
-COPY ./target/yudao-server.jar app.jar
+COPY --chown=cloudmold-provider:cloudmold-provider ./target/yudao-server.jar app.jar
+
+USER 10002:10002
 
 ## 设置 TZ 时区
 ENV TZ=Asia/Shanghai

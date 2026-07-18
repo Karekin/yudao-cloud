@@ -44,14 +44,17 @@ public interface CustomerServiceStoreMapper {
     @Insert("""
             INSERT INTO cloudmold_customer_service_ticket
               (ticket_id,tenant_id,ticket_no,run_id,customer_principal_id,channel_code,priority,category_code,
+               sla_policy_code,sla_policy_version,resolution_deadline_at,fcr_window_hours,
                assigned_agent_principal_id,status,version,created_at,updated_at)
             VALUES (#{ticketId},#{tenantId},#{ticketNo},#{runId},#{customerPrincipalId},#{channelCode},#{priority},
-                    #{categoryCode},#{assignedAgentPrincipalId},#{status},#{version},#{createdAt},#{updatedAt})
+                    #{categoryCode},#{slaPolicyCode},#{slaPolicyVersion},#{resolutionDeadlineAt},
+                    #{fcrWindowHours},#{assignedAgentPrincipalId},#{status},#{version},#{createdAt},#{updatedAt})
             """)
     int insertTicket(CustomerServiceTicketDO value);
 
     @Select("""
             SELECT ticket_id,tenant_id,ticket_no,run_id,customer_principal_id,channel_code,priority,category_code,
+                   sla_policy_code,sla_policy_version,resolution_deadline_at,fcr_window_hours,
                    assigned_agent_principal_id,status,version,created_at,updated_at
             FROM cloudmold_customer_service_ticket
             WHERE tenant_id=#{tenantId} AND ticket_id=#{ticketId}
@@ -62,6 +65,7 @@ public interface CustomerServiceStoreMapper {
 
     @Select("""
             SELECT ticket_id,tenant_id,ticket_no,run_id,customer_principal_id,channel_code,priority,category_code,
+                   sla_policy_code,sla_policy_version,resolution_deadline_at,fcr_window_hours,
                    assigned_agent_principal_id,status,version,created_at,updated_at
             FROM cloudmold_customer_service_ticket
             WHERE tenant_id=#{tenantId} AND ticket_id=#{ticketId}
@@ -138,6 +142,15 @@ public interface CustomerServiceStoreMapper {
     int insertAttachment(CustomerServiceAttachmentDO value);
 
     @Insert("""
+            INSERT INTO cloudmold_customer_service_buyer_feedback
+              (feedback_id,tenant_id,ticket_id,run_id,customer_principal_id,touchpoint_code,sentiment_code,
+               score_basis_points,reason_code,comment_token,occurred_at,created_at)
+            VALUES (#{feedbackId},#{tenantId},#{ticketId},#{runId},#{customerPrincipalId},#{touchpointCode},
+                    #{sentimentCode},#{scoreBasisPoints},#{reasonCode},#{commentToken},#{occurredAt},#{createdAt})
+            """)
+    int insertBuyerFeedback(CustomerServiceBuyerFeedbackDO value);
+
+    @Insert("""
             INSERT INTO cloudmold_customer_service_quality_review
               (review_id,tenant_id,ticket_id,run_id,reviewer_principal_id,score_basis_points,outcome_code,reason_code,
                created_at)
@@ -206,5 +219,5 @@ public interface CustomerServiceStoreMapper {
             VALUES (#{tenantId},#{aggregateType},#{aggregateId},#{aggregateVersion},#{previousStatus},#{currentStatus},
                     #{operationId},#{reasonCode},#{occurredAt},#{createdAt})
             """)
-    int insertHistory(CustomerServiceStatusHistoryDO value);
+            int insertHistory(CustomerServiceStatusHistoryDO value);
 }

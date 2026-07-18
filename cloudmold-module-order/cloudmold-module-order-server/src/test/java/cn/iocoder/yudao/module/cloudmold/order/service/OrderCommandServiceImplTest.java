@@ -102,6 +102,9 @@ class OrderCommandServiceImplTest {
         verify(outboxAppender).append(argThat(event -> event.getEventType().equals("order.status.changed")
                 && event.getAggregateVersion() == 1L
                 && ((List<?>) event.getPayload().get("items")).size() == 2
+                && ((List<Map<String, Object>>) event.getPayload().get("items")).stream()
+                        .map(item -> item.get("merchandise_cost_minor"))
+                        .toList().equals(List.of(80L, 210L))
                 && event.getPayload().get("payable_amount_minor").equals(530L)));
         verify(benefitApplicationMapper).insert(argThat((OrderBenefitApplicationDO application) ->
                 application.getAmountMinor() == 20L
@@ -393,7 +396,7 @@ class OrderCommandServiceImplTest {
                 item("item-2", "sku-2").setReservationId("res-2")));
         when(itemMapper.bindReservation(anyLong(), anyString(), anyString(), anyString(), any())).thenReturn(1);
         when(orderMapper.transition(anyLong(), anyString(), anyLong(), anyString(), anyString(),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any()))
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any()))
                 .thenReturn(1);
         OrderCommand command = transitionCommand(OrderOperation.CONFIRM_INVENTORY, 1L);
         command.setReservationReferences(List.of(new OrderLineReference("item-1", "res-1"),
@@ -432,7 +435,7 @@ class OrderCommandServiceImplTest {
         when(itemMapper.selectByOrder(1L, "order-1")).thenReturn(items, items);
         when(itemMapper.bindReservation(anyLong(), anyString(), anyString(), anyString(), any())).thenReturn(1);
         when(orderMapper.transition(anyLong(), anyString(), anyLong(), anyString(), anyString(),
-                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any())).thenReturn(1);
+                isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any())).thenReturn(1);
         when(benefitApplicationMapper.selectByOrder(1L, "order-1")).thenReturn(List.of(application));
         when(benefitAllocationMapper.selectByOrder(1L, "order-1")).thenReturn(List.of(allocation));
         when(benefitFundingMapper.selectByOrder(1L, "order-1")).thenReturn(List.of(funding));
@@ -474,7 +477,8 @@ class OrderCommandServiceImplTest {
                 item("item-1", "sku-1").setReservationId("res-1"),
                 item("item-2", "sku-2").setReservationId("res-2")));
         when(orderMapper.transition(eq(1L), eq("order-1"), eq(2L), eq("INVENTORY_RESERVED"),
-                eq("CANCELLED"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(), any())).thenReturn(1);
+                eq("CANCELLED"), isNull(), isNull(), isNull(), isNull(), isNull(), isNull(),
+                isNull(), isNull(), any())).thenReturn(1);
         OrderCommand command = transitionCommand(OrderOperation.CANCEL, 2L);
         command.setReason("buyer cancelled before fulfillment");
 
@@ -494,10 +498,12 @@ class OrderCommandServiceImplTest {
                 item("item-1", "sku-1").setReservationId("res-1")));
         when(orderMapper.transition(eq(1L), eq("order-1"), eq(2L), eq("INVENTORY_RESERVED"),
                 eq("CANCELLATION_PENDING"), isNull(), isNull(), isNull(), isNull(), eq(sagaId),
-                eq("INVENTORY_RESERVED"), any())).thenReturn(1);
+                eq("INVENTORY_RESERVED"), eq("MERCHANT"), eq("MERCHANT_STOCKOUT"), any())).thenReturn(1);
         OrderCommand command = transitionCommand(OrderOperation.REQUEST_CANCELLATION, 2L);
         command.setCancellationSagaId(sagaId);
         command.setReason("buyer cancelled before payment");
+        command.setResponsibilityParty("MERCHANT");
+        command.setResponsibilityCode("MERCHANT_STOCKOUT");
 
         OrderCommandResult result = service.execute(command);
 
@@ -511,12 +517,15 @@ class OrderCommandServiceImplTest {
         claimNewOperation();
         String sagaId = "70000000-0000-4000-8000-000000000001";
         OrderHeaderDO fenced = order("CANCELLATION_PENDING", 3L)
-                .setCancellationSagaId(sagaId).setPreCancellationStatus("INVENTORY_RESERVED");
+                .setCancellationSagaId(sagaId).setPreCancellationStatus("INVENTORY_RESERVED")
+                .setCancellationResponsibilityParty("MERCHANT")
+                .setCancellationResponsibilityCode("MERCHANT_STOCKOUT");
         when(orderMapper.selectForUpdate(1L, "order-1")).thenReturn(fenced);
         when(itemMapper.selectByOrder(1L, "order-1")).thenReturn(List.of(
                 item("item-1", "sku-1").setReservationId("res-1")));
         when(orderMapper.transition(eq(1L), eq("order-1"), eq(3L), eq("CANCELLATION_PENDING"),
-                eq("CANCELLED"), isNull(), isNull(), isNull(), isNull(), eq(sagaId), isNull(), any()))
+                eq("CANCELLED"), isNull(), isNull(), isNull(), isNull(), eq(sagaId), isNull(),
+                isNull(), isNull(), any()))
                 .thenReturn(1);
         OrderCommand command = transitionCommand(OrderOperation.FINALIZE_CANCELLATION, 3L);
         command.setCancellationSagaId(sagaId);
@@ -548,7 +557,7 @@ class OrderCommandServiceImplTest {
                         .setListingOfferId("offer-1")));
         when(orderMapper.transition(eq(1L), eq("order-1"), eq(3L), eq("PAYMENT_CONFIRMED"),
                 eq("SHIPPED"), isNull(), eq("fulfillment-1"), eq("shipment-1"), isNull(),
-                isNull(), isNull(), any()))
+                isNull(), isNull(), isNull(), isNull(), any()))
                 .thenReturn(1);
         OrderCommand command = transitionCommand(OrderOperation.SHIP_WITH_FULFILLMENT, 3L);
         command.setFulfillmentId("fulfillment-1");
@@ -574,9 +583,11 @@ class OrderCommandServiceImplTest {
         return OrderCommand.builder().operation(OrderOperation.PLACE).idempotencyKey("order-run-1-place")
                 .runId("order-run-1").buyerId("buyer-1")
                 .items(List.of(OrderLineCommand.builder().lineKey("line-1").canonicalSkuId("sku-1")
-                                .quantity(new BigDecimal("2")).unitPriceMinor(100L).build(),
+                                .quantity(new BigDecimal("2")).unitPriceMinor(100L)
+                                .merchandiseCostMinor(80L).build(),
                         OrderLineCommand.builder().lineKey("line-2").canonicalSkuId("sku-2")
-                                .quantity(BigDecimal.ONE).unitPriceMinor(300L).build()))
+                                .quantity(BigDecimal.ONE).unitPriceMinor(300L)
+                                .merchandiseCostMinor(210L).build()))
                 .benefitApplications(List.of(OrderBenefitApplicationCommand.builder()
                         .applicationKey("application-1").benefitType("COUPON")
                         .benefitSourceType("COUPON_ENTITLEMENT").benefitSourceId("entitlement-1")
@@ -627,6 +638,7 @@ class OrderCommandServiceImplTest {
     private static OrderItemDO item(String itemId, String skuId) {
         return new OrderItemDO().setOrderItemId(itemId).setTenantId(1L).setOrderId("order-1")
                 .setLineKey(itemId).setCanonicalSkuId(skuId).setQuantity(BigDecimal.ONE).setUnitPriceMinor(100L)
-                .setLineAmountMinor(100L).setDiscountAmountMinor(0L).setNetAmountMinor(100L);
+                .setLineAmountMinor(100L).setDiscountAmountMinor(0L).setNetAmountMinor(100L)
+                .setMerchandiseCostMinor(70L);
     }
 }

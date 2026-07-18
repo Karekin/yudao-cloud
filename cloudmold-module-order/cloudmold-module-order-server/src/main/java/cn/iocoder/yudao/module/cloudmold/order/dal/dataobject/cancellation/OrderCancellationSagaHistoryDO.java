@@ -21,6 +21,8 @@ public class OrderCancellationSagaHistoryDO {
     private Integer attemptCount;
     private Integer expectedReservationCount;
     private Integer releasedReservationCount;
+    private String responsibilityParty;
+    private String responsibilityCode;
     private String errorCode;
     private String errorMessage;
     private LocalDateTime nextRetryAt;

@@ -62,9 +62,52 @@ public final class OperationsIntelligenceRecords {
     }
 
     @Data @Accessors(chain = true)
+    public static class ClueSourceVersion {
+        private String sourceVersionId;
+        private Long tenantId;
+        private String sourceSystem;
+        private String sourceBizId;
+        private Long businessRevision;
+        private String supersedesSourceVersionId;
+        private String intelligenceTypeCode;
+        private String sourceCode;
+        private LocalDateTime sourcePublishedAt;
+        private Boolean sourceValid;
+        private Boolean sourceDeleted;
+        private String titleSha256;
+        private String summarySha256;
+        private String clueInfoSha256;
+        private Integer clueInfoItemCount;
+        private String semanticPayloadSha256;
+        private LocalDateTime sourceObservedAt;
+        private LocalDateTime createdAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class ClueSourceDelivery {
+        private String deliveryId;
+        private Long tenantId;
+        private String sourceVersionId;
+        private String sourceDatasetId;
+        private Long sourceDatasetVersion;
+        private String declaredSourceAsset;
+        private String physicalSourceAsset;
+        private String sourceTransport;
+        private String sourceRecordKey;
+        private String sourceRecordVersion;
+        private String payloadSchemaVersion;
+        private String sourceSchemaSha256;
+        private String sourceEvidenceRef;
+        private String sourceEvidenceSha256;
+        private LocalDateTime sourceObservedAt;
+        private LocalDateTime createdAt;
+    }
+
+    @Data @Accessors(chain = true)
     public static class Clue {
         private String clueId;
         private Long tenantId;
+        private String sourceVersionId;
         private String observationId;
         private String modelResultId;
         private String clueType;

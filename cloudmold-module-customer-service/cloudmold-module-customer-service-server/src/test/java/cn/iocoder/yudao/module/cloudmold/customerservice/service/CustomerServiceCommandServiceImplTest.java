@@ -90,6 +90,37 @@ class CustomerServiceCommandServiceImplTest {
     }
 
     @Test
+    void shouldValidateExperienceSnapshotOnTicketCreation() {
+        assertThatThrownBy(() -> service.execute(base(CustomerServiceOperation.CREATE_TICKET, "ticket-bad-sla")
+                .ticketNo("CS-1010").customerPrincipalId("principal-customer-1")
+                .channelCode("APP").priority("NORMAL").categoryCode("AFTER_SALE_CONSULTATION")
+                .slaPolicyCode("SERVICE_STANDARD").slaPolicyVersion(1)
+                .resolutionDeadlineAt(Instant.now().minusSeconds(3600)).fcrWindowHours(72).build()))
+                .hasMessage("resolutionDeadlineAt must be present and not before occurredAt");
+    }
+
+    @Test
+    void shouldRejectNonUuidRunIdBeforePersistingAnyState() {
+        CustomerServiceCommand invalid = CustomerServiceCommand.builder()
+                .operation(CustomerServiceOperation.CREATE_TICKET)
+                .idempotencyKey("ticket-invalid-runid")
+                .runId("csr-001")
+                .correlationId("customer-service-correlation-001")
+                .occurredAt(Instant.now().minusSeconds(60))
+                .ticketNo("CS-1002")
+                .customerPrincipalId("principal-customer-1")
+                .channelCode("APP")
+                .priority("NORMAL")
+                .categoryCode("AFTER_SALE_CONSULTATION")
+                .build();
+
+        assertThatThrownBy(() -> service.execute(invalid))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("runId must be a UUID");
+        verifyNoInteractions(mapper, eventService);
+    }
+
+    @Test
     void shouldPersistQualifiedOrderLinkAndAppendExactCompensationLedgerOnce() {
         CustomerServiceView created = service.execute(createTicket("ticket-claim-create", "CS-1003"));
         CustomerServiceView link = service.execute(base(CustomerServiceOperation.LINK_REFERENCE, "ticket-link-order")
@@ -173,6 +204,44 @@ class CustomerServiceCommandServiceImplTest {
         verify(eventService).appendQualityReview(any(CustomerServiceQualityReviewDO.class), any(), any());
     }
 
+    @Test
+    void shouldRecordBuyerFeedbackSeparatelyFromInternalQualityReview() {
+        CustomerServiceView created = service.execute(base(CustomerServiceOperation.CREATE_TICKET, "ticket-csat-create")
+                .ticketNo("CS-1006").customerPrincipalId("principal-customer-1")
+                .channelCode("APP").priority("NORMAL").categoryCode("AFTER_SALE_CONSULTATION")
+                .slaPolicyCode("SERVICE_STANDARD").slaPolicyVersion(1)
+                .resolutionDeadlineAt(Instant.now().plusSeconds(3600)).fcrWindowHours(72).build());
+        service.execute(base(CustomerServiceOperation.RESOLVE_TICKET, "ticket-csat-resolve")
+                .ticketId(created.getTicketId()).expectedVersion(1L).build());
+
+        CustomerServiceView feedback = service.execute(base(CustomerServiceOperation.RECORD_BUYER_FEEDBACK,
+                "ticket-csat-feedback").ticketId(created.getTicketId()).expectedVersion(2L)
+                .customerPrincipalId("principal-customer-1").touchpointCode("TICKET_RESOLUTION")
+                .sentimentCode("SATISFIED").commentToken("sha256:" + "c".repeat(64)).build());
+
+        assertThat(feedback.getFeedbackId()).isNotBlank();
+        verify(mapper).insertBuyerFeedback(argThat(value ->
+                "principal-customer-1".equals(value.getCustomerPrincipalId())
+                        && "TICKET_RESOLUTION".equals(value.getTouchpointCode())
+                        && "SATISFIED".equals(value.getSentimentCode())
+                        && value.getScoreBasisPoints() == 10000));
+        verify(eventService).appendBuyerFeedback(any(CustomerServiceBuyerFeedbackDO.class), any(), any());
+        verify(eventService, never()).appendQualityReview(any(CustomerServiceQualityReviewDO.class), any(), any());
+    }
+
+    @Test
+    void shouldRejectBuyerFeedbackFromNonTicketCustomer() {
+        CustomerServiceView created = service.execute(createTicket("ticket-csat-mismatch", "CS-1007"));
+        service.execute(base(CustomerServiceOperation.RESOLVE_TICKET, "ticket-csat-mismatch-resolve")
+                .ticketId(created.getTicketId()).expectedVersion(1L).build());
+
+        assertThatThrownBy(() -> service.execute(base(CustomerServiceOperation.RECORD_BUYER_FEEDBACK,
+                "ticket-csat-mismatch-feedback").ticketId(created.getTicketId()).expectedVersion(2L)
+                .customerPrincipalId("principal-customer-2").touchpointCode("TICKET_RESOLUTION")
+                .sentimentCode("DISSATISFIED").reasonCode("UNRESOLVED").build()))
+                .hasMessage("buyer feedback must be authored by the ticket customer");
+    }
+
     private void wirePersistence() {
         when(mapper.insertTicket(any())).thenAnswer(invocation -> {
             ticket = invocation.getArgument(0);
@@ -209,6 +278,7 @@ class CustomerServiceCommandServiceImplTest {
             value.setAttachmentCount(value.getAttachmentCount() + 1);
             return 1;
         });
+        when(mapper.insertBuyerFeedback(any())).thenReturn(1);
         when(mapper.insertQualityReview(any())).thenReturn(1);
         when(mapper.insertClaim(any())).thenAnswer(invocation -> {
             CustomerServiceClaimDO value = invocation.getArgument(0);
@@ -269,7 +339,8 @@ class CustomerServiceCommandServiceImplTest {
 
     private static CustomerServiceCommand.CustomerServiceCommandBuilder base(CustomerServiceOperation operation,
                                                                                String key) {
-        return CustomerServiceCommand.builder().operation(operation).idempotencyKey(key).runId("csr-001")
+        return CustomerServiceCommand.builder().operation(operation).idempotencyKey(key)
+                .runId("550e8400-e29b-41d4-a716-446655440000")
                 .correlationId("customer-service-correlation-001").occurredAt(Instant.now().minusSeconds(60));
     }
 }

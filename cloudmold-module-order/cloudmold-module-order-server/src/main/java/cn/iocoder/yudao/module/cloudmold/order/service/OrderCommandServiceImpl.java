@@ -11,6 +11,8 @@ import cn.iocoder.yudao.module.cloudmold.fulfillment.api.FulfillmentShipmentVali
 import cn.iocoder.yudao.module.cloudmold.listing.api.*;
 import cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryReservationQueryApi;
 import cn.iocoder.yudao.module.cloudmold.order.api.*;
+import cn.iocoder.yudao.module.cloudmold.order.api.cancellation.OrderCancellationResponsibilityCode;
+import cn.iocoder.yudao.module.cloudmold.order.api.cancellation.OrderCancellationResponsibilityParty;
 import cn.iocoder.yudao.module.cloudmold.order.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.order.dal.mysql.*;
 import cn.iocoder.yudao.module.cloudmold.payment.api.PaymentCancellationQueryApi;
@@ -118,6 +120,31 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
                 .items(items.stream().map(OrderCommandServiceImpl::lineView).toList()).build();
     }
 
+    @Override
+    public OrderAttributionView requireAttributedOrder(String orderId) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        requireText(orderId, "orderId", 36);
+        OrderHeaderDO order = orderMapper.selectForUpdate(tenantId, orderId);
+        require(order != null, "canonical order does not exist");
+        require(order.getPaymentId() != null, "canonical order does not have a paid payment reference");
+        require(Set.of("PAYMENT_CONFIRMED", "SHIPPED", "DELIVERED", "COMPLETED", "RETURNED")
+                .contains(order.getStatus()), "canonical order is not in a paid status");
+        List<OrderItemDO> items = itemMapper.selectByOrder(tenantId, orderId);
+        require(!items.isEmpty(), "canonical order has no items");
+        ListingAttribution attribution = resolveListingAttribution(order, items);
+        return OrderAttributionView.builder()
+                .orderId(order.getOrderId())
+                .orderNo(order.getOrderNo())
+                .buyerId(order.getBuyerId())
+                .status(order.getStatus())
+                .paymentId(order.getPaymentId())
+                .aggregateVersion(order.getVersion())
+                .merchantId(attribution.merchantId())
+                .shopId(attribution.shopId())
+                .channelCode(attribution.channelCode())
+                .build();
+    }
+
     private OrderCommandResult place(Long tenantId, Long operationId, OrderCommand command, LocalDateTime now) {
         String orderId = UUID.randomUUID().toString();
         String orderNo = "CMO" + orderId.replace("-", "").substring(0, 20).toUpperCase(Locale.ROOT);
@@ -144,6 +171,7 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
                     .setOrderId(orderId).setLineKey(lineKey).setCanonicalSkuId(line.getCanonicalSkuId())
                     .setQuantity(line.getQuantity()).setUnitPriceMinor(line.getUnitPriceMinor())
                     .setLineAmountMinor(lineAmount).setDiscountAmountMinor(lineDiscount).setNetAmountMinor(lineNet)
+                    .setMerchandiseCostMinor(line.getMerchandiseCostMinor())
                     .setListingId(offer == null ? null : offer.getListingId())
                     .setListingOfferId(offer == null ? null : offer.getListingOfferId())
                     .setListingRevision(offer == null ? null : offer.getListingRevision())
@@ -164,7 +192,7 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         orderMapper.insert(order);
         items.forEach(itemMapper::insert);
         List<BenefitEventFact> benefitFacts = persistBenefits(tenantId, operationId, orderId, command, items, now);
-        appendHistory(tenantId, operationId, orderId, 1L, null, "PLACED", command, now);
+        appendHistory(tenantId, operationId, order, null, "PLACED", command, now);
         appendEvent(tenantId, order, items, null, "PLACED", command, 1L);
         appendBenefitEvents(tenantId, order, command, benefitFacts);
         return result(operationId, order, items, benefitViews(benefitFacts), null, false);
@@ -272,6 +300,7 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         if (command.getOperation() == OrderOperation.REQUEST_CANCELLATION) {
             requireText(command.getCancellationSagaId(), "cancellationSagaId", 36);
             requireText(command.getReason(), "reason", 256);
+            requireResponsibility(command.getResponsibilityParty(), command.getResponsibilityCode());
             String mode = Objects.requireNonNullElse(command.getCancellationMode(), "UNPAID_RESERVED");
             if ("PAID_UNSHIPPED".equals(mode)) {
                 require("PAYMENT_CONFIRMED".equals(order.getStatus()),
@@ -287,6 +316,10 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
                         "pre-payment cancellation Saga cannot own a paid or fulfilled order");
             }
             preCancellationStatus = order.getStatus();
+        } else if (command.getOperation() == OrderOperation.FINALIZE_CANCELLATION) {
+            require(order.getCancellationResponsibilityParty() != null
+                    && order.getCancellationResponsibilityCode() != null,
+                    "cancellation responsibility is missing on canonical order fence");
         }
         if (command.getOperation() == OrderOperation.FINALIZE_CANCELLATION) {
             requireText(command.getCancellationSagaId(), "cancellationSagaId", 36);
@@ -319,7 +352,8 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         }
         require(orderMapper.transition(tenantId, order.getOrderId(), order.getVersion(), transition.expectedStatus(),
                 transition.nextStatus(), command.getPaymentId(), command.getFulfillmentId(), command.getShipmentId(),
-                command.getRefundId(), command.getCancellationSagaId(), preCancellationStatus, now) == 1,
+                command.getRefundId(), command.getCancellationSagaId(), preCancellationStatus,
+                command.getResponsibilityParty(), command.getResponsibilityCode(), now) == 1,
                 "canonical order transition conflict");
         String previous = order.getStatus();
         order.setStatus(transition.nextStatus()).setVersion(order.getVersion() + 1).setUpdatedAt(now);
@@ -329,8 +363,13 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         if (command.getRefundId() != null) order.setRefundId(command.getRefundId());
         if (command.getCancellationSagaId() != null) order.setCancellationSagaId(command.getCancellationSagaId());
         if (preCancellationStatus != null) order.setPreCancellationStatus(preCancellationStatus);
-        appendHistory(tenantId, operationId, order.getOrderId(), order.getVersion(), previous,
-                transition.nextStatus(), command, now);
+        if (command.getResponsibilityParty() != null) {
+            order.setCancellationResponsibilityParty(command.getResponsibilityParty());
+        }
+        if (command.getResponsibilityCode() != null) {
+            order.setCancellationResponsibilityCode(command.getResponsibilityCode());
+        }
+        appendHistory(tenantId, operationId, order, previous, transition.nextStatus(), command, now);
         appendEvent(tenantId, order, items, previous, transition.nextStatus(), command, order.getVersion());
         return result(operationId, order, items, loadBenefitViews(tenantId, order.getOrderId()), previous, false);
     }
@@ -355,11 +394,13 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         }
     }
 
-    private void appendHistory(Long tenantId, Long operationId, String orderId, Long version,
+    private void appendHistory(Long tenantId, Long operationId, OrderHeaderDO order,
                                String previous, String current, OrderCommand command, LocalDateTime now) {
-        historyMapper.insert(new OrderStatusHistoryDO().setTenantId(tenantId).setOrderId(orderId)
-                .setAggregateVersion(version).setPreviousStatus(previous).setCurrentStatus(current)
+        historyMapper.insert(new OrderStatusHistoryDO().setTenantId(tenantId).setOrderId(order.getOrderId())
+                .setAggregateVersion(order.getVersion()).setPreviousStatus(previous).setCurrentStatus(current)
                 .setOperationId(operationId).setReason(command.getReason())
+                .setCancellationResponsibilityParty(order.getCancellationResponsibilityParty())
+                .setCancellationResponsibilityCode(order.getCancellationResponsibilityCode())
                 .setOccurredAt(LocalDateTime.ofInstant(command.getOccurredAt(), ZoneOffset.UTC)).setCreatedAt(now));
     }
 
@@ -372,6 +413,7 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
             value.put("quantity", item.getQuantity().toPlainString());
             value.put("unit_price_minor", item.getUnitPriceMinor());
             value.put("line_amount_minor", item.getLineAmountMinor());
+            value.put("merchandise_cost_minor", item.getMerchandiseCostMinor());
             value.put("reservation_id", item.getReservationId());
             value.put("listing_id", item.getListingId());
             value.put("listing_offer_id", item.getListingOfferId());
@@ -400,6 +442,8 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         payload.put("cancellation_saga_id", order.getCancellationSagaId());
         payload.put("pre_cancellation_status", order.getPreCancellationStatus());
         payload.put("cancellation_mode", command.getCancellationMode());
+        payload.put("responsibility_party", order.getCancellationResponsibilityParty());
+        payload.put("responsibility_code", order.getCancellationResponsibilityCode());
         payload.put("step_ordinal", command.getCancellationStepOrdinal());
         payload.put("reason", command.getReason());
         payload.put("items", eventItems);
@@ -560,6 +604,42 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
                 .channelCode(item.getChannelCode()).shopId(item.getShopId()).build();
     }
 
+    private ListingAttribution resolveListingAttribution(OrderHeaderDO order, List<OrderItemDO> items) {
+        List<OrderItemDO> listingBacked = items.stream()
+                .filter(item -> item.getListingId() != null && item.getListingOfferId() != null)
+                .toList();
+        if (listingBacked.isEmpty()) {
+            return new ListingAttribution(null, uniqueNonBlank(items.stream().map(OrderItemDO::getShopId).toList()),
+                    uniqueNonBlank(items.stream().map(OrderItemDO::getChannelCode).toList()));
+        }
+        List<PublishedListingOfferView> offers = listingBacked.stream()
+                .map(item -> listingQueryApi.requirePublishedOffer(PublishedOfferValidationCommand.builder()
+                        .listingId(item.getListingId())
+                        .listingOfferId(item.getListingOfferId())
+                        .canonicalSkuId(item.getCanonicalSkuId())
+                        .expectedPriceMinor(item.getUnitPriceMinor())
+                        .currencyCode(order.getCurrencyCode())
+                        .build()))
+                .toList();
+        return new ListingAttribution(
+                uniqueNonBlank(offers.stream().map(PublishedListingOfferView::getMerchantId).toList()),
+                uniqueNonBlank(offers.stream().map(PublishedListingOfferView::getShopId).toList()),
+                uniqueNonBlank(offers.stream().map(PublishedListingOfferView::getChannelCode).toList()));
+    }
+
+    private static String uniqueNonBlank(List<String> values) {
+        Set<String> unique = new LinkedHashSet<>();
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                unique.add(value);
+            }
+        }
+        return unique.size() == 1 ? unique.iterator().next() : null;
+    }
+
+    private record ListingAttribution(String merchantId, String shopId, String channelCode) {
+    }
+
     private static Transition transition(OrderOperation operation, String status) {
         return switch (operation) {
             case CONFIRM_INVENTORY -> requireTransition(status, "PLACED", "INVENTORY_RESERVED");
@@ -611,6 +691,8 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         Set<String> skuIds = new HashSet<>();
         Set<String> lineKeys = new HashSet<>();
         boolean hasBenefits = !benefitApplications(command).isEmpty();
+        boolean anyMerchandiseCost = command.getItems().stream()
+                .anyMatch(item -> item != null && item.getMerchandiseCostMinor() != null);
         for (int index = 0; index < command.getItems().size(); index++) {
             OrderLineCommand item = command.getItems().get(index);
             require(item != null, "order item is required");
@@ -621,6 +703,10 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
                     "first slice requires positive whole-piece quantity");
             require(item.getUnitPriceMinor() != null && item.getUnitPriceMinor() >= 0,
                     "unitPriceMinor must be nonnegative");
+            if (anyMerchandiseCost || item.getMerchandiseCostMinor() != null) {
+                require(item.getMerchandiseCostMinor() != null && item.getMerchandiseCostMinor() >= 0,
+                        "merchandiseCostMinor must be nonnegative when profitability inputs are provided");
+            }
             if (hasBenefits) requireText(item.getLineKey(), "lineKey", 128);
             if (item.getLineKey() != null) requireText(item.getLineKey(), "lineKey", 128);
             require(lineKeys.add(resolveLineKey(item, index)), "duplicate lineKey in one order");
@@ -758,6 +844,13 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
 
     private static void requireText(String value, String field, int maxLength) {
         require(value != null && !value.isBlank() && value.length() <= maxLength, field + " is required");
+    }
+
+    private static void requireResponsibility(String party, String code) {
+        require(OrderCancellationResponsibilityParty.isSupported(party),
+                "responsibilityParty is unsupported");
+        require(OrderCancellationResponsibilityCode.matches(party, code),
+                "responsibilityCode does not belong to responsibilityParty");
     }
 
     private static void requireCode(String value, String field, int maxLength) {

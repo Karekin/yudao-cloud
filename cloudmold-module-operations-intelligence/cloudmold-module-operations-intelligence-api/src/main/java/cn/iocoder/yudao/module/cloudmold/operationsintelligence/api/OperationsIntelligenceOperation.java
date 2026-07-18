@@ -3,6 +3,8 @@ package cn.iocoder.yudao.module.cloudmold.operationsintelligence.api;
 public enum OperationsIntelligenceOperation {
     RECORD_OBSERVATION,
     RECORD_MODEL_RESULT,
+    RECORD_CLUE_SOURCE_VERSION,
+    RECORD_CLUE_SOURCE_DELIVERY,
     RECORD_CLUE,
     REVIEW_CLUE,
     OPEN_ALERT,

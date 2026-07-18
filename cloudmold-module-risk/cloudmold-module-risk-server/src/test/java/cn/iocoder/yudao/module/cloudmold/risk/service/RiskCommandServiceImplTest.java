@@ -27,6 +27,11 @@ class RiskCommandServiceImplTest {
     private final Map<String, Cluster> clusters = new HashMap<>();
     private final Map<String, ReviewCase> reviews = new HashMap<>();
     private final Map<String, Decision> decisions = new HashMap<>();
+    private final Map<String, OrderReference> orders = new HashMap<>();
+    private final Map<String, PaymentReference> payments = new HashMap<>();
+    private final Map<String, OrderRiskCase> orderRiskCases = new HashMap<>();
+    private final Map<String, PaymentDispute> disputes = new HashMap<>();
+    private final Map<String, LossEntry> losses = new HashMap<>();
     private final Set<String> clusterMembers = new HashSet<>();
     private final AtomicLong operationSequence = new AtomicLong();
     private final AtomicReference<Long> lastOperationId = new AtomicReference<>();
@@ -34,6 +39,20 @@ class RiskCommandServiceImplTest {
     @BeforeEach
     void setUp() {
         TenantContextHolder.setTenantId(1L);
+        orders.put(key(1L, "order-1"), new OrderReference().setTenantId(1L).setOrderId("order-1")
+                .setPaymentId("payment-1").setStatus("PAYMENT_CONFIRMED").setPayableAmountMinor(39800L)
+                .setCurrencyCode("CNY"));
+        payments.put(key(1L, "payment-1"), new PaymentReference().setTenantId(1L).setPaymentId("payment-1")
+                .setOrderId("order-1").setStatus("CAPTURED").setCapturedAmountMinor(39800L)
+                .setRefundedAmountMinor(0L).setCurrencyCode("CNY").setProviderCode("INTERNAL_TEST")
+                .setTestMode(true));
+        disputes.put(key(1L, "dispute-1"), new PaymentDispute().setDisputeId("dispute-1").setTenantId(1L)
+                .setOrderId("order-1").setPaymentId("payment-1").setDisputeType("CHARGEBACK")
+                .setStatus("OPEN").setReasonCode("CARDHOLDER_DISPUTE").setAmountMinor(39800L)
+                .setCurrencyCode("CNY").setExternalRef("chargeback-case-seeded").setVersion(1L)
+                .setOpenedAt(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC))
+                .setCreatedAt(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC))
+                .setUpdatedAt(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)));
         wireOperationStore();
         wirePersistence();
     }
@@ -246,6 +265,55 @@ class RiskCommandServiceImplTest {
                 eq("PUBLISHED"), same(retirement), any(), any());
     }
 
+    @Test
+    void shouldLinkReviewToCanonicalOrderAndTrackPaymentDisputeLifecycle() {
+        RiskView cluster = service.execute(base(RiskOperation.CREATE_CLUSTER, "commerce-risk-cluster")
+                .clusterCode("PAYMENT_REVIEW_001").riskLevel("HIGH").build());
+        RiskView review = service.execute(base(RiskOperation.OPEN_REVIEW, "commerce-risk-review")
+                .clusterId(cluster.getClusterId()).reviewerPrincipalId("principal-reviewer-1").build());
+
+        RiskView linked = service.execute(base(RiskOperation.LINK_ORDER_REVIEW_CASE, "commerce-risk-link")
+                .caseId(review.getCaseId()).orderId("order-1").paymentId("payment-1")
+                .riskType("FRAUD").reasonCode("SUSPICIOUS_CAPTURE").build());
+        assertThat(linked.getOrderRiskCaseId()).isNotBlank();
+        assertThat(linked.getOrderId()).isEqualTo("order-1");
+        verify(eventService).appendOrderRiskCase(any(OrderRiskCase.class), any(ReviewCase.class), any(), any());
+
+        RiskView dispute = service.execute(base(RiskOperation.OPEN_PAYMENT_DISPUTE, "commerce-risk-dispute-open")
+                .orderId("order-1").paymentId("payment-1").caseId(review.getCaseId())
+                .disputeType("CHARGEBACK").reasonCode("CARDHOLDER_DISPUTE")
+                .amountMinor(39800L).currencyCode("CNY").externalRef("chargeback-case-1").build());
+        assertThat(dispute.getDisputeStatus()).isEqualTo("OPEN");
+        assertThat(dispute.getDisputeId()).isNotBlank();
+
+        RiskView started = service.execute(base(RiskOperation.START_REVIEW, "commerce-risk-review-start")
+                .caseId(review.getCaseId()).expectedVersion(1L).build());
+        RiskView decided = service.execute(base(RiskOperation.DECIDE_REVIEW, "commerce-risk-review-decide")
+                .caseId(review.getCaseId()).expectedVersion(started.getCaseVersion())
+                .decisionType("CONFIRM_RISK").reasonCode("CONFIRMED_CHARGEBACK")
+                .decidedByPrincipalId("principal-reviewer-1").build());
+        RiskView resolved = service.execute(base(RiskOperation.RESOLVE_PAYMENT_DISPUTE, "commerce-risk-dispute-resolve")
+                .disputeId(dispute.getDisputeId()).expectedVersion(1L).disputeStatus("LOST")
+                .decisionId(decided.getDecisionId()).reasonCode("CHARGEBACK_LOST").build());
+        assertThat(resolved.getDisputeStatus()).isEqualTo("LOST");
+        verify(eventService, atLeastOnce()).appendPaymentDispute(anyLong(), any(PaymentDispute.class), any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldRequireLinkedDisputeOrDecisionForLossTypes() {
+        RiskView loss = service.execute(base(RiskOperation.POST_LOSS_ENTRY, "commerce-risk-loss-ok")
+                .orderId("order-1").paymentId("payment-1").disputeId("dispute-1")
+                .lossEntryType("CHARGEBACK_LOSS").signedAmountMinor(39800L)
+                .currencyCode("CNY").externalRef("chargeback-case-1").build());
+        assertThat(loss.getLossEntryId()).isNotBlank();
+        assertThat(losses).hasSize(1);
+
+        assertThatThrownBy(() -> service.execute(base(RiskOperation.POST_LOSS_ENTRY, "commerce-risk-loss-bad")
+                .orderId("order-1").paymentId("payment-1").lossEntryType("CONFIRMED_RISK_LOSS")
+                .signedAmountMinor(100L).currencyCode("CNY").build()))
+                .hasMessage("decisionId must be a stable opaque identifier");
+    }
+
     private RiskView createPublishedPolicy() {
         RiskView policy = service.execute(createPolicy("policy-create-published", "PUBLISHED_POLICY"));
         return service.execute(base(RiskOperation.PUBLISH_POLICY_VERSION, "policy-publish-ready")
@@ -324,6 +392,33 @@ class RiskCommandServiceImplTest {
         when(mapper.insertDecision(any())).thenAnswer(invocation -> { Decision value = invocation.getArgument(0); decisions.put(key(value.getTenantId(), value.getDecisionId()), value); return 1; });
         when(mapper.selectDecision(anyLong(), anyString())).thenAnswer(invocation -> decisions.get(key(invocation.getArgument(0), invocation.getArgument(1))));
         when(mapper.insertFeedback(any())).thenReturn(1);
+        when(mapper.selectOrderReference(anyLong(), anyString())).thenAnswer(invocation ->
+                orders.get(key(invocation.getArgument(0), invocation.getArgument(1))));
+        when(mapper.selectPaymentReference(anyLong(), anyString())).thenAnswer(invocation ->
+                payments.get(key(invocation.getArgument(0), invocation.getArgument(1))));
+        when(mapper.insertOrderRiskCase(any())).thenAnswer(invocation -> {
+            OrderRiskCase value = invocation.getArgument(0);
+            orderRiskCases.put(key(value.getTenantId(), value.getCaseId()), value);
+            return 1;
+        });
+        when(mapper.selectOrderRiskCaseByCaseId(anyLong(), anyString())).thenAnswer(invocation ->
+                orderRiskCases.get(key(invocation.getArgument(0), invocation.getArgument(1))));
+        when(mapper.insertPaymentDispute(any())).thenAnswer(invocation -> {
+            PaymentDispute value = invocation.getArgument(0);
+            disputes.put(key(value.getTenantId(), value.getDisputeId()), value);
+            return 1;
+        });
+        when(mapper.selectPaymentDispute(anyLong(), anyString())).thenAnswer(invocation ->
+                disputes.get(key(invocation.getArgument(0), invocation.getArgument(1))));
+        when(mapper.selectPaymentDisputeForUpdate(anyLong(), anyString())).thenAnswer(invocation ->
+                disputes.get(key(invocation.getArgument(0), invocation.getArgument(1))));
+        when(mapper.resolvePaymentDispute(anyLong(), anyString(), anyLong(), anyString(), anyString(), anyString(), any(), any(), any()))
+                .thenReturn(1);
+        when(mapper.insertLossEntry(any())).thenAnswer(invocation -> {
+            LossEntry value = invocation.getArgument(0);
+            losses.put(key(value.getTenantId(), value.getLossEntryId()), value);
+            return 1;
+        });
         when(mapper.insertHistory(any())).thenReturn(1);
     }
 
