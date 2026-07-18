@@ -43,7 +43,8 @@ public class CloudMoldMcpConfiguration {
 
     @Bean
     McpSyncServer cloudMoldMcpServer(HttpServletStreamableServerTransportProvider transport,
-                                     CloudMoldMcpTools tools) {
+                                     CloudMoldMcpTools tools,
+                                     CloudMoldSkillTaskMcpTools skillTaskTools) {
         return McpServer.sync(transport)
                 .serverInfo("cloudmold-hsf-mcp-server", "1.0.0")
                 .instructions("Discover governed CloudMold Dubbo contracts and invoke READ capabilities only. "
@@ -51,6 +52,11 @@ public class CloudMoldMcpConfiguration {
                 .toolCall(tools.listTool(), tools::list)
                 .toolCall(tools.describeTool(), tools::describe)
                 .toolCall(tools.invokeReadTool(), tools::invokeRead)
+                .toolCall(skillTaskTools.submitTool(), skillTaskTools::submit)
+                .toolCall(skillTaskTools.getTool(), skillTaskTools::get)
+                .toolCall(skillTaskTools.getByRequestKeyTool(), skillTaskTools::getByRequestKey)
+                .toolCall(skillTaskTools.listStepsTool(), skillTaskTools::listSteps)
+                .toolCall(skillTaskTools.retryTool(), skillTaskTools::retry)
                 .build();
     }
 }
