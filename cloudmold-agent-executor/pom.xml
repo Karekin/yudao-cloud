@@ -62,6 +62,11 @@
                         <goals>
                             <goal>repackage</goal>
                         </goals>
+                        <configuration>
+                            <!-- Keep the primary artifact as a reusable thin jar for the
+                                 long-lived MCP adapter. The executable CLI remains attached. -->
+                            <classifier>exec</classifier>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

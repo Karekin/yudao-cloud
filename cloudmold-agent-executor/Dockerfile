@@ -6,7 +6,7 @@ RUN groupadd --system --gid 10001 cloudmold \
     && chown -R cloudmold:cloudmold /opt/cloudmold
 
 WORKDIR /opt/cloudmold
-COPY --chown=cloudmold:cloudmold ./target/cloudmold-agent-executor.jar app.jar
+COPY --chown=cloudmold:cloudmold ./target/cloudmold-agent-executor-exec.jar app.jar
 
 USER 10001:10001
 ENV TZ=Asia/Shanghai

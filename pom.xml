@@ -55,6 +55,7 @@
         <module>cloudmold-integration-yudao</module>
         <module>cloudmold-rpc</module>
         <module>cloudmold-agent-executor</module>
+        <module>cloudmold-hsf-mcp-server</module>
     </modules>
 
     <name>${project.artifactId}</name>
