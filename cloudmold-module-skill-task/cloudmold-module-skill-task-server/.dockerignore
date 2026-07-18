@@ -1,0 +1,2 @@
+target/*
+!target/cloudmold-module-skill-task-server.jar

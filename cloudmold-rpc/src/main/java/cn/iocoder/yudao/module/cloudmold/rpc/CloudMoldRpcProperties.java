@@ -2,6 +2,9 @@ package cn.iocoder.yudao.module.cloudmold.rpc;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 @ConfigurationProperties(prefix = "cloudmold.rpc")
 public class CloudMoldRpcProperties {
 
@@ -13,6 +16,8 @@ public class CloudMoldRpcProperties {
     private int timeoutMillis = 5000;
     private long maxClockSkewSeconds = 60;
     private boolean failOnMissingService = true;
+    private Set<String> exportServiceInterfaces = new LinkedHashSet<>();
+    private Set<String> externalServiceInterfaces = new LinkedHashSet<>();
     private String readinessMarker;
 
     public boolean isEnabled() { return enabled; }
@@ -31,6 +36,16 @@ public class CloudMoldRpcProperties {
     public void setMaxClockSkewSeconds(long maxClockSkewSeconds) { this.maxClockSkewSeconds = maxClockSkewSeconds; }
     public boolean isFailOnMissingService() { return failOnMissingService; }
     public void setFailOnMissingService(boolean failOnMissingService) { this.failOnMissingService = failOnMissingService; }
+    public Set<String> getExportServiceInterfaces() { return exportServiceInterfaces; }
+    public void setExportServiceInterfaces(Set<String> exportServiceInterfaces) {
+        this.exportServiceInterfaces = exportServiceInterfaces == null
+                ? new LinkedHashSet<>() : new LinkedHashSet<>(exportServiceInterfaces);
+    }
+    public Set<String> getExternalServiceInterfaces() { return externalServiceInterfaces; }
+    public void setExternalServiceInterfaces(Set<String> externalServiceInterfaces) {
+        this.externalServiceInterfaces = externalServiceInterfaces == null
+                ? new LinkedHashSet<>() : new LinkedHashSet<>(externalServiceInterfaces);
+    }
     public String getReadinessMarker() { return readinessMarker; }
     public void setReadinessMarker(String readinessMarker) { this.readinessMarker = readinessMarker; }
 }

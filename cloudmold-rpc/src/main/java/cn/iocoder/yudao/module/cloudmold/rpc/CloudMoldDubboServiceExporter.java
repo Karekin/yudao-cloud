@@ -9,6 +9,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationListener;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -23,14 +24,15 @@ public class CloudMoldDubboServiceExporter implements ApplicationListener<Applic
 
     private final ApplicationContext applicationContext;
     private final CloudMoldRpcProperties properties;
-    private final Set<String> allowlist;
+    private final Set<String> serviceInterfaces;
     private final List<ServiceConfig<Object>> exports = new ArrayList<>();
     private final Path readinessMarker;
 
     public CloudMoldDubboServiceExporter(ApplicationContext applicationContext, CloudMoldRpcProperties properties) {
         this.applicationContext = applicationContext;
         this.properties = properties;
-        this.allowlist = CloudMoldDubboServiceAllowlist.load();
+        this.serviceInterfaces = selectServiceInterfaces(CloudMoldDubboServiceAllowlist.load(),
+                properties.getExportServiceInterfaces());
         this.readinessMarker = markerPath(properties.getReadinessMarker());
     }
 
@@ -42,7 +44,7 @@ public class CloudMoldDubboServiceExporter implements ApplicationListener<Applic
         }
         deleteReadinessMarker();
         ClassLoader classLoader = applicationContext.getClassLoader();
-        for (String interfaceName : allowlist) {
+        for (String interfaceName : serviceInterfaces) {
             try {
                 Class<?> serviceInterface = Class.forName(interfaceName, false, classLoader);
                 if (!serviceInterface.isInterface()) {
@@ -50,6 +52,10 @@ public class CloudMoldDubboServiceExporter implements ApplicationListener<Applic
                 }
                 Map<String, ?> beans = applicationContext.getBeansOfType(serviceInterface);
                 if (beans.size() != 1) {
+                    if (beans.isEmpty() && properties.getExternalServiceInterfaces().contains(interfaceName)) {
+                        log.info("Skipping externally provided governed Dubbo service {}", interfaceName);
+                        continue;
+                    }
                     String message = "Expected exactly one provider bean for " + interfaceName + " but found "
                             + beans.keySet();
                     if (properties.isFailOnMissingService()) {
@@ -80,6 +86,19 @@ public class CloudMoldDubboServiceExporter implements ApplicationListener<Applic
 
     public int exportedServiceCount() {
         return exports.size();
+    }
+
+    static Set<String> selectServiceInterfaces(Set<String> allowlist, Set<String> configured) {
+        if (configured == null || configured.isEmpty()) {
+            return allowlist;
+        }
+        LinkedHashSet<String> unknown = new LinkedHashSet<>(configured);
+        unknown.removeAll(allowlist);
+        if (!unknown.isEmpty()) {
+            throw new IllegalArgumentException("cloudmold.rpc.export-service-interfaces contains non-allowlisted "
+                    + "interfaces: " + unknown);
+        }
+        return Set.copyOf(configured);
     }
 
     @Override

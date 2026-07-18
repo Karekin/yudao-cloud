@@ -52,6 +52,7 @@
         <module>cloudmold-module-gamification</module>
         <module>cloudmold-module-metadata</module>
         <module>cloudmold-module-dreamplant</module>
+        <module>cloudmold-module-skill-task</module>
         <module>cloudmold-integration-yudao</module>
         <module>cloudmold-rpc</module>
         <module>cloudmold-agent-executor</module>

@@ -9,6 +9,15 @@ spring:
     allow-circular-references: true # 允许循环依赖，因为项目是三层架构，无法避免这个情况。
 #    allow-bean-definition-overriding: false # 允许 Bean 覆盖，例如说 Feign 等会存在重复定义的服务
 
+# These contracts are governed by the durable Skill Task Executor in every
+# deployment profile; yudao-server keeps them on its classpath for discovery
+# but must never try to export duplicate providers.
+cloudmold:
+  rpc:
+    external-service-interfaces:
+      - cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskCommandApi
+      - cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskQueryApi
+
   # Servlet 配置
   servlet:
     # 文件上传相关配置项

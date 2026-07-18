@@ -77,6 +77,8 @@ cn.iocoder.yudao.module.cloudmold.promotion.api.PromotionCommandApi
 cn.iocoder.yudao.module.cloudmold.promotion.api.PromotionQueryApi
 cn.iocoder.yudao.module.cloudmold.risk.api.RiskCommandApi
 cn.iocoder.yudao.module.cloudmold.risk.api.RiskQueryApi
+cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskCommandApi
+cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskQueryApi
 cn.iocoder.yudao.module.cloudmold.tokenplatform.api.TokenPlatformCommandApi
 cn.iocoder.yudao.module.cloudmold.tokenplatform.api.TokenPlatformQueryApi
 cn.iocoder.yudao.module.cloudmold.warehouse.api.WarehouseNetworkCommandApi
