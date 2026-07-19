@@ -8,7 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-@Service
+@Service("cloudMoldOrderQueryService")
 @RequiredArgsConstructor
 public class OrderQueryService {
 

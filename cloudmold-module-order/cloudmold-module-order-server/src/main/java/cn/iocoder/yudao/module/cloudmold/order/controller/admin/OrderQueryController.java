@@ -21,7 +21,7 @@ import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 @RequestMapping("/cloudmold/order")
 public class OrderQueryController {
 
-    @Resource
+    @Resource(name = "cloudMoldOrderQueryService")
     private OrderQueryService orderQueryService;
 
     @GetMapping("/page")
