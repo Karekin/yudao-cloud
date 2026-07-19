@@ -61,6 +61,7 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
 
         Outcome outcome = switch (command.getOperation()) {
             case CREATE_CAMPAIGN -> createCampaign(tenantId, command);
+            case UPDATE_CAMPAIGN -> updateCampaign(tenantId, command, now);
             case ACTIVATE_CAMPAIGN, PAUSE_CAMPAIGN, COMPLETE_CAMPAIGN, CANCEL_CAMPAIGN ->
                     changeCampaign(tenantId, command, now);
             case CREATE_COUPON_TEMPLATE -> createTemplate(tenantId, command);
@@ -140,6 +141,26 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
                 "campaign version conflict");
         return outcome("promotion.campaign.state_changed", "promotion_campaign", row.getCampaignId(),
                 row.getVersion() + 1, next, campaignPayload(row, row.getStatus(), next, command.getOperation()));
+    }
+
+    /** 编辑活动业务字段：仅 DRAFT/PAUSED 可改 name/campaignKind/起止时间（campaignCode 业务键不可改，status 不变） */
+    private Outcome updateCampaign(Long tenantId, PromotionCommand command, LocalDateTime now) {
+        PromotionCommand.CampaignDefinition input = requireNonNull(command.getCampaign(), "campaign is required");
+        requireText(input.getCampaignId(), "campaignId", 64);
+        requireText(input.getName(), "campaign name", 128);
+        String kind = normalized(input.getCampaignKind());
+        require(Set.of("ACTIVITY", "COUPON", "ADVERTISING", "GENERAL").contains(kind), "invalid campaignKind");
+        requireInterval(input.getStartsAt(), input.getEndsAt(), "campaign");
+        PromotionCampaignDO row = requireNonNull(campaignMapper.selectForUpdate(tenantId, input.getCampaignId()),
+                "campaign not found");
+        requireVersion(row.getVersion(), input.getExpectedVersion());
+        require(Set.of("DRAFT", "PAUSED").contains(row.getStatus()), "campaign is not editable");
+        require(campaignMapper.updateFieldsCas(tenantId, row.getCampaignId(), row.getVersion(),
+                input.getName(), kind, at(input.getStartsAt()), at(input.getEndsAt()), now) == 1,
+                "campaign version conflict");
+        return outcome("promotion.campaign.fields_updated", "promotion_campaign", row.getCampaignId(),
+                row.getVersion() + 1, row.getStatus(),
+                campaignPayload(row, row.getStatus(), row.getStatus(), command.getOperation()));
     }
 
     private Outcome createTemplate(Long tenantId, PromotionCommand command) {

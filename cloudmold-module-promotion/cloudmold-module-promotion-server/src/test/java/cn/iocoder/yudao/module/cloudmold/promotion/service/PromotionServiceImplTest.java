@@ -284,6 +284,50 @@ class PromotionServiceImplTest {
                         && Long.valueOf(6000L).equals(event.getPayload().get("incremental_contribution_profit_minor"))));
     }
 
+    @Test
+    void updatesEditableDraftCampaignFieldsWithoutStatusChange() {
+        prepareNewOperation(PromotionOperation.UPDATE_CAMPAIGN);
+        when(campaignMapper.selectForUpdate(7L, "campaign-1")).thenReturn(new PromotionCampaignDO()
+                .setCampaignId("campaign-1").setStatus("DRAFT").setVersion(3L));
+        when(campaignMapper.updateFieldsCas(eq(7L), eq("campaign-1"), eq(3L), eq("七月会员活动-改"),
+                eq("GENERAL"), any(LocalDateTime.class), any(LocalDateTime.class),
+                any(LocalDateTime.class))).thenReturn(1);
+        PromotionCommand command = envelope(PromotionOperation.UPDATE_CAMPAIGN)
+                .campaign(PromotionCommand.CampaignDefinition.builder().campaignId("campaign-1")
+                        .expectedVersion(3L).name("七月会员活动-改").campaignKind("GENERAL")
+                        .startsAt(Instant.parse("2026-07-02T00:00:00Z"))
+                        .endsAt(Instant.parse("2026-08-02T00:00:00Z")).build()).build();
+
+        PromotionCommandResult result = service.execute(command);
+
+        assertThat(result.getAggregateVersion()).isEqualTo(4L);
+        assertThat(result.getStatus()).isEqualTo("DRAFT");
+        verify(campaignMapper).updateFieldsCas(eq(7L), eq("campaign-1"), eq(3L), eq("七月会员活动-改"),
+                eq("GENERAL"), any(LocalDateTime.class), any(LocalDateTime.class), any(LocalDateTime.class));
+        verify(campaignMapper, never()).updateStatusCas(anyLong(), anyString(), anyLong(), anyString(), any());
+        verify(outboxAppender).append(argThat(event ->
+                event.getEventType().equals("promotion.campaign.fields_updated")
+                        && event.getAggregateVersion().equals(4L)));
+    }
+
+    @Test
+    void rejectsUpdateWhenCampaignIsNotEditable() {
+        prepareNewOperation(PromotionOperation.UPDATE_CAMPAIGN);
+        when(campaignMapper.selectForUpdate(7L, "campaign-1")).thenReturn(new PromotionCampaignDO()
+                .setCampaignId("campaign-1").setStatus("ACTIVE").setVersion(3L));
+        PromotionCommand command = envelope(PromotionOperation.UPDATE_CAMPAIGN)
+                .campaign(PromotionCommand.CampaignDefinition.builder().campaignId("campaign-1")
+                        .expectedVersion(3L).name("改名").campaignKind("ACTIVITY")
+                        .startsAt(Instant.parse("2026-07-02T00:00:00Z"))
+                        .endsAt(Instant.parse("2026-08-02T00:00:00Z")).build()).build();
+
+        assertThatThrownBy(() -> service.execute(command)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("campaign is not editable");
+        verify(campaignMapper, never()).updateFieldsCas(anyLong(), anyString(), anyLong(), anyString(),
+                anyString(), any(LocalDateTime.class), any(LocalDateTime.class), any(LocalDateTime.class));
+        verifyNoInteractions(outboxAppender);
+    }
+
     private void prepareNewOperation(PromotionOperation operation) {
         AtomicReference<String> attemptToken = new AtomicReference<>();
         when(operationMapper.insertOrResolve(eq(7L), anyString(), eq(operation.name()), anyString(), anyString(),
