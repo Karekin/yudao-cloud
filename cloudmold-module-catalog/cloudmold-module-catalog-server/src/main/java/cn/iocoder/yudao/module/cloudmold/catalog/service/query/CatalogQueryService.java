@@ -27,6 +27,20 @@ public class CatalogQueryService {
                 offset, request.getPageSize()), total);
     }
 
+    /**
+     * 查询单个规范 SKU 详情（含条码列表）。跨租户或不存在时返回 null，
+     * 由前端处理为"未找到"，不抛 404 以避免泄露资源存在性。
+     */
+    public CatalogSkuDetailVO getSkuDetail(String skuId) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        CatalogSkuDetailVO detail = queryMapper.selectSkuDetail(tenantId, skuId);
+        if (detail == null) {
+            return null;
+        }
+        detail.setBarcodes(queryMapper.selectSkuBarcodes(tenantId, skuId));
+        return detail;
+    }
+
     private static String normalize(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
     }

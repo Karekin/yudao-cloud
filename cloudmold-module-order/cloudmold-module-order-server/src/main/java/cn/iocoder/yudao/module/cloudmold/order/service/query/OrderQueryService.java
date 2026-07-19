@@ -29,6 +29,20 @@ public class OrderQueryService {
                 offset, request.getPageSize()), total);
     }
 
+    /**
+     * 查询单个规范订单详情（含订单行）。跨租户或不存在时返回 null，
+     * 由前端处理为"未找到"，不抛 404 以避免泄露资源存在性。
+     */
+    public OrderDetailVO getOrderDetail(String orderId) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        OrderDetailVO detail = orderQueryMapper.selectOrderDetail(tenantId, orderId);
+        if (detail == null) {
+            return null;
+        }
+        detail.setItems(orderQueryMapper.selectOrderItems(tenantId, orderId));
+        return detail;
+    }
+
     private static String normalize(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
