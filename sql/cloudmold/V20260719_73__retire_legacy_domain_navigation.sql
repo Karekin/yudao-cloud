@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS cloudmold_legacy_menu_retirement (
     retired_at datetime(6) NOT NULL,
     restored_at datetime(6) DEFAULT NULL,
     PRIMARY KEY (menu_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Reversible preimage for retired legacy domain menu roots';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Reversible preimage for retired legacy domain menu roots';
 
 INSERT IGNORE INTO cloudmold_legacy_menu_retirement
     (menu_id, menu_name, expected_parent_id, expected_path, original_status, original_visible,
@@ -37,4 +38,4 @@ SET m.status = 1,
 WHERE r.restored_at IS NULL
   AND m.deleted = b'0'
   AND m.parent_id = r.expected_parent_id
-  AND m.path = r.expected_path;
+  AND m.path COLLATE utf8mb4_unicode_ci = r.expected_path COLLATE utf8mb4_unicode_ci;
