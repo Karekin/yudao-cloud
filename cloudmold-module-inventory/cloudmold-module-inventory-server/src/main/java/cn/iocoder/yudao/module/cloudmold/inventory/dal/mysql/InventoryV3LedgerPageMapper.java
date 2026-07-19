@@ -23,7 +23,7 @@ public interface InventoryV3LedgerPageMapper {
              AND b.balance_id = e.balance_id
             JOIN cloudmold_catalog_sku sku
               ON sku.tenant_id = b.tenant_id
-             AND sku.sku_id = b.canonical_sku_id
+             AND sku.sku_id COLLATE utf8mb4_unicode_ci = b.canonical_sku_id
             JOIN cloudmold_warehouse wh
               ON wh.tenant_id = b.tenant_id
              AND wh.warehouse_id = b.warehouse_id
@@ -111,7 +111,7 @@ public interface InventoryV3LedgerPageMapper {
              AND b.balance_id = e.balance_id
             JOIN cloudmold_catalog_sku sku
               ON sku.tenant_id = b.tenant_id
-             AND sku.sku_id = b.canonical_sku_id
+             AND sku.sku_id COLLATE utf8mb4_unicode_ci = b.canonical_sku_id
             JOIN cloudmold_warehouse wh
               ON wh.tenant_id = b.tenant_id
              AND wh.warehouse_id = b.warehouse_id

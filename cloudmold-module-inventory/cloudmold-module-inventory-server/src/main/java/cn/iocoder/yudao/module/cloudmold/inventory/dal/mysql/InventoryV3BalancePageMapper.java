@@ -16,7 +16,7 @@ public interface InventoryV3BalancePageMapper {
             FROM cloudmold_inventory_balance_v3 b
             JOIN cloudmold_catalog_sku sku
               ON sku.tenant_id = b.tenant_id
-             AND sku.sku_id = b.canonical_sku_id
+             AND sku.sku_id COLLATE utf8mb4_unicode_ci = b.canonical_sku_id
             JOIN cloudmold_catalog_spu spu
               ON spu.tenant_id = sku.tenant_id
              AND spu.spu_id = sku.spu_id
@@ -102,7 +102,7 @@ public interface InventoryV3BalancePageMapper {
             FROM cloudmold_inventory_balance_v3 b
             JOIN cloudmold_catalog_sku sku
               ON sku.tenant_id = b.tenant_id
-             AND sku.sku_id = b.canonical_sku_id
+             AND sku.sku_id COLLATE utf8mb4_unicode_ci = b.canonical_sku_id
             JOIN cloudmold_catalog_spu spu
               ON spu.tenant_id = sku.tenant_id
              AND spu.spu_id = sku.spu_id
