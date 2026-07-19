@@ -85,4 +85,49 @@ public interface PaymentQueryMapper {
                                            @Param("testMode") Boolean testMode,
                                            @Param("offset") long offset,
                                            @Param("limit") int limit);
+
+    @Select("""
+            <script>
+            SELECT p.payment_id,
+                   p.payment_no,
+                   p.order_id,
+                   p.status,
+                   p.payable_amount_minor,
+                   p.captured_amount_minor,
+                   p.refunded_amount_minor,
+                   p.currency_code,
+                   p.provider_code,
+                   COALESCE(tx.provider_transaction_id, p.provider_transaction_id) AS provider_transaction_reference,
+                   p.test_mode,
+                   p.version AS aggregate_version,
+                   p.captured_at,
+                   p.refunded_at,
+                   p.created_at,
+                   p.updated_at
+            FROM cloudmold_payment p
+            LEFT JOIN (
+                SELECT t.tenant_id,
+                       t.payment_id,
+                       t.provider_transaction_id
+                FROM cloudmold_payment_transaction t
+                JOIN (
+                    SELECT tenant_id,
+                           payment_id,
+                           MAX(transaction_id) AS latest_transaction_id
+                    FROM cloudmold_payment_transaction
+                    WHERE tenant_id = #{tenantId}
+                    GROUP BY tenant_id, payment_id
+                ) latest
+                  ON latest.tenant_id = t.tenant_id
+                 AND latest.payment_id = t.payment_id
+                 AND latest.latest_transaction_id = t.transaction_id
+            ) tx
+              ON tx.tenant_id = p.tenant_id
+             AND tx.payment_id = p.payment_id
+            WHERE p.tenant_id = #{tenantId}
+              AND p.payment_id = #{paymentId}
+            </script>
+            """)
+    PaymentPageRow selectPaymentDetail(@Param("tenantId") Long tenantId,
+                                       @Param("paymentId") String paymentId);
 }

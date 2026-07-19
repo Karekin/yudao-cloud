@@ -34,6 +34,12 @@ public class PaymentQueryService {
                 .toList(), total);
     }
 
+    public PaymentPageItem getPaymentDetail(String paymentId) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        PaymentPageRow row = paymentQueryMapper.selectPaymentDetail(tenantId, normalize(paymentId));
+        return row == null ? null : toPageItem(row);
+    }
+
     private static PaymentPageItem toPageItem(PaymentPageRow row) {
         PaymentPageItem item = new PaymentPageItem();
         item.setPaymentId(row.getPaymentId());

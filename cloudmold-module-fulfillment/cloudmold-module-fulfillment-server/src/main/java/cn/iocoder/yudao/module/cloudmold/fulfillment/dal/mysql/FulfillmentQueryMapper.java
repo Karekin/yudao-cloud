@@ -1,5 +1,7 @@
 package cn.iocoder.yudao.module.cloudmold.fulfillment.dal.mysql;
 
+import cn.iocoder.yudao.module.cloudmold.fulfillment.service.query.FulfillmentDetailItem;
+import cn.iocoder.yudao.module.cloudmold.fulfillment.service.query.FulfillmentDetailVO;
 import cn.iocoder.yudao.module.cloudmold.fulfillment.service.query.FulfillmentPageItem;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -109,4 +111,63 @@ public interface FulfillmentQueryMapper {
                                          @Param("waybillNo") String waybillNo,
                                          @Param("offset") long offset,
                                          @Param("limit") int limit);
+
+    @Select("""
+            <script>
+            SELECT f.fulfillment_id,
+                   f.fulfillment_no,
+                   f.order_id,
+                   f.order_no,
+                   f.seller_id,
+                   f.warehouse_id,
+                   f.status,
+                   COALESCE(i.item_count, 0) AS item_count,
+                   COALESCE(i.total_quantity, 0) AS total_quantity,
+                   s.shipment_id AS first_slice_shipment_id,
+                   s.status AS first_slice_shipment_status,
+                   s.carrier_code,
+                   s.waybill_no,
+                   f.delivery_promise_version_ref,
+                   f.promised_delivery_at,
+                   f.cancellation_saga_id AS cancellation_ref,
+                   f.version AS aggregate_version,
+                   f.created_at,
+                   f.updated_at
+            FROM cloudmold_fulfillment_order f
+            LEFT JOIN (
+                SELECT tenant_id,
+                       fulfillment_id,
+                       COUNT(*) AS item_count,
+                       SUM(quantity) AS total_quantity
+                FROM cloudmold_fulfillment_item
+                WHERE tenant_id = #{tenantId}
+                GROUP BY tenant_id, fulfillment_id
+            ) i
+              ON i.tenant_id = f.tenant_id
+             AND i.fulfillment_id = f.fulfillment_id
+            LEFT JOIN cloudmold_shipment s
+              ON s.tenant_id = f.tenant_id
+             AND s.fulfillment_id = f.fulfillment_id
+            WHERE f.tenant_id = #{tenantId}
+              AND f.fulfillment_id = #{fulfillmentId}
+            </script>
+            """)
+    FulfillmentDetailVO selectFulfillmentDetail(@Param("tenantId") Long tenantId,
+                                                @Param("fulfillmentId") String fulfillmentId);
+
+    @Select("""
+            SELECT fulfillment_item_id,
+                   order_item_id,
+                   canonical_sku_id,
+                   quantity,
+                   reservation_id,
+                   created_at,
+                   updated_at
+            FROM cloudmold_fulfillment_item
+            WHERE tenant_id = #{tenantId}
+              AND fulfillment_id = #{fulfillmentId}
+            ORDER BY created_at ASC, fulfillment_item_id ASC
+            """)
+    List<FulfillmentDetailItem> selectFulfillmentItems(@Param("tenantId") Long tenantId,
+                                                       @Param("fulfillmentId") String fulfillmentId);
 }

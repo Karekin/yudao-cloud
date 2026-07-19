@@ -38,6 +38,17 @@ public class FulfillmentQueryService {
                 request.getPageSize()), total);
     }
 
+    public FulfillmentDetailVO getFulfillmentDetail(String fulfillmentId) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        String normalizedFulfillmentId = normalize(fulfillmentId);
+        FulfillmentDetailVO detail = queryMapper.selectFulfillmentDetail(tenantId, normalizedFulfillmentId);
+        if (detail == null) {
+            return null;
+        }
+        detail.setItems(queryMapper.selectFulfillmentItems(tenantId, normalizedFulfillmentId));
+        return detail;
+    }
+
     private static String normalize(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
     }

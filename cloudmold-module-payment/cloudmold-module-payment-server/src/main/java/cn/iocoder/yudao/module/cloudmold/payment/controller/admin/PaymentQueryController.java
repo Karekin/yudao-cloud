@@ -6,12 +6,14 @@ import cn.iocoder.yudao.module.cloudmold.payment.controller.admin.vo.PaymentPage
 import cn.iocoder.yudao.module.cloudmold.payment.service.query.PaymentPageItem;
 import cn.iocoder.yudao.module.cloudmold.payment.service.query.PaymentQueryService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
@@ -29,5 +31,13 @@ public class PaymentQueryController {
     @PreAuthorize("@ss.hasPermission('cloudmold:payment:query')")
     public CommonResult<PageResult<PaymentPageItem>> getPage(@Valid PaymentPageReqVO request) {
         return success(paymentQueryService.getPage(request));
+    }
+
+    @GetMapping("/get")
+    @Operation(summary = "查询单个规范 Payment 详情，只返回当前租户权威支付数据")
+    @PreAuthorize("@ss.hasPermission('cloudmold:payment:query')")
+    @Parameter(name = "paymentId", description = "规范 Payment ID", required = true)
+    public CommonResult<PaymentPageItem> getPaymentDetail(@RequestParam("paymentId") String paymentId) {
+        return success(paymentQueryService.getPaymentDetail(paymentId));
     }
 }
