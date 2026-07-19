@@ -37,6 +37,17 @@ public class AfterSaleQueryService {
                 request.getPageSize()), total);
     }
 
+    public AfterSaleDetailVO getDetail(String afterSaleId) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        String id = normalize(afterSaleId);
+        AfterSaleDetailVO detail = pageMapper.selectDetail(tenantId, id);
+        if (detail == null) {
+            return null;
+        }
+        detail.setItems(pageMapper.selectAfterSaleItems(tenantId, id));
+        return detail;
+    }
+
     private static String normalize(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
     }

@@ -1,5 +1,8 @@
 package cn.iocoder.yudao.module.cloudmold.inventory.dal.mysql;
 
+import cn.iocoder.yudao.module.cloudmold.inventory.service.query.InventoryV3BalanceDetailVO;
+import cn.iocoder.yudao.module.cloudmold.inventory.service.query.InventoryV3BalanceAllocationItem;
+import cn.iocoder.yudao.module.cloudmold.inventory.service.query.InventoryV3BalanceLedgerItem;
 import cn.iocoder.yudao.module.cloudmold.inventory.service.query.InventoryV3BalancePageItem;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -143,4 +146,111 @@ public interface InventoryV3BalancePageMapper {
                                                        @Param("onlyNonZero") Boolean onlyNonZero,
                                                        @Param("offset") long offset,
                                                        @Param("limit") int limit);
+
+    @Select("""
+            <script>
+            SELECT b.balance_id,
+                   b.canonical_sku_id,
+                   sku.sku_code,
+                   spu.spu_code,
+                   b.warehouse_id,
+                   wh.warehouse_code,
+                   wh.name AS warehouse_name,
+                   b.location_id,
+                   loc.location_code,
+                   loc.name AS location_name,
+                   b.lot_id,
+                   lot.lot_code,
+                   b.owner_type,
+                   b.owner_id,
+                   b.stock_status,
+                   b.quality_status,
+                   b.base_uom_code,
+                   b.on_hand_quantity,
+                   b.reserved_quantity,
+                   b.in_transit_quantity,
+                   CASE
+                     WHEN b.stock_status = 'SELLABLE' AND b.quality_status = 'QUALIFIED'
+                       THEN b.on_hand_quantity - b.reserved_quantity
+                     ELSE 0
+                   END AS available_quantity,
+                   CASE
+                     WHEN b.stock_status = 'SELLABLE'
+                      AND b.quality_status = 'QUALIFIED'
+                      AND (b.lot_id IS NULL OR (lot.status = 'ACTIVE'
+                           AND (lot.expires_on IS NULL OR lot.expires_on &gt;= UTC_DATE())))
+                       THEN b.on_hand_quantity - b.reserved_quantity
+                     ELSE 0
+                   END AS allocatable_quantity,
+                   CASE
+                     WHEN b.stock_status &lt;&gt; 'SELLABLE' THEN 'STOCK_NOT_SELLABLE'
+                     WHEN b.quality_status &lt;&gt; 'QUALIFIED' THEN 'QUALITY_NOT_QUALIFIED'
+                     WHEN lot.status = 'RECALLED' THEN 'LOT_RECALLED'
+                     WHEN lot.status = 'CLOSED' THEN 'LOT_CLOSED'
+                     WHEN lot.expires_on IS NOT NULL AND lot.expires_on &lt; UTC_DATE() THEN 'LOT_EXPIRED'
+                     ELSE 'ALLOCATABLE'
+                   END AS allocation_eligibility,
+                   b.version AS aggregate_version,
+                   b.created_at,
+                   b.updated_at
+            FROM cloudmold_inventory_balance_v3 b
+            JOIN cloudmold_catalog_sku sku
+              ON sku.tenant_id = b.tenant_id
+             AND sku.sku_id COLLATE utf8mb4_unicode_ci = b.canonical_sku_id
+            JOIN cloudmold_catalog_spu spu
+              ON spu.tenant_id = sku.tenant_id
+             AND spu.spu_id = sku.spu_id
+            JOIN cloudmold_warehouse wh
+              ON wh.tenant_id = b.tenant_id
+             AND wh.warehouse_id = b.warehouse_id
+            JOIN cloudmold_warehouse_location loc
+              ON loc.tenant_id = b.tenant_id
+             AND loc.location_id = b.location_id
+            LEFT JOIN cloudmold_inventory_lot lot
+              ON lot.tenant_id = b.tenant_id
+             AND lot.lot_id = b.lot_id
+            WHERE b.tenant_id = #{tenantId}
+              AND b.balance_id = #{balanceId}
+            </script>
+            """)
+    InventoryV3BalanceDetailVO selectBalanceDetail(@Param("tenantId") Long tenantId,
+                                                   @Param("balanceId") String balanceId);
+
+    @Select("""
+            SELECT e.ledger_entry_id,
+                   e.entry_role,
+                   tx.command_type,
+                   tx.business_type,
+                   tx.business_no,
+                   e.delta_on_hand_quantity,
+                   e.delta_reserved_quantity,
+                   e.delta_in_transit_quantity,
+                   e.after_on_hand_quantity,
+                   tx.occurred_at
+            FROM cloudmold_inventory_ledger_entry_v3 e
+            JOIN cloudmold_inventory_ledger_transaction_v3 tx
+              ON tx.tenant_id = e.tenant_id
+             AND tx.ledger_transaction_id = e.ledger_transaction_id
+            WHERE e.tenant_id = #{tenantId}
+              AND e.balance_id = #{balanceId}
+            ORDER BY tx.occurred_at DESC, e.ledger_entry_id DESC
+            LIMIT 20
+            """)
+    List<InventoryV3BalanceLedgerItem> selectRecentLedgerEntries(@Param("tenantId") Long tenantId,
+                                                                 @Param("balanceId") String balanceId);
+
+    @Select("""
+            SELECT allocation_id,
+                   reservation_id,
+                   quantity,
+                   status,
+                   version
+            FROM cloudmold_inventory_reservation_allocation_v3
+            WHERE tenant_id = #{tenantId}
+              AND balance_id = #{balanceId}
+              AND status <> 30
+            ORDER BY created_operation_id DESC
+            """)
+    List<InventoryV3BalanceAllocationItem> selectActiveAllocations(@Param("tenantId") Long tenantId,
+                                                                   @Param("balanceId") String balanceId);
 }

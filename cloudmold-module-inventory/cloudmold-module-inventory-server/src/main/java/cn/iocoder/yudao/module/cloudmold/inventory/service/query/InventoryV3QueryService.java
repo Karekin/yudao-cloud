@@ -89,6 +89,18 @@ public class InventoryV3QueryService {
                 request.getPageSize()), total);
     }
 
+    public InventoryV3BalanceDetailVO getBalanceDetail(String balanceId) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        String id = normalize(balanceId);
+        InventoryV3BalanceDetailVO detail = balancePageMapper.selectBalanceDetail(tenantId, id);
+        if (detail == null) {
+            return null;
+        }
+        detail.setRecentLedgerEntries(balancePageMapper.selectRecentLedgerEntries(tenantId, id));
+        detail.setActiveAllocations(balancePageMapper.selectActiveAllocations(tenantId, id));
+        return detail;
+    }
+
     private static long offset(int pageNo, int pageSize) {
         return (long) (pageNo - 1) * pageSize;
     }
