@@ -39,4 +39,44 @@ class SkillTaskTemplateResolverTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("unavailable");
     }
+
+    @Test
+    void resolvesArraySegmentsAndCopiesApprovedObjectsWithBoundedOverrides() throws Exception {
+        JsonNode template = objectMapper.readTree("""
+                [{
+                  "$object":"$input.commands.0",
+                  "$overrides":{
+                    "/items/0/listingId":"$steps.listing.result.listingId",
+                    "idempotencyKey":"$task.stepIdempotencyKey",
+                    "runId":"$task.runId"
+                  }
+                }]
+                """);
+        JsonNode input = objectMapper.readTree("""
+                {"commands":[{"command":"PLACE","items":[{"listingId":"approved-placeholder"}],
+                  "idempotencyKey":"approved-placeholder","runId":"approved-placeholder"}]}
+                """);
+        JsonNode listing = objectMapper.readTree("{\"listingId\":\"listing-1\"}");
+
+        JsonNode result = resolver.resolveValue(template, input, Map.of("listing", listing),
+                "task-1", "run-1", "task-1:place");
+
+        assertThat(result).isEqualTo(objectMapper.readTree("""
+                [{"command":"PLACE","items":[{"listingId":"listing-1"}],
+                  "idempotencyKey":"task-1:place","runId":"run-1"}]
+                """));
+        assertThat(input.at("/commands/0/items/0/listingId").asText()).isEqualTo("approved-placeholder");
+    }
+
+    @Test
+    void rejectsObjectOverridesThatWereNotDeclaredByTheApprovedBase() throws Exception {
+        JsonNode template = objectMapper.readTree("""
+                [{"$object":"$input.commands.0","$overrides":{"/items/0/newField":"value"}}]
+                """);
+        JsonNode input = objectMapper.readTree("{\"commands\":[{\"items\":[{}]}]}");
+
+        assertThatThrownBy(() -> resolver.resolve(template, input, Map.of(), "task-1", "task-1:step"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("path is missing");
+    }
 }

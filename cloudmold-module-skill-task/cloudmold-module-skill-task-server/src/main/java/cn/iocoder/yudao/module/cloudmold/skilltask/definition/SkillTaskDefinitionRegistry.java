@@ -9,8 +9,11 @@ import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -19,6 +22,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.HexFormat;
 
 @Component
 public class SkillTaskDefinitionRegistry {
@@ -114,7 +118,78 @@ public class SkillTaskDefinitionRegistry {
                 throw new IllegalArgumentException("Duplicate Skill Task definition: " + key);
             }
         }
+        validateComposition(indexed);
+        populateDefinitionProofs(indexed);
         return Map.copyOf(indexed);
+    }
+
+    private void populateDefinitionProofs(Map<String, SkillTaskDefinition> indexed) {
+        for (SkillTaskDefinition definition : indexed.values()) {
+            definition.setDefinitionSha256(sha256(canonical(objectMapper.valueToTree(definition))));
+        }
+        for (String definitionKey : indexed.keySet()) {
+            definitionClosureSha256(definitionKey, indexed, new LinkedHashMap<>());
+        }
+    }
+
+    private String definitionClosureSha256(String definitionKey, Map<String, SkillTaskDefinition> indexed,
+                                           Map<String, String> resolved) {
+        String existing = resolved.get(definitionKey);
+        if (existing != null) {
+            return existing;
+        }
+        SkillTaskDefinition definition = indexed.get(definitionKey);
+        var closure = objectMapper.createObjectNode();
+        closure.put("schema", "cloudmold.skill-task-definition-closure/v1");
+        closure.put("definitionSha256", definition.getDefinitionSha256());
+        var children = closure.putArray("children");
+        definition.getSteps().stream().filter(step -> "SUBMIT_CHILD".equals(step.getStepKind()))
+                .sorted(Comparator.comparing(SkillTaskDefinition.Step::getStepCode))
+                .forEach(step -> {
+                    String childKey = key(step.getChildSkillId(), step.getChildSkillVersion());
+                    var child = children.addObject();
+                    child.put("stepCode", step.getStepCode());
+                    child.put("skillId", step.getChildSkillId());
+                    child.put("skillVersion", step.getChildSkillVersion());
+                    child.put("definitionClosureSha256", definitionClosureSha256(childKey, indexed, resolved));
+                });
+        String hash = sha256(canonical(closure));
+        resolved.put(definitionKey, hash);
+        definition.setDefinitionClosureSha256(hash);
+        return hash;
+    }
+
+    private String canonical(JsonNode value) {
+        try {
+            return objectMapper.writeValueAsString(sort(value));
+        } catch (IOException exception) {
+            throw new IllegalStateException("Cannot canonicalize Skill Task definition", exception);
+        }
+    }
+
+    private JsonNode sort(JsonNode value) {
+        if (value.isObject()) {
+            var result = objectMapper.createObjectNode();
+            List<String> names = new ArrayList<>();
+            value.fieldNames().forEachRemaining(names::add);
+            names.stream().sorted().forEach(name -> result.set(name, sort(value.get(name))));
+            return result;
+        }
+        if (value.isArray()) {
+            var result = objectMapper.createArrayNode();
+            value.forEach(item -> result.add(sort(item)));
+            return result;
+        }
+        return value.deepCopy();
+    }
+
+    private static String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 
     private void validateStep(SkillTaskDefinition definition, SkillTaskDefinition.Step step, String riskLevel,
@@ -125,6 +200,24 @@ public class SkillTaskDefinitionRegistry {
         }
         if (step.getStepOrder() == null || step.getStepOrder() <= 0 || !stepOrders.add(step.getStepOrder())) {
             throw new IllegalArgumentException("step_order must be positive and unique: " + step.getStepCode());
+        }
+        String stepKind = step.getStepKind() == null || step.getStepKind().isBlank()
+                ? "CAPABILITY" : step.getStepKind().trim().toUpperCase(Locale.ROOT);
+        step.setStepKind(stepKind);
+        if ("SUBMIT_CHILD".equals(stepKind)) {
+            validateSubmitChild(definition, step, riskLevel);
+            return;
+        }
+        if ("WAIT_CHILD".equals(stepKind)) {
+            validateWaitChild(definition, step, riskLevel);
+            return;
+        }
+        if ("WAIT_CAPABILITY".equals(stepKind)) {
+            validateWaitCapability(step);
+            return;
+        }
+        if (!"CAPABILITY".equals(stepKind)) {
+            throw new IllegalArgumentException("Unsupported step_kind: " + stepKind);
         }
         step.setCapabilityId(requireText(step.getCapabilityId(), "capability_id", 255));
         CapabilityDescriptor descriptor = capabilityCatalog.require(step.getCapabilityId());
@@ -159,6 +252,175 @@ public class SkillTaskDefinitionRegistry {
         }
     }
 
+    private static void validateSubmitChild(SkillTaskDefinition definition, SkillTaskDefinition.Step step,
+                                            String riskLevel) {
+        if (!"R3".equals(riskLevel)) {
+            throw new IllegalArgumentException("SUBMIT_CHILD steps require an R3 parent Skill: "
+                    + definition.getSkillId());
+        }
+        step.setChildSkillId(requireText(step.getChildSkillId(), "child_skill_id", 191));
+        step.setChildSkillVersion(requireText(step.getChildSkillVersion(), "child_skill_version", 64));
+        if (step.getArguments() == null || !step.getArguments().isObject()) {
+            throw new IllegalArgumentException("SUBMIT_CHILD arguments must be a JSON object: " + step.getStepCode());
+        }
+        if (step.getChildRunId() != null && !step.getChildRunId().isBlank()) {
+            step.setChildRunId(requireText(step.getChildRunId(), "child_run_id", 255));
+        } else {
+            step.setChildRunId(null);
+        }
+        step.setCapabilityId(null);
+        step.setOperationType("ORCHESTRATE");
+        step.setApprovalRequired(false);
+        step.setIdempotencyBinding(null);
+        step.setPollIntervalSeconds(null);
+    }
+
+    private static void validateWaitChild(SkillTaskDefinition definition, SkillTaskDefinition.Step step,
+                                          String riskLevel) {
+        if (!"R3".equals(riskLevel)) {
+            throw new IllegalArgumentException("WAIT_CHILD steps require an R3 parent Skill: "
+                    + definition.getSkillId());
+        }
+        if (step.getArguments() == null || !step.getArguments().isArray() || step.getArguments().size() != 1) {
+            throw new IllegalArgumentException("WAIT_CHILD arguments must contain exactly one child task ID: "
+                    + step.getStepCode());
+        }
+        int pollSeconds = step.getPollIntervalSeconds() == null ? 2 : step.getPollIntervalSeconds();
+        if (pollSeconds < 1 || pollSeconds > 300) {
+            throw new IllegalArgumentException("poll_interval_seconds must be between 1 and 300: "
+                    + step.getStepCode());
+        }
+        step.setPollIntervalSeconds(pollSeconds);
+        step.setCapabilityId(null);
+        step.setOperationType("ORCHESTRATE");
+        step.setApprovalRequired(false);
+        step.setIdempotencyBinding(null);
+        step.setChildSkillId(null);
+        step.setChildSkillVersion(null);
+        step.setChildRunId(null);
+    }
+
+    private void validateWaitCapability(SkillTaskDefinition.Step step) {
+        step.setCapabilityId(requireText(step.getCapabilityId(), "capability_id", 255));
+        CapabilityDescriptor descriptor = capabilityCatalog.require(step.getCapabilityId());
+        if (descriptor.interfaceName().startsWith(ORCHESTRATION_API_PACKAGE)) {
+            throw new IllegalArgumentException("Skill Task orchestration APIs cannot be polled as domain state: "
+                    + step.getCapabilityId());
+        }
+        if (!"READ".equals(descriptor.operationType().name())) {
+            throw new IllegalArgumentException("WAIT_CAPABILITY may only poll a READ capability: "
+                    + step.getCapabilityId());
+        }
+        if (step.getArguments() == null || !step.getArguments().isArray()
+                || step.getArguments().size() != descriptor.parameterTypes().size()) {
+            throw new IllegalArgumentException("WAIT_CAPABILITY arguments do not match the capability contract: "
+                    + step.getStepCode());
+        }
+        validateWaitSuccess(step.getWaitSuccess(), step.getStepCode());
+        validateWaitFailure(step.getWaitFailure(), step.getStepCode());
+        int pollSeconds = step.getPollIntervalSeconds() == null ? 2 : step.getPollIntervalSeconds();
+        if (pollSeconds < 1 || pollSeconds > 300) {
+            throw new IllegalArgumentException("poll_interval_seconds must be between 1 and 300: "
+                    + step.getStepCode());
+        }
+        step.setPollIntervalSeconds(pollSeconds);
+        step.setOperationType("READ");
+        step.setApprovalRequired(false);
+        step.setIdempotencyBinding(null);
+        step.setChildSkillId(null);
+        step.setChildSkillVersion(null);
+        step.setChildRunId(null);
+    }
+
+    private static void validateWaitSuccess(JsonNode condition, String stepCode) {
+        if (condition == null || !condition.isObject() || condition.isEmpty()) {
+            throw new IllegalArgumentException("WAIT_CAPABILITY wait_success must be a non-empty object: " + stepCode);
+        }
+        condition.fields().forEachRemaining(entry -> {
+            validateJsonPointer(entry.getKey(), stepCode);
+            if (!entry.getValue().isValueNode() || entry.getValue().isNull()) {
+                throw new IllegalArgumentException("WAIT_CAPABILITY success values must be non-null scalars: "
+                        + stepCode);
+            }
+        });
+    }
+
+    private static void validateWaitFailure(JsonNode condition, String stepCode) {
+        if (condition == null || condition.isNull()) {
+            return;
+        }
+        if (!condition.isObject()) {
+            throw new IllegalArgumentException("WAIT_CAPABILITY wait_failure must be an object: " + stepCode);
+        }
+        condition.fields().forEachRemaining(entry -> {
+            validateJsonPointer(entry.getKey(), stepCode);
+            if (!entry.getValue().isArray() || entry.getValue().isEmpty()) {
+                throw new IllegalArgumentException("WAIT_CAPABILITY failure values must be non-empty arrays: "
+                        + stepCode);
+            }
+            entry.getValue().forEach(value -> {
+                if (!value.isValueNode() || value.isNull()) {
+                    throw new IllegalArgumentException("WAIT_CAPABILITY failure values must be non-null scalars: "
+                            + stepCode);
+                }
+            });
+        });
+    }
+
+    private static void validateJsonPointer(String pointer, String stepCode) {
+        if (pointer == null || pointer.isBlank() || !pointer.startsWith("/")) {
+            throw new IllegalArgumentException("WAIT_CAPABILITY conditions require JSON Pointer keys: " + stepCode);
+        }
+    }
+
+    private static void validateComposition(Map<String, SkillTaskDefinition> indexed) {
+        for (SkillTaskDefinition parent : indexed.values()) {
+            for (SkillTaskDefinition.Step step : parent.getSteps()) {
+                if (!"SUBMIT_CHILD".equals(step.getStepKind())) {
+                    continue;
+                }
+                SkillTaskDefinition child = indexed.get(key(step.getChildSkillId(), step.getChildSkillVersion()));
+                if (child == null) {
+                    throw new IllegalArgumentException("Child Skill Task definition is not registered: "
+                            + step.getChildSkillId() + "@" + step.getChildSkillVersion());
+                }
+                if (riskRank(child.getRiskLevel()) > riskRank(parent.getRiskLevel())) {
+                    throw new IllegalArgumentException("Child Skill risk cannot exceed its parent: "
+                            + step.getChildSkillId());
+                }
+            }
+        }
+        for (String definitionKey : indexed.keySet()) {
+            detectCycle(definitionKey, indexed, new HashSet<>(), new HashSet<>());
+        }
+    }
+
+    private static void detectCycle(String current, Map<String, SkillTaskDefinition> indexed,
+                                    Set<String> visiting, Set<String> visited) {
+        if (visited.contains(current)) {
+            return;
+        }
+        if (!visiting.add(current)) {
+            throw new IllegalArgumentException("Skill Task composition cycle detected at " + current);
+        }
+        for (SkillTaskDefinition.Step step : indexed.get(current).getSteps()) {
+            if ("SUBMIT_CHILD".equals(step.getStepKind())) {
+                detectCycle(key(step.getChildSkillId(), step.getChildSkillVersion()), indexed, visiting, visited);
+            }
+        }
+        visiting.remove(current);
+        visited.add(current);
+    }
+
+    private static int riskRank(String risk) {
+        return switch (risk) {
+            case "R1" -> 1;
+            case "R2" -> 2;
+            case "R3" -> 3;
+            default -> throw new IllegalArgumentException("Unsupported risk level: " + risk);
+        };
+    }
+
     private static void validateIdempotencyBinding(SkillTaskDefinition.Step step, CapabilityDescriptor descriptor) {
         SkillTaskDefinition.IdempotencyBinding binding = step.getIdempotencyBinding();
         if (binding == null || binding.getArgumentIndex() == null) {
@@ -177,6 +439,14 @@ public class SkillTaskDefinitionRegistry {
         }
         JsonNode argumentTemplate = step.getArguments().get(argumentIndex);
         JsonNode boundTemplate = pointer.isEmpty() ? argumentTemplate : argumentTemplate.at(pointer);
+        if ((boundTemplate.isMissingNode() || boundTemplate.isNull()) && "/idempotencyKey".equals(pointer)
+                && argumentTemplate.isObject() && argumentTemplate.has("$object")
+                && argumentTemplate.path("$overrides").isObject()) {
+            boundTemplate = argumentTemplate.path("$overrides").path("idempotencyKey");
+            if (boundTemplate.isMissingNode()) {
+                boundTemplate = argumentTemplate.path("$overrides").path("/idempotencyKey");
+            }
+        }
         if (!boundTemplate.isTextual() || !"$task.stepIdempotencyKey".equals(boundTemplate.asText())) {
             throw new IllegalArgumentException("WRITE step idempotency_binding must point exactly to "
                     + "$task.stepIdempotencyKey: " + step.getStepCode());

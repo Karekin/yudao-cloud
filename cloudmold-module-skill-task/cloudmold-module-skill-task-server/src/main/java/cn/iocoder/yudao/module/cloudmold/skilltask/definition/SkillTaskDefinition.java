@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.cloudmold.skilltask.definition;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -14,6 +15,11 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class SkillTaskDefinition {
+
+    @JsonIgnore
+    private String definitionSha256;
+    @JsonIgnore
+    private String definitionClosureSha256;
 
     @JsonProperty("schema_version")
     private String schemaVersion;
@@ -32,6 +38,8 @@ public class SkillTaskDefinition {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Step {
+        @JsonProperty("step_kind")
+        private String stepKind;
         @JsonProperty("step_code")
         private String stepCode;
         @JsonProperty("step_order")
@@ -44,6 +52,18 @@ public class SkillTaskDefinition {
         private Boolean approvalRequired;
         @JsonProperty("idempotency_binding")
         private IdempotencyBinding idempotencyBinding;
+        @JsonProperty("child_skill_id")
+        private String childSkillId;
+        @JsonProperty("child_skill_version")
+        private String childSkillVersion;
+        @JsonProperty("child_run_id")
+        private String childRunId;
+        @JsonProperty("poll_interval_seconds")
+        private Integer pollIntervalSeconds;
+        @JsonProperty("wait_success")
+        private JsonNode waitSuccess;
+        @JsonProperty("wait_failure")
+        private JsonNode waitFailure;
         private JsonNode arguments;
     }
 

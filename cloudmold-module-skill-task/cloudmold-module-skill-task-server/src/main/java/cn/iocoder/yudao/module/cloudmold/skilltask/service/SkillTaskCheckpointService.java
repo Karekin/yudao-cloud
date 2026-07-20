@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -18,11 +19,14 @@ public class SkillTaskCheckpointService {
 
     private final SkillTaskMapper mapper;
     private final SkillTaskProperties properties;
+    private final SkillTaskJson json;
     private final Clock clock;
 
-    public SkillTaskCheckpointService(SkillTaskMapper mapper, SkillTaskProperties properties, Clock clock) {
+    public SkillTaskCheckpointService(SkillTaskMapper mapper, SkillTaskProperties properties,
+                                      SkillTaskJson json, Clock clock) {
         this.mapper = mapper;
         this.properties = properties;
+        this.json = json;
         this.clock = clock;
     }
 
@@ -77,7 +81,8 @@ public class SkillTaskCheckpointService {
                 .filter(candidate -> candidate.getStepOrder() > step.getStepOrder())
                 .map(Step::getStepCode).findFirst().orElse(null);
         if (nextStepCode == null) {
-            if (mapper.complete(task.getTenantId(), task.getTaskId(), leaseOwner, now) != 1) {
+            String terminalResultSha256 = terminalResultSha256(task, steps);
+            if (mapper.complete(task.getTenantId(), task.getTaskId(), leaseOwner, terminalResultSha256, now) != 1) {
                 throw new LeaseLostException("Task completion checkpoint was rejected");
             }
             mapper.insertHistory(task.getTenantId(), task.getTaskId(), task.getVersion() + 1,
@@ -93,6 +98,46 @@ public class SkillTaskCheckpointService {
                     task.getOperatorId(), task.getOperatorType(), now);
         }
         return nextStepCode;
+    }
+
+    private String terminalResultSha256(Task task, List<Step> steps) {
+        if (task.getDefinitionClosureSha256() == null) {
+            throw new IllegalStateException("Task cannot complete without a frozen definition closure proof");
+        }
+        var proof = json.objectNode();
+        proof.put("schema", "cloudmold.skill-task-terminal/v1");
+        proof.put("tenantId", task.getTenantId());
+        proof.put("taskId", task.getTaskId());
+        proof.put("runId", task.getRunId());
+        proof.put("skillId", task.getSkillId());
+        proof.put("skillVersion", task.getSkillVersion());
+        proof.put("definitionClosureSha256", task.getDefinitionClosureSha256());
+        proof.put("inputSha256", task.getInputSha256());
+        proof.put("riskLevel", task.getRiskLevel());
+        var stepProofs = proof.putArray("steps");
+        steps.stream().sorted(java.util.Comparator.comparing(Step::getStepOrder)).forEach(value -> {
+            var item = stepProofs.addObject();
+            item.put("stepOrder", value.getStepOrder());
+            item.put("stepCode", value.getStepCode());
+            item.put("stepKind", value.getStepKind());
+            item.put("capabilityId", value.getCapabilityId());
+            item.put("operationType", value.getOperationType());
+            item.put("requestSha256", value.getRequestSha256());
+            item.put("resultSha256", value.getResultSha256());
+        });
+        var children = proof.putArray("children");
+        for (Task child : mapper.selectChildren(task.getTenantId(), task.getTaskId())) {
+            if (!"SUCCEEDED".equals(child.getStatus()) || child.getTerminalResultSha256() == null) {
+                throw new IllegalStateException("Parent task cannot complete without child terminal proof");
+            }
+            var item = children.addObject();
+            item.put("taskId", child.getTaskId());
+            item.put("skillId", child.getSkillId());
+            item.put("skillVersion", child.getSkillVersion());
+            item.put("inputSha256", child.getInputSha256());
+            item.put("terminalResultSha256", child.getTerminalResultSha256());
+        }
+        return json.sha256(json.canonical(proof));
     }
 
     @Transactional
@@ -112,6 +157,26 @@ public class SkillTaskCheckpointService {
         }
         mapper.insertHistory(task.getTenantId(), task.getTaskId(), task.getVersion() + 1,
                 "RUNNING", taskStatus, task.getCurrentStepCode(), errorCode, errorMessage,
+                task.getOperatorId(), task.getOperatorType(), now);
+    }
+
+    @Transactional
+    public void checkpointWaiting(Task claimed, Step step, String leaseOwner, Duration pollInterval,
+                                  String detailMessage, String resultJson, String resultSha256) {
+        Task task = lockOwnedTask(claimed.getTenantId(), claimed.getTaskId(), leaseOwner);
+        if (!step.getStepCode().equals(task.getCurrentStepCode())) {
+            throw new LeaseLostException("Task current step changed before wait checkpoint");
+        }
+        LocalDateTime now = now();
+        if (mapper.markStepWaiting(task.getTenantId(), task.getTaskId(), step.getStepCode(), resultJson,
+                resultSha256, now) != 1) {
+            throw new LeaseLostException("Task step wait checkpoint was rejected");
+        }
+        if (mapper.waitTask(task.getTenantId(), task.getTaskId(), leaseOwner, now.plus(pollInterval), now) != 1) {
+            throw new LeaseLostException("Task wait checkpoint was rejected");
+        }
+        mapper.insertHistory(task.getTenantId(), task.getTaskId(), task.getVersion() + 1,
+                "RUNNING", "WAITING", step.getStepCode(), "CHILD_TASK_WAITING", detailMessage,
                 task.getOperatorId(), task.getOperatorType(), now);
     }
 

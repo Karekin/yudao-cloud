@@ -13,6 +13,7 @@ public class SkillTaskSubmitCommand implements java.io.Serializable {
 
     private String skillId;
     private String skillVersion;
+    private String runId;
     private String clientRequestKey;
     private String inputJson;
     private String riskLevel;

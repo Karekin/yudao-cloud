@@ -19,6 +19,9 @@ public class SkillTaskView implements java.io.Serializable {
     private String skillVersion;
     private String clientRequestKey;
     private String inputSha256;
+    private String definitionSha256;
+    private String definitionClosureSha256;
+    private String terminalResultSha256;
     private String riskLevel;
     private String approvalRef;
     private Long submitterId;

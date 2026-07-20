@@ -45,6 +45,10 @@ public class SkillTaskJson {
         return (ObjectNode) value;
     }
 
+    public ObjectNode objectNode() {
+        return objectMapper.createObjectNode();
+    }
+
     public String canonical(JsonNode value) {
         try {
             String result = objectMapper.writeValueAsString(sort(value));

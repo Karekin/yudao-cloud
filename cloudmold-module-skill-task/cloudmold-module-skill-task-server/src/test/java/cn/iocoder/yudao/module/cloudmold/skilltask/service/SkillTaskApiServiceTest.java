@@ -6,12 +6,15 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskRetryCommand;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskSubmitCommand;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskView;
+import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalEvidence;
+import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalVerifier;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskMapper;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Task;
 import cn.iocoder.yudao.module.cloudmold.skilltask.definition.SkillTaskDefinition;
 import cn.iocoder.yudao.module.cloudmold.skilltask.definition.SkillTaskDefinitionRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -38,8 +41,15 @@ class SkillTaskApiServiceTest {
     private final SkillTaskMapper mapper = mock(SkillTaskMapper.class);
     private final SkillTaskDefinitionRegistry definitions = mock(SkillTaskDefinitionRegistry.class);
     private final SkillTaskJson json = new SkillTaskJson(new ObjectMapper(), new SkillTaskProperties());
+    private final SkillTaskApprovalVerifier approvalVerifier = mock(SkillTaskApprovalVerifier.class);
     private final Clock clock = Clock.fixed(Instant.parse("2026-07-18T12:00:00Z"), ZoneOffset.UTC);
-    private final SkillTaskApiService service = new SkillTaskApiService(mapper, definitions, json, clock);
+    private final SkillTaskApiService service = new SkillTaskApiService(mapper, definitions, json,
+            approvalVerifier, clock);
+
+    @BeforeEach
+    void acceptDefinitionProofFreeze() {
+        when(mapper.freezeDefinitionProof(anyLong(), any(), any(), any(), any())).thenReturn(1);
+    }
 
     @AfterEach
     void clearContext() {
@@ -118,6 +128,24 @@ class SkillTaskApiServiceTest {
     }
 
     @Test
+    void verifiesR3ApprovalBeforePersistingAnyTask() throws Exception {
+        authenticate();
+        SkillTaskDefinition definition = readDefinition();
+        definition.setRiskLevel("R3");
+        when(definitions.require("skill.read", "1.0.0")).thenReturn(definition);
+        SkillTaskSubmitCommand command = command("request-r3", "{}");
+        command.setRiskLevel("R3");
+        command.setApprovalRef("cma1:approval-r3:1784380000:" + "a".repeat(64));
+        when(approvalVerifier.verify(any())).thenThrow(new SecurityException("approval scope rejected"));
+
+        assertThatThrownBy(() -> service.submit(command))
+                .isInstanceOf(SecurityException.class)
+                .hasMessage("approval scope rejected");
+        verify(mapper, never()).insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), anyLong(), any(), any(), any(), any());
+    }
+
+    @Test
     void manualRetryTransfersExecutionActorAndAuditsRetryingOperator() {
         authenticate(99L, 3);
         Task failed = task("task-failed", "request-1", "{}", json.sha256("{}"));
@@ -142,6 +170,17 @@ class SkillTaskApiServiceTest {
                 LocalDateTime.of(2026, 7, 18, 12, 0));
     }
 
+    @Test
+    void terminalProofApiRejectsAnyNonTerminalTask() {
+        authenticate();
+        Task running = task("task-running", "request-1", "{}", json.sha256("{}"));
+        running.setStatus("RUNNING");
+        when(mapper.selectTask(8L, "task-running")).thenReturn(running);
+
+        assertThatThrownBy(() -> service.getTerminalProof("task-running"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("terminal proof");
+    }
+
     private void authenticate() {
         authenticate(42L, 2);
     }
@@ -158,6 +197,7 @@ class SkillTaskApiServiceTest {
     private SkillTaskDefinition readDefinition() throws Exception {
         return SkillTaskDefinition.builder().schemaVersion(SkillTaskDefinitionRegistry.SCHEMA_VERSION)
                 .skillId("skill.read").skillVersion("1.0.0").riskLevel("R1").maxAttempts(3)
+                .definitionSha256("d".repeat(64)).definitionClosureSha256("c".repeat(64))
                 .steps(List.of(SkillTaskDefinition.Step.builder().stepCode("read").stepOrder(1)
                         .capabilityId("cap.read").operationType("READ").approvalRequired(false)
                         .arguments(new ObjectMapper().readTree("[]")).build())).build();
@@ -173,6 +213,7 @@ class SkillTaskApiServiceTest {
         task.setTenantId(8L); task.setTaskId(taskId); task.setRunId(taskId);
         task.setSkillId("skill.read"); task.setSkillVersion("1.0.0"); task.setClientRequestKey(requestKey);
         task.setInputJson(input); task.setInputSha256(hash); task.setRiskLevel("R1");
+        task.setDefinitionSha256("d".repeat(64)); task.setDefinitionClosureSha256("c".repeat(64));
         task.setSubmitterId(42L); task.setSubmitterType(2);
         task.setOperatorId(42L); task.setOperatorType(2); task.setStatus("QUEUED"); task.setCurrentStepCode("read");
         task.setAttemptCount(0); task.setMaxAttempts(3); task.setVersion(0L);

@@ -50,6 +50,10 @@ cloudmold:
     batch-size: ${CLOUDMOLD_SKILL_BATCH_SIZE:20}
     default-max-attempts: ${CLOUDMOLD_SKILL_DEFAULT_MAX_ATTEMPTS:5}
     max-payload-bytes: ${CLOUDMOLD_SKILL_MAX_PAYLOAD_BYTES:1048576}
+    approval:
+      hmac-secret: ${CLOUDMOLD_SKILL_TASK_APPROVAL_HMAC_SECRET:}
+      max-validity: ${CLOUDMOLD_SKILL_TASK_APPROVAL_MAX_VALIDITY:4h}
+      clock-skew: ${CLOUDMOLD_SKILL_TASK_APPROVAL_CLOCK_SKEW:30s}
   rpc:
     enabled: true
     export-enabled: true

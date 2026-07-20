@@ -9,4 +9,6 @@ public interface SkillTaskQueryApi {
     SkillTaskView getByRequestKey(String skillId, String clientRequestKey);
 
     List<SkillTaskStepView> listSteps(String taskId);
+
+    SkillTaskTerminalProofView getTerminalProof(String taskId);
 }
