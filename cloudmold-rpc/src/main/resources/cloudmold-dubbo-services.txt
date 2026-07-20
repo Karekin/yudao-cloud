@@ -38,6 +38,7 @@ cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryMigrationQualificationA
 cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryMigrationQueryApi
 cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryMigrationShadowApi
 cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryReservationQueryApi
+cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryStockoutDiagnosisQueryApi
 cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryV3AvailabilityQueryApi
 cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryV3CommandApi
 cn.iocoder.yudao.module.cloudmold.listing.api.ListingCommandApi

@@ -34,4 +34,12 @@ class CloudMoldDubboServiceExporterTest {
                 .hasMessageContaining("non-allowlisted")
                 .hasMessageContaining("unsafe.Api");
     }
+
+    @Test
+    void neverExportsAnExternallyProvidedInterfaceEvenWhenAClientProxyBeanExists() {
+        assertThat(CloudMoldDubboServiceExporter.isExternallyProvided(
+                "external.SkillTaskApi", Set.of("external.SkillTaskApi"))).isTrue();
+        assertThat(CloudMoldDubboServiceExporter.isExternallyProvided(
+                "local.AgentControlApi", Set.of("external.SkillTaskApi"))).isFalse();
+    }
 }

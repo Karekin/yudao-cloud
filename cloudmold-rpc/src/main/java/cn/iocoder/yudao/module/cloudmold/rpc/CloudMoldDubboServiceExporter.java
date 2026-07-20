@@ -45,6 +45,10 @@ public class CloudMoldDubboServiceExporter implements ApplicationListener<Applic
         deleteReadinessMarker();
         ClassLoader classLoader = applicationContext.getClassLoader();
         for (String interfaceName : serviceInterfaces) {
+            if (isExternallyProvided(interfaceName, properties.getExternalServiceInterfaces())) {
+                log.info("Skipping externally provided governed Dubbo service {}", interfaceName);
+                continue;
+            }
             try {
                 Class<?> serviceInterface = Class.forName(interfaceName, false, classLoader);
                 if (!serviceInterface.isInterface()) {
@@ -52,10 +56,6 @@ public class CloudMoldDubboServiceExporter implements ApplicationListener<Applic
                 }
                 Map<String, ?> beans = applicationContext.getBeansOfType(serviceInterface);
                 if (beans.size() != 1) {
-                    if (beans.isEmpty() && properties.getExternalServiceInterfaces().contains(interfaceName)) {
-                        log.info("Skipping externally provided governed Dubbo service {}", interfaceName);
-                        continue;
-                    }
                     String message = "Expected exactly one provider bean for " + interfaceName + " but found "
                             + beans.keySet();
                     if (properties.isFailOnMissingService()) {
@@ -99,6 +99,10 @@ public class CloudMoldDubboServiceExporter implements ApplicationListener<Applic
                     + "interfaces: " + unknown);
         }
         return Set.copyOf(configured);
+    }
+
+    static boolean isExternallyProvided(String interfaceName, Set<String> externalServiceInterfaces) {
+        return externalServiceInterfaces != null && externalServiceInterfaces.contains(interfaceName);
     }
 
     @Override

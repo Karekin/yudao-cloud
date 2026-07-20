@@ -2,6 +2,17 @@ spring:
   application:
     name: yudao-server
 
+  # yudao-server is the monolith/runtime assembly. Module-level Feign clients
+  # are excluded by the application scan, and framework RPC clients are
+  # disabled here so local API implementations remain the sole authority.
+  autoconfigure:
+    exclude:
+      - cn.iocoder.yudao.framework.security.config.YudaoSecurityRpcAutoConfiguration
+      - cn.iocoder.yudao.framework.operatelog.config.YudaoOperateLogRpcAutoConfiguration
+      - cn.iocoder.yudao.framework.tenant.config.YudaoTenantRpcAutoConfiguration
+      - cn.iocoder.yudao.framework.dict.config.YudaoDictRpcAutoConfiguration
+      - cn.iocoder.yudao.framework.apilog.config.YudaoApiLogRpcAutoConfiguration
+
   profiles:
     active: local
 
