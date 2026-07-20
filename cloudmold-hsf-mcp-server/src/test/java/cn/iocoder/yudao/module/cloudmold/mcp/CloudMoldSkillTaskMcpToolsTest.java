@@ -34,17 +34,23 @@ class CloudMoldSkillTaskMcpToolsTest {
     @Test
     void exposesDurableTaskToolsWithAccurateSafetyHints() {
         assertThat(List.of(tools.submitTool().name(), tools.getTool().name(),
-                tools.getByRequestKeyTool().name(), tools.listStepsTool().name(), tools.retryTool().name()))
+                tools.getByRequestKeyTool().name(), tools.listStepsTool().name(), tools.retryTool().name(),
+                tools.fullChainSubmitTool().name(), tools.fullChainRetryTool().name()))
                 .containsExactly(CloudMoldSkillTaskMcpTools.SUBMIT_TOOL_NAME,
                         CloudMoldSkillTaskMcpTools.GET_TOOL_NAME,
                         CloudMoldSkillTaskMcpTools.GET_BY_REQUEST_KEY_TOOL_NAME,
                         CloudMoldSkillTaskMcpTools.LIST_STEPS_TOOL_NAME,
-                        CloudMoldSkillTaskMcpTools.RETRY_TOOL_NAME);
+                        CloudMoldSkillTaskMcpTools.RETRY_TOOL_NAME,
+                        CloudMoldSkillTaskMcpTools.FULL_CHAIN_SUBMIT_TOOL_NAME,
+                        CloudMoldSkillTaskMcpTools.FULL_CHAIN_RETRY_TOOL_NAME);
         assertThat(tools.submitTool().annotations().readOnlyHint()).isFalse();
         assertThat(tools.submitTool().annotations().idempotentHint()).isTrue();
         assertThat(tools.retryTool().annotations().readOnlyHint()).isFalse();
         assertThat(tools.retryTool().annotations().idempotentHint()).isFalse();
         assertThat(tools.getTool().annotations().readOnlyHint()).isTrue();
+        assertThat(tools.fullChainSubmitTool().inputSchema().toString())
+                .doesNotContain("skillId", "skillVersion", "riskLevel")
+                .contains("approvalRef", "clientRunId");
     }
 
     @Test
@@ -76,6 +82,8 @@ class CloudMoldSkillTaskMcpToolsTest {
 
     @Test
     void retriesWithOptimisticVersionThroughTheGovernedDubboCapability() throws Exception {
+        when(executor.execute(eq("capability.cloudmold.skilltask.skill-task-query.get.v1"), any(), any(), eq(false)))
+                .thenReturn(objectMapper.readTree("{\"taskId\":\"task-1\",\"riskLevel\":\"R1\"}"));
         when(executor.execute(eq(RETRY_CAPABILITY), any(), any(), eq(true)))
                 .thenReturn(objectMapper.readTree("{\"taskId\":\"task-1\",\"status\":\"QUEUED\"}"));
         Map<String, Object> arguments = contextArguments();
@@ -108,6 +116,48 @@ class CloudMoldSkillTaskMcpToolsTest {
         assertThat(result.isError()).isTrue();
         assertThat(result.structuredContent().toString()).contains("tenantId is required");
         verifyNoInteractions(executor);
+    }
+
+    @Test
+    void submitsOnlyTheFixedR3FullChainWithApprovalAndClientRunId() throws Exception {
+        when(executor.execute(eq(SUBMIT_CAPABILITY), any(), any(), eq(true)))
+                .thenReturn(objectMapper.readTree("{\"taskId\":\"r3-task\",\"status\":\"QUEUED\"}"));
+        Map<String, Object> arguments = contextArguments();
+        arguments.put("clientRunId", "deerflow-run-1");
+        arguments.put("clientRequestKey", "full-chain-1");
+        arguments.put("input", Map.of("scenario", "commerce"));
+        arguments.put("approvalRef", "cma1:approval1:9999999999:signature");
+
+        McpSchema.CallToolResult result = tools.fullChainSubmit(null, McpSchema.CallToolRequest
+                .builder(CloudMoldSkillTaskMcpTools.FULL_CHAIN_SUBMIT_TOOL_NAME).arguments(arguments).build());
+
+        assertThat(result.isError()).isFalse();
+        ArgumentCaptor<JsonNode> command = ArgumentCaptor.forClass(JsonNode.class);
+        verify(executor).execute(eq(SUBMIT_CAPABILITY), command.capture(), any(), eq(true));
+        JsonNode value = command.getValue().get(0);
+        assertThat(value.get("skillId").asText()).isEqualTo(CloudMoldSkillTaskMcpTools.FULL_CHAIN_SKILL_ID);
+        assertThat(value.get("skillVersion").asText()).isEqualTo(CloudMoldSkillTaskMcpTools.FULL_CHAIN_SKILL_VERSION);
+        assertThat(value.get("riskLevel").asText()).isEqualTo("R3");
+        assertThat(value.get("runId").asText()).isEqualTo("deerflow-run-1");
+        assertThat(value.get("approvalRef").asText()).startsWith("cma1:");
+    }
+
+    @Test
+    void rejectsR3RetryWhenPersistedTaskIsOutsideTheFixedWhitelist() throws Exception {
+        when(executor.execute(eq("capability.cloudmold.skilltask.skill-task-query.get.v1"), any(), any(), eq(false)))
+                .thenReturn(objectMapper.readTree("{\"skillId\":\"skill.other\",\"skillVersion\":\"1.0.0\"}"));
+        Map<String, Object> arguments = contextArguments();
+        arguments.put("taskId", "other-task");
+        arguments.put("expectedVersion", 2L);
+        arguments.put("reason", "retry");
+        arguments.put("approvalRef", "cma1:approval1:9999999999:signature");
+
+        McpSchema.CallToolResult result = tools.fullChainRetry(null, McpSchema.CallToolRequest
+                .builder(CloudMoldSkillTaskMcpTools.FULL_CHAIN_RETRY_TOOL_NAME).arguments(arguments).build());
+
+        assertThat(result.isError()).isTrue();
+        assertThat(result.structuredContent().toString()).contains("restricted");
+        verify(executor).execute(eq("capability.cloudmold.skilltask.skill-task-query.get.v1"), any(), any(), eq(false));
     }
 
     private static Map<String, Object> submitArguments() {

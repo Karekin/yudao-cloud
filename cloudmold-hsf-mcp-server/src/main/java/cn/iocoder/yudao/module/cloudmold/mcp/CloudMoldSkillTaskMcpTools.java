@@ -29,6 +29,8 @@ public class CloudMoldSkillTaskMcpTools {
     static final String GET_BY_REQUEST_KEY_TOOL_NAME = "cloudmold_skill_task_get_by_request_key";
     static final String LIST_STEPS_TOOL_NAME = "cloudmold_skill_task_list_steps";
     static final String RETRY_TOOL_NAME = "cloudmold_skill_task_retry_r1";
+    static final String FULL_CHAIN_SUBMIT_TOOL_NAME = "cloudmold_skill_task_submit_commerce_full_chain_r3";
+    static final String FULL_CHAIN_RETRY_TOOL_NAME = "cloudmold_skill_task_retry_commerce_full_chain_r3";
 
     private static final String SUBMIT_CAPABILITY =
             "capability.cloudmold.skilltask.skill-task-command.submit.v1";
@@ -41,6 +43,8 @@ public class CloudMoldSkillTaskMcpTools {
     private static final String LIST_STEPS_CAPABILITY =
             "capability.cloudmold.skilltask.skill-task-query.list-steps.v1";
     private static final String CONTROL_SKILL_ID = "skill.cloudmold.platform.mcp-task-control.v1";
+    static final String FULL_CHAIN_SKILL_ID = "skill.cloudmold.commerce.full-chain-hsf.v1";
+    static final String FULL_CHAIN_SKILL_VERSION = "1.2.0";
 
     private final CloudMoldCapabilityExecutor executor;
     private final ObjectMapper objectMapper;
@@ -98,6 +102,30 @@ public class CloudMoldSkillTaskMcpTools {
                         "taskId", "expectedVersion", "reason")), false);
     }
 
+    McpSchema.Tool fullChainSubmitTool() {
+        Map<String, Object> properties = contextProperties();
+        properties.put("clientRunId", stringSchema());
+        properties.put("clientRequestKey", stringSchema());
+        properties.put("input", Map.of("type", "object"));
+        properties.put("approvalRef", stringSchema());
+        return writeTool(FULL_CHAIN_SUBMIT_TOOL_NAME,
+                "Submit the fixed, approved R3 CloudMold commerce full-chain Skill to the durable executor",
+                objectSchema(properties, List.of("tenantId", "operatorId", "operatorType", "controlRunId",
+                        "clientRunId", "clientRequestKey", "input", "approvalRef")), true);
+    }
+
+    McpSchema.Tool fullChainRetryTool() {
+        Map<String, Object> properties = contextProperties();
+        properties.put("taskId", stringSchema());
+        properties.put("expectedVersion", Map.of("type", "integer", "minimum", 0));
+        properties.put("reason", stringSchema());
+        properties.put("approvalRef", stringSchema());
+        return writeTool(FULL_CHAIN_RETRY_TOOL_NAME,
+                "Retry only the fixed R3 CloudMold commerce full-chain Skill after approval renewal",
+                objectSchema(properties, List.of("tenantId", "operatorId", "operatorType", "controlRunId",
+                        "taskId", "expectedVersion", "reason", "approvalRef")), false);
+    }
+
     McpSchema.CallToolResult submit(McpSyncServerExchange exchange, McpSchema.CallToolRequest request) {
         return guarded(() -> {
             Map<String, Object> values = arguments(request);
@@ -128,11 +156,51 @@ public class CloudMoldSkillTaskMcpTools {
     McpSchema.CallToolResult retry(McpSyncServerExchange exchange, McpSchema.CallToolRequest request) {
         return guarded(() -> {
             Map<String, Object> values = arguments(request);
+            CloudMoldRpcCallContext context = context(values);
+            String taskId = requiredString(values, "taskId");
+            JsonNode task = executor.execute(GET_CAPABILITY, objectMapper.valueToTree(List.of(taskId)), context, false);
+            if (!"R1".equals(task.path("riskLevel").asText())) {
+                throw new SecurityException("R1 retry is restricted to persisted R1 Skill Tasks");
+            }
             Map<String, Object> command = new LinkedHashMap<>();
-            command.put("taskId", requiredString(values, "taskId"));
+            command.put("taskId", taskId);
             command.put("expectedVersion", nonNegativeLong(values, "expectedVersion"));
             command.put("reason", requiredString(values, "reason"));
-            return invoke(RETRY_CAPABILITY, List.of(command), context(values), true);
+            return invoke(RETRY_CAPABILITY, List.of(command), context, true);
+        });
+    }
+
+    McpSchema.CallToolResult fullChainSubmit(McpSyncServerExchange exchange, McpSchema.CallToolRequest request) {
+        return guarded(() -> {
+            Map<String, Object> values = arguments(request);
+            Map<String, Object> command = new LinkedHashMap<>();
+            command.put("skillId", FULL_CHAIN_SKILL_ID);
+            command.put("skillVersion", FULL_CHAIN_SKILL_VERSION);
+            command.put("runId", requiredString(values, "clientRunId"));
+            command.put("clientRequestKey", requiredString(values, "clientRequestKey"));
+            command.put("inputJson", objectMapper.writeValueAsString(required(values, "input")));
+            command.put("riskLevel", "R3");
+            command.put("approvalRef", requiredString(values, "approvalRef"));
+            return invoke(SUBMIT_CAPABILITY, List.of(command), context(values), true);
+        });
+    }
+
+    McpSchema.CallToolResult fullChainRetry(McpSyncServerExchange exchange, McpSchema.CallToolRequest request) {
+        return guarded(() -> {
+            Map<String, Object> values = arguments(request);
+            CloudMoldRpcCallContext context = context(values);
+            String taskId = requiredString(values, "taskId");
+            JsonNode task = executor.execute(GET_CAPABILITY, objectMapper.valueToTree(List.of(taskId)), context, false);
+            if (!FULL_CHAIN_SKILL_ID.equals(task.path("skillId").asText())
+                    || !FULL_CHAIN_SKILL_VERSION.equals(task.path("skillVersion").asText())) {
+                throw new SecurityException("R3 retry is restricted to the fixed commerce full-chain Skill");
+            }
+            Map<String, Object> command = new LinkedHashMap<>();
+            command.put("taskId", taskId);
+            command.put("expectedVersion", nonNegativeLong(values, "expectedVersion"));
+            command.put("reason", requiredString(values, "reason"));
+            command.put("approvalRef", requiredString(values, "approvalRef"));
+            return invoke(RETRY_CAPABILITY, List.of(command), context, true);
         });
     }
 

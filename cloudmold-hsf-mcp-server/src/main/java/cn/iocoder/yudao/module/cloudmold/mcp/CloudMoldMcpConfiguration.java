@@ -10,7 +10,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(CloudMoldMcpSecurityProperties.class)
+@EnableConfigurationProperties({CloudMoldMcpSecurityProperties.class, CloudMoldAnalyticsProperties.class})
 public class CloudMoldMcpConfiguration {
 
     @Bean
@@ -43,8 +43,8 @@ public class CloudMoldMcpConfiguration {
 
     @Bean
     McpSyncServer cloudMoldMcpServer(HttpServletStreamableServerTransportProvider transport,
-                                     CloudMoldMcpTools tools,
-                                     CloudMoldSkillTaskMcpTools skillTaskTools) {
+                                     CloudMoldMcpTools tools, CloudMoldSkillTaskMcpTools skillTaskTools,
+                                     CloudMoldAnalyticsMcpTools analyticsTools) {
         return McpServer.sync(transport)
                 .serverInfo("cloudmold-hsf-mcp-server", "1.0.0")
                 .instructions("Discover governed CloudMold Dubbo contracts and invoke READ capabilities only. "
@@ -57,6 +57,11 @@ public class CloudMoldMcpConfiguration {
                 .toolCall(skillTaskTools.getByRequestKeyTool(), skillTaskTools::getByRequestKey)
                 .toolCall(skillTaskTools.listStepsTool(), skillTaskTools::listSteps)
                 .toolCall(skillTaskTools.retryTool(), skillTaskTools::retry)
+                .toolCall(skillTaskTools.fullChainSubmitTool(), skillTaskTools::fullChainSubmit)
+                .toolCall(skillTaskTools.fullChainRetryTool(), skillTaskTools::fullChainRetry)
+                .toolCall(analyticsTools.snapshotTool(), analyticsTools::snapshot)
+                .toolCall(analyticsTools.metricValueTool(), analyticsTools::metricValue)
+                .toolCall(analyticsTools.metricDefinitionTool(), analyticsTools::metricDefinition)
                 .build();
     }
 }
