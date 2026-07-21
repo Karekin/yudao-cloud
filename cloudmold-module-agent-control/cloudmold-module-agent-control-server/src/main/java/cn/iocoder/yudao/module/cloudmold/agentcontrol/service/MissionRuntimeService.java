@@ -7,12 +7,14 @@ import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.*;
 import java.util.*;
 
+@ConditionalOnProperty(prefix = "cloudmold.agent-control", name = "enabled", havingValue = "true")
 @Service
 public class MissionRuntimeService implements MissionRuntimeApi {
     static final String STOCKOUT_TEMPLATE = "mission.inventory-stockout-response.v1";

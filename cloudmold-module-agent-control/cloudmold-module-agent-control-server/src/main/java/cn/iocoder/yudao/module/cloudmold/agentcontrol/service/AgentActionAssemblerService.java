@@ -11,6 +11,7 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskCommandApi;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskSubmitCommand;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskView;
 import cn.iocoder.yudao.module.cloudmold.rpc.CloudMoldRpcCallContext;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +19,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Objects;
 
+@ConditionalOnProperty(prefix = "cloudmold.agent-control", name = "enabled", havingValue = "true")
 @Service
 public class AgentActionAssemblerService implements AgentActionAssemblyApi {
 
