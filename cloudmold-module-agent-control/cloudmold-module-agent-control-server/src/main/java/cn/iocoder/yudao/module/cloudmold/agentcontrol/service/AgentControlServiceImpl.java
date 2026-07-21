@@ -437,6 +437,21 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
         return cards == null ? List.of() : List.copyOf(cards);
     }
 
+    @Override
+    public List<ActorRoleGrantView> listActorRoleGrants(String roleCode, String status, Long actorUserId,
+                                                        Integer limit) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        String normalizedRole = roleCode == null || roleCode.isBlank() ? null : roleCode.trim();
+        if (normalizedRole != null) requireRoleCode(normalizedRole);
+        String normalizedStatus = status == null || status.isBlank() ? null
+                : requireRef(status.trim().toUpperCase(Locale.ROOT), "status");
+        int normalizedLimit = limit == null ? 50 : limit;
+        require(normalizedLimit >= 1 && normalizedLimit <= 200, "limit must be between 1 and 200");
+        List<ActorRoleGrantView> grants = mapper.selectActorRoleGrants(tenantId, normalizedRole, normalizedStatus,
+                actorUserId, normalizedLimit);
+        return grants == null ? List.of() : List.copyOf(grants);
+    }
+
     private RoleDefinition requireActiveRole(Long tenantId, String roleCode) {
         RoleDefinition role = requireNonNull(mapper.selectRole(tenantId, roleCode), "role not found");
         require("ACTIVE".equals(role.getStatus()), "role is not ACTIVE");

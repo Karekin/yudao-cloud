@@ -9,6 +9,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 import static cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils.getLoginUserId;
 
@@ -19,6 +21,20 @@ import static cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUti
 public class AgentAuthorityGovernanceAdminController {
     @Resource
     private AgentAuthorityGovernanceApi governanceApi;
+
+    @Resource
+    private AgentControlQueryApi queryApi;
+
+    @GetMapping("/grants")
+    @Operation(summary = "查询岗位角色授予记录（管理员治理只读）")
+    @PreAuthorize("@ss.hasPermission('cloudmold:agent-control:govern')")
+    public CommonResult<List<ActorRoleGrantView>> listGrants(
+            @RequestParam(required = false) String roleCode,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Long actorUserId,
+            @RequestParam(required = false) Integer limit) {
+        return success(queryApi.listActorRoleGrants(roleCode, status, actorUserId, limit));
+    }
 
     @PostMapping("/commands")
     @Operation(summary = "Grant or revoke tenant-scoped actor-role and exact approver authority")

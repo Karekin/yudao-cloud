@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql;
 
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.ActorRoleGrantView;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentBusinessCardView;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.*;
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
@@ -87,6 +88,25 @@ public interface AgentControlStoreMapper {
                                                     @Param("roleCode") String roleCode,
                                                     @Param("cardType") String cardType,
                                                     @Param("status") String status,
+                                                    @Param("limit") int limit);
+
+    @Select("""
+            <script>
+            SELECT grant_id,actor_user_id,role_code,status,valid_from,valid_until,granted_by_user_id,
+                   version,granted_at,updated_at
+            FROM cloudmold_agent_actor_role_grant
+            WHERE tenant_id=#{tenantId}
+            <if test="roleCode != null">AND role_code=#{roleCode}</if>
+            <if test="status != null">AND status=#{status}</if>
+            <if test="actorUserId != null">AND actor_user_id=#{actorUserId}</if>
+            ORDER BY granted_at DESC,grant_id DESC
+            LIMIT #{limit}
+            </script>
+            """)
+    List<ActorRoleGrantView> selectActorRoleGrants(@Param("tenantId") Long tenantId,
+                                                    @Param("roleCode") String roleCode,
+                                                    @Param("status") String status,
+                                                    @Param("actorUserId") Long actorUserId,
                                                     @Param("limit") int limit);
 
     @Insert("""
