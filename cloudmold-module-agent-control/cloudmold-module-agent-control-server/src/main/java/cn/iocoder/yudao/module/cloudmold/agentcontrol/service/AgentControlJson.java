@@ -14,8 +14,8 @@ import java.util.Set;
 final class AgentControlJson {
 
     private static final Set<String> FORBIDDEN_EXECUTION_KEYS = Set.of(
-            "tenantid", "operatorid", "operatortype", "runid", "approvalref", "approvalscope",
-            "idempotencykey", "clientrequestkey", "skilltaskid", "skillid", "skillversion");
+            "tenantid", "operatorid", "operatortype", "approvalref", "approvalscope",
+            "clientrequestkey", "skilltaskid", "skillid", "skillversion");
 
     private AgentControlJson() {
     }

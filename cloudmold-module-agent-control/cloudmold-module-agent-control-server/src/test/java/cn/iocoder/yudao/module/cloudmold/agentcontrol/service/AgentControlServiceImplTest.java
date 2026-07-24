@@ -338,6 +338,23 @@ class AgentControlServiceImplTest {
     }
 
     @Test
+    void acceptsFrozenBusinessReplayCoordinatesWithoutAcceptingAuthorityFields() {
+        when(mapper.selectRole(17L, "inventory-control")).thenReturn(activeRole("inventory-control"));
+        when(mapper.selectActionPolicy(17L, "inventory-control", "inventory.rebalance"))
+                .thenReturn(policy("inventory-control", "inventory.rebalance", false));
+
+        service.execute(base(AgentControlOperation.CREATE_WORK_ORDER, "context-replay-1")
+                .workOrder(AgentControlCommand.WorkOrderDefinition.builder().workOrderId("wo-replay")
+                        .roleCode("inventory-control").actionCode("inventory.rebalance").title("库存分析")
+                        .businessContextJson("""
+                                {"commands":[{"runId":"run-1","idempotencyKey":"inventory-rebalance-1"}]}
+                                """).build()).build(), 100L);
+
+        assertThat(workOrder.get().getBusinessContextJson())
+                .isEqualTo("{\"commands\":[{\"idempotencyKey\":\"inventory-rebalance-1\",\"runId\":\"run-1\"}]}");
+    }
+
+    @Test
     void rejectsStaleWorkOrderVersionBeforeStateMutation() {
         WorkOrder row = new WorkOrder().setWorkOrderId("wo-stale").setTenantId(17L)
                 .setRoleCode("inventory-control").setActionCode("inventory.rebalance")
