@@ -17,6 +17,7 @@ import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentContro
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalScope;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +41,7 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
     private final SkillTaskApprovalSigningProperties properties;
     private final Clock clock;
 
+    @Autowired
     public AgentExecutionTicketService(AgentControlStoreMapper mapper, SkillTaskApprovalSigningProperties properties) {
         this(mapper, properties, Clock.systemUTC());
     }
