@@ -156,6 +156,7 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
         WorkOrder row = new WorkOrder().setWorkOrderId(valueOrUuid(input.getWorkOrderId())).setTenantId(tenantId)
                 .setRoleCode(input.getRoleCode()).setActionCode(input.getActionCode()).setTitle(input.getTitle())
                 .setBusinessContextJson(businessContextJson).setStatus(status).setRequesterUserId(operatorUserId)
+                .setAssigneeUserId(operatorUserId)
                 .setActionPolicyId(policy.getPolicyId()).setActionPolicyVersion(policy.getVersion())
                 .setRiskLevel(policy.getRiskLevel()).setExecutionRequired(policy.getExecutionRequired())
                 .setSkillId(policy.getSkillId()).setSkillVersion(policy.getSkillVersion())

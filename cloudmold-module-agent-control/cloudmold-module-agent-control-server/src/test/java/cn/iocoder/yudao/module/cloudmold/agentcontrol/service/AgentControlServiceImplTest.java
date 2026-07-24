@@ -101,7 +101,8 @@ class AgentControlServiceImplTest {
                 AgentControlResult::getAggregateId, AgentControlResult::getStatus)
                 .containsExactly("role_work_order", "wo-1", "READY");
         assertThat(workOrder.get()).extracting(WorkOrder::getTenantId, WorkOrder::getRequesterUserId,
-                WorkOrder::getStatus).containsExactly(17L, 100L, "READY");
+                WorkOrder::getAssigneeUserId, WorkOrder::getStatus)
+                .containsExactly(17L, 100L, 100L, "READY");
         verify(mapper).insertAuditEvent(argThat(event -> event.getTenantId().equals(17L)
                 && event.getEventType().equals("agent_control.work_order.created")));
     }
