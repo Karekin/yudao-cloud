@@ -69,6 +69,8 @@ case "${1:-}" in
     ;;
 esac
 
+"$SCRIPT_DIR/cloudmold-migration-manifest.sh" --check
+
 : "${CLOUDMOLD_DB_HOST:?set CLOUDMOLD_DB_HOST}"
 : "${CLOUDMOLD_DB_NAME:?set CLOUDMOLD_DB_NAME}"
 : "${CLOUDMOLD_DB_USERNAME:?set CLOUDMOLD_DB_USERNAME}"
@@ -127,6 +129,25 @@ assert_inventory() {
   fi
 }
 
+assert_zero_rows() {
+  local name=$1
+  local file=$2
+  local result
+
+  result=$(
+    MYSQL_PWD="$CLOUDMOLD_DB_PASSWORD" \
+    "$MYSQL_BIN" "${MYSQL_ARGS[@]}" \
+      <"$file"
+  )
+
+  result=$(printf '%s\n' "$result" | sed '/^--/d;/^#/d;/^$/d')
+  if [[ -n "$result" ]]; then
+    echo "database preflight failed: navigation zero-row check '$name' returned data" >&2
+    echo "$result" >&2
+    return 1
+  fi
+}
+
 version=$(query 'SELECT VERSION();')
 major_version=${version%%.*}
 if [[ ! "$major_version" =~ ^[0-9]+$ ]] || (( major_version < 8 )); then
@@ -149,6 +170,16 @@ assert_inventory tables "$(list_required_tables)" "$tables"
 assert_inventory columns "$(list_required_columns)" "$columns"
 assert_inventory indexes "$(list_required_indexes)" "$indexes"
 assert_inventory constraints "$(list_required_constraints)" "$constraints"
+
+if [[ "${CLOUDMOLD_PRECHECK_BUSINESS_NAVIGATION:-true}" == "true" ]]; then
+  V82_PRECHECK="${CLOUDMOLD_BUSINESS_NAVIGATION_PRECHECK_FILE:-${REPO_ROOT}/sql/cloudmold/V20260724_82__business_navigation_preflight.sql}"
+  if [[ ! -f "$V82_PRECHECK" ]]; then
+    echo "database preflight failed: missing V82 navigation precheck file: $V82_PRECHECK" >&2
+    exit 1
+  fi
+
+  assert_zero_rows 'business_navigation_preflight' "$V82_PRECHECK"
+fi
 
 table_count=$(list_required_tables | wc -l | tr -d ' ')
 echo "database preflight passed: schema=$selected_database mysql=$version required_tables=$table_count"
