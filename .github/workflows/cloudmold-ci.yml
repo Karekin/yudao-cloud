@@ -32,11 +32,29 @@ jobs:
           java-version: '17'
           cache: maven
 
-      - name: Keep Agent Control dormant until P0 activation review
-        run: >-
-          ! grep --quiet --fixed-strings
-          '<artifactId>cloudmold-module-agent-control-server</artifactId>'
-          yudao-server/pom.xml
+      - name: Keep Agent Control assembled but dormant until P0 activation review
+        shell: bash
+        run: |
+          set -euo pipefail
+          properties='cloudmold-module-agent-control/cloudmold-module-agent-control-server/src/main/java/cn/iocoder/yudao/module/cloudmold/agentcontrol/AgentControlProperties.java'
+
+          grep --quiet --fixed-strings \
+            '<artifactId>cloudmold-module-agent-control-server</artifactId>' \
+            yudao-server/pom.xml
+          grep --quiet --fixed-strings \
+            'private boolean enabled = false;' \
+            "${properties}"
+          grep --quiet --fixed-strings \
+            'private boolean actionSubmissionEnabled = false;' \
+            "${properties}"
+
+          if grep --recursive --line-number \
+            --include='*.yml' --include='*.yaml' --include='*.properties' \
+            --extended-regexp 'agent-control|CLOUDMOLD_AGENT_CONTROL' \
+            yudao-server/src/main/resources; then
+            echo 'Agent Control must remain unconfigured and default-off until P0 activation review.' >&2
+            exit 1
+          fi
 
       - name: Test CloudMold-owned modules
         run: >-
