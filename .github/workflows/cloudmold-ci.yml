@@ -68,6 +68,9 @@ jobs:
       - name: Test the Demo database preflight gate
         run: bash deploy/demo/test-database-preflight.sh
 
+      - name: Verify CloudMold admin write permissions
+        run: bash deploy/demo/test-cloudmold-write-permission-gate.sh
+
       - name: Install thin module artifacts
         run: >-
           mvn -B -ntp -pl yudao-server -am clean install -DskipTests
