@@ -1,6 +1,8 @@
 package cn.iocoder.yudao.module.cloudmold.skilltask.approval;
 
 import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalScope;
 import org.junit.jupiter.api.Test;
 
 import javax.crypto.Mac;
@@ -71,6 +73,12 @@ class HmacSkillTaskApprovalVerifierTest {
                 .isInstanceOf(SecurityException.class).hasMessageContaining("signature");
 
         assertThatThrownBy(() -> verifier("too-short", Duration.ofHours(4)))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("32 bytes");
+        assertThatThrownBy(() -> SkillTaskApprovalRefCodec.sign("too-short".getBytes(StandardCharsets.UTF_8), "msg"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("32 bytes");
+        assertThatThrownBy(() -> SkillTaskApprovalRefCodec.issue("too-short".getBytes(StandardCharsets.UTF_8),
+                new SkillTaskApprovalScope(8L, 42L, 2, "skill.full-chain", "1.0.0", "a".repeat(64), "R3"),
+                "approval-0718", CLOCK.instant().plus(Duration.ofMinutes(5))))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("32 bytes");
     }
 

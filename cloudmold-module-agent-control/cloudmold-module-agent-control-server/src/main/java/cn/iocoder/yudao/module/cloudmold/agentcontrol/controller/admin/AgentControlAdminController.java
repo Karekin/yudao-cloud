@@ -21,6 +21,7 @@ import java.util.List;
 public class AgentControlAdminController {
     @Resource private AgentControlCommandApi commandApi;
     @Resource private AgentControlQueryApi queryApi;
+    @Resource private AgentExecutionTicketApi executionTicketApi;
 
     @PostMapping("/commands")
     @Operation(summary = "Persist role work, handoff, approval and business-result commands")
@@ -36,6 +37,14 @@ public class AgentControlAdminController {
     public CommonResult<AgentControlResult> executeGovernance(@RequestBody AgentControlCommand command) {
         requireGovernanceOperation(command, true);
         return success(commandApi.execute(command, getLoginUserId()));
+    }
+
+    @PostMapping("/execution-tickets")
+    @Operation(summary = "Issue one short-lived cma1 SkillTask execution ticket from an approved READY work order")
+    @PreAuthorize("@ss.hasPermission('cloudmold:agent-control:command')")
+    public CommonResult<AgentExecutionTicketResult> issueExecutionTicket(
+            @RequestBody AgentExecutionTicketCommand command) {
+        return success(executionTicketApi.issue(command, getLoginUserId()));
     }
 
     @GetMapping("/roles/{roleCode}")

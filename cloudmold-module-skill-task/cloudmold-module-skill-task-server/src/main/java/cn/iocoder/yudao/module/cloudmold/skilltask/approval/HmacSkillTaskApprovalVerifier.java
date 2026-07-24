@@ -1,26 +1,19 @@
 package cn.iocoder.yudao.module.cloudmold.skilltask.approval;
 
 import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalScope;
 import org.springframework.stereotype.Component;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HexFormat;
-import java.util.Locale;
 import java.util.Objects;
-import java.util.regex.Pattern;
 
 @Component
 public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier {
-
-    static final String VERSION = "cma1";
-    private static final String ALGORITHM = "HmacSHA256";
-    private static final Pattern APPROVAL_ID = Pattern.compile("[A-Za-z0-9._-]{8,64}");
 
     private final byte[] secret;
     private final Duration maxValidity;
@@ -45,82 +38,33 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
         if (secret.length == 0) {
             throw new SecurityException("R2/R3 Skill approvals are disabled because no approval authority is configured");
         }
-        String reference = requireText(context.approvalRef(), "approvalRef");
-        String[] parts = reference.split(":", -1);
-        if (parts.length != 4 || !VERSION.equals(parts[0]) || !APPROVAL_ID.matcher(parts[1]).matches()) {
-            throw new SecurityException("approvalRef has an unsupported format");
-        }
-        long expiresEpoch;
         try {
-            expiresEpoch = Long.parseLong(parts[2]);
-        } catch (NumberFormatException ex) {
-            throw new SecurityException("approvalRef expiry is invalid", ex);
-        }
-        byte[] supplied;
-        try {
-            supplied = HexFormat.of().parseHex(parts[3]);
+            String reference = requireText(context.approvalRef(), "approvalRef");
+            SkillTaskApprovalRefCodec.ParsedApprovalRef parsed = SkillTaskApprovalRefCodec.parse(reference);
+            byte[] expected = SkillTaskApprovalRefCodec.sign(secret, message(context, parsed.approvalId(),
+                    parsed.expiresAt().getEpochSecond()));
+            if (!MessageDigest.isEqual(expected, parsed.signature())) {
+                throw new SecurityException("approvalRef signature or scope is invalid");
+            }
+            Instant now = clock.instant();
+            Instant expiresAt = parsed.expiresAt();
+            if (!expiresAt.plus(clockSkew).isAfter(now)) {
+                throw new SecurityException("approvalRef has expired");
+            }
+            if (expiresAt.isAfter(now.plus(maxValidity).plus(clockSkew))) {
+                throw new SecurityException("approvalRef validity exceeds the configured maximum");
+            }
+            return new SkillTaskApprovalEvidence(parsed.approvalId(), SkillTaskApprovalRefCodec.sha256(reference),
+                    expiresAt, SkillTaskApprovalRefCodec.VERIFIER);
         } catch (IllegalArgumentException ex) {
-            throw new SecurityException("approvalRef signature is invalid", ex);
+            throw new SecurityException(ex.getMessage(), ex);
         }
-        if (supplied.length != 32) {
-            throw new SecurityException("approvalRef signature is invalid");
-        }
-        byte[] expected = sign(message(context, parts[1], expiresEpoch));
-        if (!MessageDigest.isEqual(expected, supplied)) {
-            throw new SecurityException("approvalRef signature or scope is invalid");
-        }
-        Instant now = clock.instant();
-        Instant expiresAt = Instant.ofEpochSecond(expiresEpoch);
-        if (!expiresAt.plus(clockSkew).isAfter(now)) {
-            throw new SecurityException("approvalRef has expired");
-        }
-        if (expiresAt.isAfter(now.plus(maxValidity).plus(clockSkew))) {
-            throw new SecurityException("approvalRef validity exceeds the configured maximum");
-        }
-        return new SkillTaskApprovalEvidence(parts[1], sha256(reference), expiresAt, VERSION + ":hmac-sha256");
     }
 
     static String message(SkillTaskApprovalContext context, String approvalId, long expiresEpoch) {
-        return String.join("\n", VERSION, approvalId, Long.toString(expiresEpoch),
-                Long.toString(context.tenantId()), Long.toString(context.operatorId()),
-                Integer.toString(context.operatorType()), requireText(context.skillId(), "skillId"),
-                requireText(context.skillVersion(), "skillVersion"),
-                requireSha256(context.inputSha256()), requireRisk(context.riskLevel()));
-    }
-
-    private byte[] sign(String value) {
-        try {
-            Mac mac = Mac.getInstance(ALGORITHM);
-            mac.init(new SecretKeySpec(secret, ALGORITHM));
-            return mac.doFinal(value.getBytes(StandardCharsets.UTF_8));
-        } catch (Exception ex) {
-            throw new IllegalStateException("Cannot verify Skill Task approval", ex);
-        }
-    }
-
-    private static String sha256(String value) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) {
-            throw new IllegalStateException("Cannot hash Skill Task approval reference", ex);
-        }
-    }
-
-    private static String requireSha256(String value) {
-        String normalized = requireText(value, "inputSha256").toLowerCase();
-        if (!normalized.matches("[0-9a-f]{64}")) {
-            throw new IllegalArgumentException("inputSha256 must be lowercase SHA-256 hex");
-        }
-        return normalized;
-    }
-
-    private static String requireRisk(String value) {
-        String risk = requireText(value, "riskLevel").toUpperCase(Locale.ROOT);
-        if (!risk.equals("R2") && !risk.equals("R3")) {
-            throw new IllegalArgumentException("approval verification is only valid for R2/R3 Skills");
-        }
-        return risk;
+        return SkillTaskApprovalRefCodec.message(new SkillTaskApprovalScope(context.tenantId(), context.operatorId(),
+                context.operatorType(), context.skillId(), context.skillVersion(), context.inputSha256(),
+                context.riskLevel()), approvalId, expiresEpoch);
     }
 
     private static String requireText(String value, String field) {
