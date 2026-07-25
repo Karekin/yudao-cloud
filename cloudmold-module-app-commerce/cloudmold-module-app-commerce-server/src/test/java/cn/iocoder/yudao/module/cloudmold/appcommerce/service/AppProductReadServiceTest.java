@@ -13,6 +13,7 @@ import cn.iocoder.yudao.module.cloudmold.quality.api.QualityConsumerEvidenceApi;
 import cn.iocoder.yudao.module.cloudmold.quality.api.QualityConsumerEvidenceView;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -35,6 +36,7 @@ class AppProductReadServiceTest {
 
     @Test
     void pageShouldAlwaysUseYShoppingChannelForConsumerCatalog() {
+        ReflectionTestUtils.setField(service, "appChannel", "YSHOPPING_INTERNAL");
         when(listingQueryApi.listPublished(any())).thenReturn(PublishedListingPageView.builder()
                 .list(List.of()).total(0L).pageNo(2).pageSize(12).build());
 
@@ -42,9 +44,42 @@ class AppProductReadServiceTest {
 
         ArgumentCaptor<PublishedListingPageQuery> query = ArgumentCaptor.forClass(PublishedListingPageQuery.class);
         verify(listingQueryApi).listPublished(query.capture());
-        assertThat(query.getValue().getChannelCode()).isEqualTo("YSHOPPING");
+        assertThat(query.getValue().getChannelCode()).isEqualTo("YSHOPPING_INTERNAL");
         assertThat(query.getValue().getKeyword()).isEqualTo("  coat  ");
         assertThat(result.getTotal()).isZero();
+    }
+
+    @Test
+    void pageShouldTrustSellableListingContractAndKeepTotalAligned() {
+        ReflectionTestUtils.setField(service, "appChannel", "YSHOPPING_INTERNAL");
+        when(listingQueryApi.listPublished(any())).thenReturn(PublishedListingPageView.builder()
+                .list(List.of(PublishedListingView.builder()
+                        .listingId("listing-1")
+                        .listingNo("LIST-1")
+                        .title("Wool Coat")
+                        .canonicalSpuId("spu-1")
+                        .offers(List.of(ListingOfferView.builder()
+                                .listingOfferId("offer-1")
+                                .canonicalSkuId("sku-1")
+                                .priceMinor(29900L)
+                                .currencyCode("CNY")
+                                .enabled(true)
+                                .build()))
+                        .build()))
+                .total(1L).pageNo(1).pageSize(20).build());
+        CatalogSkuProjectionView projection = new CatalogSkuProjectionView();
+        projection.setCanonicalSkuId("sku-1");
+        projection.setSkuCode("SKU-1");
+        when(catalogSkuProjectionApi.getActiveSku("sku-1")).thenReturn(projection);
+        when(inventoryAvailabilityQueryApi.getBySku(eq("sku-1"), any())).thenReturn(InventorySkuAvailabilityView.builder()
+                .canonicalSkuId("sku-1").allocatableQuantity(BigDecimal.ONE).inventoryVersion(3L).build());
+        when(qualityConsumerEvidenceApi.getLatestBySku("sku-1")).thenReturn(QualityConsumerEvidenceView.builder()
+                .canonicalSkuId("sku-1").status("VERIFIED").build());
+
+        AppProductPageView result = service.page(null, 1, 20);
+
+        assertThat(result.getList()).hasSize(1);
+        assertThat(result.getTotal()).isEqualTo(1L);
     }
 
     @Test

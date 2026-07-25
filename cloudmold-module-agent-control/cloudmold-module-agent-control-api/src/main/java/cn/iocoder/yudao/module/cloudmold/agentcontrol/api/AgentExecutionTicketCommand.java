@@ -21,5 +21,9 @@ public class AgentExecutionTicketCommand implements Serializable {
     private String approvalId;
     private Long workOrderExpectedVersion;
     private Long validForSeconds;
+    private String missionRunId;
+    private String leaseOwner;
+    private String leaseToken;
+    private Long fencingToken;
 
 }

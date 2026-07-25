@@ -1,14 +1,19 @@
 package cn.iocoder.yudao.module.cloudmold.inventory.dal.mysql;
 
 import cn.iocoder.yudao.framework.mybatis.core.mapper.BaseMapperX;
-import cn.iocoder.yudao.module.cloudmold.inventory.dal.dataobject.InventoryV3ReservationDO;
 import cn.iocoder.yudao.module.cloudmold.inventory.dal.dataobject.InventoryV3ReservationAllocationDO;
+import cn.iocoder.yudao.module.cloudmold.inventory.dal.dataobject.InventoryV3ReservationDO;
 import org.apache.ibatis.annotations.*;
 
 import java.time.LocalDateTime;
 
 @Mapper
 public interface InventoryV3ReservationMapper extends BaseMapperX<InventoryV3ReservationDO> {
+
+    @Select("SELECT * FROM cloudmold_inventory_reservation_v3 WHERE reservation_id = #{reservationId} AND tenant_id = #{tenantId}")
+    InventoryV3ReservationDO selectHint(@Param("tenantId") Long tenantId,
+                                        @Param("reservationId") String reservationId);
+
     @Select("SELECT * FROM cloudmold_inventory_reservation_v3 WHERE tenant_id=#{tenantId} AND reservation_id=#{reservationId} FOR UPDATE")
     InventoryV3ReservationDO selectForUpdate(@Param("tenantId") Long tenantId,
                                              @Param("reservationId") String reservationId);

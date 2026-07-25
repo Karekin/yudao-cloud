@@ -416,9 +416,16 @@ public interface QualityMapper {
 
     @Select("""
             SELECT canonical_sku_id,
-                   CASE COALESCE(ground_truth_decision,secondary_decision,decision)
-                       WHEN 'PASS' THEN 'VERIFIED'
-                       WHEN 'FAIL' THEN 'REJECTED'
+                   CASE
+                       WHEN EXISTS (
+                           SELECT 1
+                           FROM cloudmold_quality_recall_action recall_action
+                           WHERE recall_action.tenant_id=cloudmold_inspection_task.tenant_id
+                             AND recall_action.inspection_task_id=cloudmold_inspection_task.task_id
+                             AND recall_action.status IN ('OPEN','ACKNOWLEDGED')
+                       ) THEN 'RECALLED'
+                       WHEN COALESCE(ground_truth_decision,secondary_decision,decision)='PASS' THEN 'VERIFIED'
+                       WHEN COALESCE(ground_truth_decision,secondary_decision,decision)='FAIL' THEN 'REJECTED'
                        ELSE 'UNVERIFIED'
                    END AS status,
                    task_id AS inspection_task_id,

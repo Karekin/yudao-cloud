@@ -102,6 +102,26 @@ public interface CatalogLifecycleMapper {
     @Select("SELECT COUNT(*) FROM cloudmold_catalog_sku WHERE tenant_id=#{tenantId} AND spu_id=#{spuId} AND status=10")
     int countActiveSkus(@Param("tenantId") Long tenantId, @Param("spuId") String spuId);
 
+    @Select("SELECT COUNT(*) FROM cloudmold_catalog_spu WHERE tenant_id=#{tenantId} AND style_id=#{styleId} AND status=30")
+    int countActiveSpus(@Param("tenantId") Long tenantId, @Param("styleId") String styleId);
+
+    @Select("SELECT COUNT(*) FROM cloudmold_catalog_sku WHERE tenant_id=#{tenantId} AND color_id=#{colorId} AND status=10")
+    int countActiveColorSkus(@Param("tenantId") Long tenantId, @Param("colorId") String colorId);
+
+    @Select("""
+            SELECT COUNT(*) FROM cloudmold_catalog_sku sku
+            JOIN cloudmold_catalog_size size
+              ON size.tenant_id=sku.tenant_id AND size.size_id=sku.size_id
+            WHERE sku.tenant_id=#{tenantId} AND size.size_group_id=#{groupId} AND sku.status=10
+            """)
+    int countActiveSizeGroupSkus(@Param("tenantId") Long tenantId, @Param("groupId") String groupId);
+
+    @Select("SELECT COUNT(*) FROM cloudmold_catalog_size WHERE tenant_id=#{tenantId} AND size_group_id=#{groupId} AND status=10")
+    int countActiveSizes(@Param("tenantId") Long tenantId, @Param("groupId") String groupId);
+
+    @Select("SELECT COUNT(*) FROM cloudmold_catalog_sku WHERE tenant_id=#{tenantId} AND size_id=#{sizeId} AND status=10")
+    int countActiveSizeSkus(@Param("tenantId") Long tenantId, @Param("sizeId") String sizeId);
+
     @Select("SELECT COUNT(*) FROM cloudmold_catalog_spu WHERE tenant_id=#{tenantId} AND style_id=#{styleId} AND status<>90")
     int countNonArchivedSpus(@Param("tenantId") Long tenantId, @Param("styleId") String styleId);
 

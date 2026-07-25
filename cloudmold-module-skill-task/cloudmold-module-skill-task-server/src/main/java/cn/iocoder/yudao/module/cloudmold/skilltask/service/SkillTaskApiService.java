@@ -11,6 +11,9 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskSubmitCommand;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskTerminalProofView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskMissionLeaseFencePort;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskMissionLeaseFencePort.MissionLeaseFence;
 import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalContext;
 import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalEvidence;
 import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalVerifier;
@@ -21,6 +24,7 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Task;
 import cn.iocoder.yudao.module.cloudmold.skilltask.definition.SkillTaskDefinition;
 import cn.iocoder.yudao.module.cloudmold.skilltask.definition.SkillTaskDefinitionRegistry;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +35,7 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -42,15 +47,24 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
     private final SkillTaskDefinitionRegistry definitions;
     private final SkillTaskJson json;
     private final SkillTaskApprovalVerifier approvalVerifier;
+    private final SkillTaskMissionLeaseFencePort missionLeaseFenceApi;
     private final Clock clock;
 
+    @Autowired
     public SkillTaskApiService(SkillTaskMapper mapper, SkillTaskDefinitionRegistry definitions,
-                               SkillTaskJson json, SkillTaskApprovalVerifier approvalVerifier, Clock clock) {
+                               SkillTaskJson json, SkillTaskApprovalVerifier approvalVerifier,
+                               Optional<SkillTaskMissionLeaseFencePort> missionLeaseFenceApi, Clock clock) {
         this.mapper = mapper;
         this.definitions = definitions;
         this.json = json;
         this.approvalVerifier = approvalVerifier;
+        this.missionLeaseFenceApi = missionLeaseFenceApi.orElse(null);
         this.clock = clock;
+    }
+
+    public SkillTaskApiService(SkillTaskMapper mapper, SkillTaskDefinitionRegistry definitions,
+                               SkillTaskJson json, SkillTaskApprovalVerifier approvalVerifier, Clock clock) {
+        this(mapper, definitions, json, approvalVerifier, Optional.empty(), clock);
     }
 
     @Override
@@ -80,10 +94,12 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
         if (existing != null) {
             verifyReplay(existing, skillVersion, requestedRunId, inputSha256, riskLevel, approvalRef);
             verifyDefinitionProof(existing, definition);
+            validatePersistedMissionFence(existing, requestedRunId);
             return toView(existing);
         }
         SkillTaskApprovalEvidence approval = verifyApproval(tenantId, operator, skillId, skillVersion,
                 inputSha256, definition.getDefinitionClosureSha256(), riskLevel, approvalRef);
+        validateMissionFence(approval == null ? null : approval.claims(), requestedRunId);
 
         String taskId = UUID.randomUUID().toString().replace("-", "");
         String runId = requestedRunId == null ? taskId : requestedRunId;
@@ -245,9 +261,33 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
         if (requestedRunId != null && !requestedRunId.equals(task.getRunId())) {
             throw new IllegalStateException("clientRequestKey was already used with a different runId");
         }
-        if (approvalRef != null && task.getApprovalRef() != null && !approvalRef.equals(task.getApprovalRef())) {
+        if (!Objects.equals(approvalRef, task.getApprovalRef())) {
             throw new IllegalStateException("clientRequestKey was already used with a different approvalRef");
         }
+    }
+
+    private void validatePersistedMissionFence(Task task, String requestedRunId) {
+        String approvalRef = task.getApprovalRef();
+        if (approvalRef == null || !approvalRef.startsWith(SkillTaskApprovalRefCodec.CLAIMS_VERSION + ":")) {
+            return;
+        }
+        validateMissionFence(SkillTaskApprovalRefCodec.parseClaims(approvalRef).claims(), requestedRunId);
+    }
+
+    private void validateMissionFence(SkillTaskApprovalPermitClaims claims, String requestedRunId) {
+        if (claims == null || !SkillTaskApprovalRefCodec.CLAIMS_VERSION.equals(claims.version())) {
+            return;
+        }
+        if (missionLeaseFenceApi == null) {
+            throw new SecurityException("cma3 mission lease validation is unavailable");
+        }
+        if (claims.missionBound() && !Objects.equals(requestedRunId, claims.missionRunId())) {
+            throw new SecurityException("Skill Task runId does not match the mission lease fence");
+        }
+        missionLeaseFenceApi.validateCurrentLease(new MissionLeaseFence(
+                claims.tenantId(), claims.workOrderId(), claims.missionRunId(), claims.leaseOwner(),
+                claims.leaseEpoch() == null ? 0L : claims.leaseEpoch(),
+                claims.fencingToken() == null ? 0L : claims.fencingToken()));
     }
 
     private void verifyDefinitionProof(Task task, SkillTaskDefinition definition) {
@@ -279,11 +319,20 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
         if (consumption == null) {
             throw new IllegalStateException("Skill Task permit consumption did not become visible");
         }
-        if (!requestKey.equals(consumption.getClientRequestKey())) {
+        if (!Objects.equals(requestKey, consumption.getClientRequestKey())) {
             throw new IllegalStateException("approvalRef was already consumed by a different clientRequestKey");
         }
-        if (!approval.rootRequestIdentity().equals(consumption.getRootRequestIdentity())) {
-            throw new IllegalStateException("approvalRef root request identity drifted after first consumption");
+        if (!Objects.equals(approval.permitId(), consumption.getPermitId())
+                || !Objects.equals(approval.approvalId(), consumption.getApprovalId())
+                || !Objects.equals(approval.workOrderId(), consumption.getWorkOrderId())
+                || !Objects.equals(approval.rootRequestIdentity(), consumption.getRootRequestIdentity())
+                || !Objects.equals(taskId, consumption.getTaskId())
+                || !Objects.equals(approval.referenceSha256(), consumption.getApprovalRefSha256())
+                || !Objects.equals(definition.getDefinitionClosureSha256(),
+                        consumption.getDefinitionClosureSha256())
+                || !Objects.equals(inputSha256, consumption.getInputSha256())
+                || !Objects.equals(riskLevel, consumption.getRiskLevel())) {
+            throw new IllegalStateException("approvalRef permit consumption drifted after first consumption");
         }
     }
 

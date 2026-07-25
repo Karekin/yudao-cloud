@@ -4,7 +4,9 @@ import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryReservationView;
 import cn.iocoder.yudao.module.cloudmold.inventory.dal.dataobject.InventoryReservationDO;
 import cn.iocoder.yudao.module.cloudmold.inventory.dal.dataobject.InventoryCancellationReservationDO;
+import cn.iocoder.yudao.module.cloudmold.inventory.dal.dataobject.InventoryV3ReservationDO;
 import cn.iocoder.yudao.module.cloudmold.inventory.dal.mysql.InventoryReservationMapper;
+import cn.iocoder.yudao.module.cloudmold.inventory.dal.mysql.InventoryV3ReservationMapper;
 import org.junit.jupiter.api.*;
 
 import java.math.BigDecimal;
@@ -15,7 +17,9 @@ import static org.mockito.Mockito.*;
 class InventoryReservationQueryServiceImplTest {
 
     private final InventoryReservationMapper mapper = mock(InventoryReservationMapper.class);
-    private final InventoryReservationQueryServiceImpl service = new InventoryReservationQueryServiceImpl(mapper);
+    private final InventoryV3ReservationMapper v3Mapper = mock(InventoryV3ReservationMapper.class);
+    private final InventoryReservationQueryServiceImpl service =
+            new InventoryReservationQueryServiceImpl(mapper, v3Mapper);
 
     @BeforeEach
     void setUp() {
@@ -62,6 +66,43 @@ class InventoryReservationQueryServiceImplTest {
         assertThat(result.getOwnerId()).isEqualTo("owner-1");
         assertThat(result.getWarehouseId()).isEqualTo("warehouse-1");
         assertThat(result.getUomCode()).isEqualTo("PIECE");
+    }
+
+    @Test
+    void shouldProveCommittedV3ReservationBeforeFulfillmentShipment() {
+        when(v3Mapper.selectHint(1L, "reservation-v3")).thenReturn(new InventoryV3ReservationDO()
+                .setReservationId("reservation-v3").setTenantId(1L).setBusinessType("TRADE_ORDER")
+                .setBusinessId("order-1").setBusinessItemId("item-1").setQuantity(BigDecimal.ONE)
+                .setStatus(20).setVersion(2L));
+
+        InventoryReservationView result = service.requireCommitted("reservation-v3", "order-1", "item-1");
+
+        assertThat(result.getStatus()).isEqualTo("COMMITTED");
+        assertThat(result.getBusinessType()).isEqualTo("TRADE_ORDER");
+    }
+
+    @Test
+    void shouldRejectActiveReservationBeforeFulfillmentShipment() {
+        when(v3Mapper.selectHint(1L, "reservation-v3")).thenReturn(new InventoryV3ReservationDO()
+                .setReservationId("reservation-v3").setTenantId(1L).setBusinessType("TRADE_ORDER")
+                .setBusinessId("order-1").setBusinessItemId("item-1").setQuantity(BigDecimal.ONE)
+                .setStatus(10).setVersion(1L));
+
+        assertThatThrownBy(() -> service.requireCommitted("reservation-v3", "order-1", "item-1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("inventory reservation is not committed for shipment");
+    }
+
+    @Test
+    void shouldRejectNonCanonicalOrderReservationBeforeFulfillmentShipment() {
+        when(v3Mapper.selectHint(1L, "reservation-v3")).thenReturn(new InventoryV3ReservationDO()
+                .setReservationId("reservation-v3").setTenantId(1L).setBusinessType("ORDER")
+                .setBusinessId("order-1").setBusinessItemId("item-1").setQuantity(BigDecimal.ONE)
+                .setStatus(20).setVersion(2L));
+
+        assertThatThrownBy(() -> service.requireCommitted("reservation-v3", "order-1", "item-1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("inventory reservation does not belong to fulfillment item");
     }
 
     private static InventoryReservationDO reservation(int status) {

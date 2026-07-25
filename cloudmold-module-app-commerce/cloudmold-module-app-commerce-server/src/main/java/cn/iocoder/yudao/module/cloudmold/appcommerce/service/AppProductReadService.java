@@ -8,6 +8,7 @@ import cn.iocoder.yudao.module.cloudmold.listing.api.*;
 import cn.iocoder.yudao.module.cloudmold.quality.api.QualityConsumerEvidenceApi;
 import cn.iocoder.yudao.module.cloudmold.quality.api.QualityConsumerEvidenceView;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -18,17 +19,19 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AppProductReadService {
 
-    private static final String APP_CHANNEL = "YSHOPPING";
-
     private final AppListingQueryApi listingQueryApi;
     private final CatalogSkuProjectionApi catalogSkuProjectionApi;
     private final InventoryV3AvailabilityQueryApi inventoryAvailabilityQueryApi;
     private final QualityConsumerEvidenceApi qualityConsumerEvidenceApi;
 
+    @Value("${cloudmold.app-commerce.channel-code:YSHOPPING}")
+    private String appChannel;
+
     public AppProductPageView page(String keyword, int pageNo, int pageSize) {
         PublishedListingPageView result = listingQueryApi.listPublished(PublishedListingPageQuery.builder()
-                .keyword(keyword).channelCode(APP_CHANNEL).pageNo(pageNo).pageSize(pageSize).build());
-        return AppProductPageView.builder().list(result.getList().stream().map(this::assemble).toList())
+                .keyword(keyword).channelCode(appChannel).pageNo(pageNo).pageSize(pageSize).build());
+        List<AppProductView> products = result.getList().stream().map(this::assemble).toList();
+        return AppProductPageView.builder().list(products)
                 .total(result.getTotal()).pageNo(result.getPageNo()).pageSize(result.getPageSize()).build();
     }
 

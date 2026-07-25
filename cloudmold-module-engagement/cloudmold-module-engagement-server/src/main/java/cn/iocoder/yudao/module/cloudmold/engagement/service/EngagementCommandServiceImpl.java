@@ -27,7 +27,7 @@ public class EngagementCommandServiceImpl implements EngagementCommandApi {
     private static final String SOURCE_SYSTEM = "cloudmold-engagement";
     private static final Set<String> CAMPAIGN_STATUSES = Set.of("DRAFT", "ACTIVE", "PAUSED", "COMPLETED");
     private static final Set<String> CHANNELS = Set.of("SMS", "APP_PUSH");
-    private static final Set<String> CONTENT_STATUSES = Set.of("DRAFT", "PUBLISHED");
+    private static final Set<String> CONTENT_TRANSITION_STATUSES = Set.of("PENDING_MODERATION", "PUBLISHED");
 
     private final EngagementOperationMapper operationMapper;
     private final FavoriteMapper favoriteMapper;
@@ -271,9 +271,18 @@ public class EngagementCommandServiceImpl implements EngagementCommandApi {
                 command == null ? null : command.getOccurredAt(), command == null ? null : command.getCorrelationId(),
                 command == null ? null : command.getCausationId());
         requireUuid(command.getContentId(), "contentId"); requireUuid(command.getAuthorPrincipalId(), "authorPrincipalId");
-        require(Set.of("POST", "COMMENT").contains(command.getContentType()), "contentType must be POST or COMMENT");
-        requireText(command.getBodyRef(), "bodyRef", 512); require(CONTENT_STATUSES.contains(command.getDesiredStatus()),
-                "desiredStatus must be DRAFT or PUBLISHED");
+        require("POST".equals(command.getContentType()), "community content must be POST; comments are interactions");
+        requireText(command.getBodyRef(), "bodyRef", 512);
+        requireText(command.getBodyKeyId(), "bodyKeyId", 128);
+        require(command.getBodyIv() != null && command.getBodyIv().length == 12, "bodyIv must be 12 bytes");
+        require(command.getBodyCiphertext() != null && command.getBodyCiphertext().length > 16
+                && command.getBodyCiphertext().length <= 65535, "bodyCiphertext is invalid");
+        requireSha256(command.getBodyDigestSha256(), "bodyDigestSha256");
+        requireUuid(command.getCanonicalSpuId(), "canonicalSpuId");
+        requireUuid(command.getCanonicalSkuId(), "canonicalSkuId");
+        requireUuid(command.getListingId(), "listingId");
+        requireUuid(command.getListingOfferId(), "listingOfferId");
+        require("DRAFT".equals(command.getDesiredStatus()), "new community content must start as DRAFT");
         requireOptionalSourceTriple(command.getSourceSystem(), command.getSourceType(), command.getSourceId());
         return execute("CREATE_COMMUNITY_CONTENT", command.getIdempotencyKey(), command, context -> {
             principalReferenceValidationPort.requireActive(context.tenantId, command.getAuthorPrincipalId());
@@ -282,17 +291,59 @@ public class EngagementCommandServiceImpl implements EngagementCommandApi {
             CommunityContentDO row = new CommunityContentDO().setContentId(command.getContentId())
                     .setTenantId(context.tenantId).setAuthorPrincipalId(command.getAuthorPrincipalId())
                     .setContentType(command.getContentType()).setBodyRef(command.getBodyRef())
-                    .setStatus(command.getDesiredStatus()).setVersion(1L).setSourceSystem(command.getSourceSystem())
+                    .setBodyKeyId(command.getBodyKeyId()).setBodyIv(command.getBodyIv())
+                    .setBodyCiphertext(command.getBodyCiphertext())
+                    .setBodyDigestSha256(command.getBodyDigestSha256())
+                    .setCanonicalSpuId(command.getCanonicalSpuId()).setCanonicalSkuId(command.getCanonicalSkuId())
+                    .setListingId(command.getListingId()).setListingOfferId(command.getListingOfferId())
+                    .setStatus("DRAFT").setVersion(1L).setSourceSystem(command.getSourceSystem())
                     .setSourceType(command.getSourceType()).setSourceId(command.getSourceId())
                     .setCreatedAt(context.now).setUpdatedAt(context.now);
             require(communityMapper.insert(row) == 1, "failed to create community content");
             Map<String, Object> value = payload("run_id", command.getRunId(), "content_id", row.getContentId(),
                     "author_principal_id", row.getAuthorPrincipalId(), "content_type", row.getContentType(),
-                    "body_ref", row.getBodyRef(), "previous_status", null, "current_status", row.getStatus(),
+                    "body_ref", row.getBodyRef(), "body_digest_sha256", row.getBodyDigestSha256(),
+                    "canonical_spu_id", row.getCanonicalSpuId(), "canonical_sku_id", row.getCanonicalSkuId(),
+                    "listing_id", row.getListingId(), "listing_offer_id", row.getListingOfferId(),
+                    "previous_status", null, "current_status", row.getStatus(),
                     "source_system", row.getSourceSystem(), "source_type", row.getSourceType(), "source_id", row.getSourceId());
             append(context.tenantId, "engagement.community.content_status_changed", "community_content", row.getContentId(),
                     row.getVersion(), (short) 1, command.getOccurredAt(), command.getCorrelationId(), command.getCausationId(),
                     command.getIdempotencyKey(), value, "CREATE_COMMUNITY_CONTENT");
+            return result(context.operationId, row.getContentId(), "community_content", row.getStatus(), row.getVersion());
+        });
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public EngagementCommandResult transitionCommunityContent(TransitionCommunityContentCommand command) {
+        validateCommon(command, command == null ? null : command.getIdempotencyKey(),
+                command == null ? null : command.getRunId(), command == null ? null : command.getOccurredAt(),
+                command == null ? null : command.getCorrelationId(), command == null ? null : command.getCausationId());
+        requireUuid(command.getContentId(), "contentId");
+        requireUuid(command.getActorPrincipalId(), "actorPrincipalId");
+        require(CONTENT_TRANSITION_STATUSES.contains(command.getDesiredStatus()), "invalid content transition status");
+        requirePositive(command.getExpectedVersion(), "expectedVersion");
+        requireText(command.getReasonCode(), "reasonCode", 64);
+        return execute("TRANSITION_COMMUNITY_CONTENT", command.getIdempotencyKey(), command, context -> {
+            principalReferenceValidationPort.requireActive(context.tenantId, command.getActorPrincipalId());
+            CommunityContentDO row = communityMapper.selectContentForUpdate(context.tenantId, command.getContentId());
+            require(row != null, "community content does not exist");
+            require(Objects.equals(row.getVersion(), command.getExpectedVersion()), "community content version conflict");
+            String previous = row.getStatus();
+            require(("DRAFT".equals(previous) && "PENDING_MODERATION".equals(command.getDesiredStatus()))
+                            || ("PENDING_MODERATION".equals(previous) && "PUBLISHED".equals(command.getDesiredStatus())),
+                    "invalid community content transition");
+            require(communityMapper.updateContentStatus(context.tenantId, row.getContentId(), row.getVersion(),
+                    command.getDesiredStatus(), context.now) == 1, "community content transition conflict");
+            row.setStatus(command.getDesiredStatus()).setVersion(row.getVersion() + 1).setUpdatedAt(context.now);
+            Map<String, Object> value = contentStatusPayload(command.getRunId(), row, previous);
+            value.put("transition_actor_principal_id", command.getActorPrincipalId());
+            value.put("reason_code", command.getReasonCode());
+            append(context.tenantId, "engagement.community.content_status_changed", "community_content",
+                    row.getContentId(), row.getVersion(), (short) 1, command.getOccurredAt(),
+                    command.getCorrelationId(), command.getCausationId(), command.getIdempotencyKey(), value,
+                    "TRANSITION_COMMUNITY_CONTENT");
             return result(context.operationId, row.getContentId(), "community_content", row.getStatus(), row.getVersion());
         });
     }
@@ -309,7 +360,15 @@ public class EngagementCommandServiceImpl implements EngagementCommandApi {
         String requiredTarget = "FOLLOW".equals(command.getInteractionType()) ? "PRINCIPAL" : "CONTENT";
         require(Objects.equals(requiredTarget, command.getTargetType()), "interaction targetType does not match interactionType");
         requireUuid(command.getTargetId(), "targetId");
-        if ("COMMENT".equals(command.getInteractionType())) requireText(command.getPayloadRef(), "payloadRef", 512);
+        if ("COMMENT".equals(command.getInteractionType())) {
+            requireText(command.getPayloadRef(), "payloadRef", 512);
+            requireText(command.getPayloadKeyId(), "payloadKeyId", 128);
+            require(command.getPayloadIv() != null && command.getPayloadIv().length == 12,
+                    "payloadIv must be 12 bytes");
+            require(command.getPayloadCiphertext() != null && command.getPayloadCiphertext().length > 16
+                    && command.getPayloadCiphertext().length <= 65535, "payloadCiphertext is invalid");
+            requireSha256(command.getPayloadDigestSha256(), "payloadDigestSha256");
+        }
         return execute("RECORD_COMMUNITY_INTERACTION", command.getIdempotencyKey(), command, context -> {
             principalReferenceValidationPort.requireActive(context.tenantId, command.getActorPrincipalId());
             if ("PRINCIPAL".equals(command.getTargetType())) {
@@ -322,15 +381,75 @@ public class EngagementCommandServiceImpl implements EngagementCommandApi {
                     .setTenantId(context.tenantId).setActorPrincipalId(command.getActorPrincipalId())
                     .setInteractionType(command.getInteractionType()).setTargetType(command.getTargetType())
                     .setTargetId(command.getTargetId()).setPayloadRef(command.getPayloadRef())
+                    .setPayloadKeyId(command.getPayloadKeyId()).setPayloadIv(command.getPayloadIv())
+                    .setPayloadCiphertext(command.getPayloadCiphertext())
+                    .setPayloadDigestSha256(command.getPayloadDigestSha256())
                     .setOccurredAt(utc(command.getOccurredAt())).setCreatedAt(context.now);
             require(communityMapper.insertInteraction(row) == 1, "failed to persist community interaction");
             Map<String, Object> value = payload("run_id", command.getRunId(), "interaction_id", row.getInteractionId(),
                     "actor_principal_id", row.getActorPrincipalId(), "interaction_type", row.getInteractionType(),
-                    "target_type", row.getTargetType(), "target_id", row.getTargetId(), "payload_ref", row.getPayloadRef());
+                    "target_type", row.getTargetType(), "target_id", row.getTargetId(),
+                    "payload_ref", row.getPayloadRef(), "payload_digest_sha256", row.getPayloadDigestSha256());
             append(context.tenantId, "engagement.community.interaction_recorded", "community_interaction",
                     row.getInteractionId(), 1L, (short) 1, command.getOccurredAt(), command.getCorrelationId(),
                     command.getCausationId(), command.getIdempotencyKey(), value, "RECORD_COMMUNITY_INTERACTION");
             return result(context.operationId, row.getInteractionId(), "community_interaction", "RECORDED", 1L);
+        });
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public EngagementCommandResult changeCommunityReaction(ChangeCommunityReactionCommand command) {
+        validateCommon(command, command == null ? null : command.getIdempotencyKey(),
+                command == null ? null : command.getRunId(), command == null ? null : command.getOccurredAt(),
+                command == null ? null : command.getCorrelationId(), command == null ? null : command.getCausationId());
+        requireUuid(command.getActorPrincipalId(), "actorPrincipalId");
+        require("LIKE".equals(command.getReactionType()), "reactionType must be LIKE");
+        require("CONTENT".equals(command.getTargetType()), "reaction targetType must be CONTENT");
+        requireUuid(command.getTargetId(), "targetId");
+        require(Set.of("ACTIVE", "REMOVED").contains(command.getDesiredStatus()),
+                "reaction status must be ACTIVE or REMOVED");
+        return execute("CHANGE_COMMUNITY_REACTION", command.getIdempotencyKey(), command, context -> {
+            principalReferenceValidationPort.requireActive(context.tenantId, command.getActorPrincipalId());
+            CommunityContentDO content = communityMapper.selectContent(context.tenantId, command.getTargetId());
+            require(content != null && "PUBLISHED".equals(content.getStatus()), "target content is not published");
+            CommunityReactionStateDO row = communityMapper.selectReactionForUpdate(context.tenantId,
+                    command.getActorPrincipalId(), command.getReactionType(), command.getTargetType(),
+                    command.getTargetId());
+            String previous = null;
+            if (row == null) {
+                require("ACTIVE".equals(command.getDesiredStatus()), "a missing reaction can only become ACTIVE");
+                requireUuid(command.getReactionId(), "reactionId");
+                require(command.getExpectedVersion() == null, "expectedVersion must be absent for a new reaction");
+                row = new CommunityReactionStateDO().setReactionId(command.getReactionId())
+                        .setTenantId(context.tenantId).setActorPrincipalId(command.getActorPrincipalId())
+                        .setReactionType(command.getReactionType()).setTargetType(command.getTargetType())
+                        .setTargetId(command.getTargetId()).setStatus("ACTIVE").setVersion(1L)
+                        .setCreatedAt(context.now).setUpdatedAt(context.now);
+                require(communityMapper.insertReaction(row) == 1, "failed to create community reaction");
+            } else {
+                require(command.getReactionId() == null || Objects.equals(row.getReactionId(), command.getReactionId()),
+                        "reactionId does not match current reaction");
+                require(command.getExpectedVersion() != null
+                                && Objects.equals(row.getVersion(), command.getExpectedVersion()),
+                        "community reaction version conflict");
+                require(!Objects.equals(row.getStatus(), command.getDesiredStatus()),
+                        "community reaction is already in desired status");
+                previous = row.getStatus();
+                require(communityMapper.updateReaction(context.tenantId, row.getReactionId(), row.getVersion(),
+                        command.getDesiredStatus(), context.now) == 1, "community reaction transition conflict");
+                row.setStatus(command.getDesiredStatus()).setVersion(row.getVersion() + 1).setUpdatedAt(context.now);
+            }
+            Map<String, Object> value = payload("run_id", command.getRunId(), "reaction_id", row.getReactionId(),
+                    "actor_principal_id", row.getActorPrincipalId(), "reaction_type", row.getReactionType(),
+                    "target_type", row.getTargetType(), "target_id", row.getTargetId(),
+                    "previous_status", previous, "current_status", row.getStatus());
+            append(context.tenantId, "engagement.community.reaction_status_changed", "community_reaction",
+                    row.getReactionId(), row.getVersion(), (short) 1, command.getOccurredAt(),
+                    command.getCorrelationId(), command.getCausationId(), command.getIdempotencyKey(), value,
+                    "CHANGE_COMMUNITY_REACTION");
+            return result(context.operationId, row.getReactionId(), "community_reaction",
+                    row.getStatus(), row.getVersion());
         });
     }
 
@@ -394,11 +513,8 @@ public class EngagementCommandServiceImpl implements EngagementCommandApi {
                 require(communityMapper.updateContentStatus(context.tenantId, content.getContentId(), content.getVersion(),
                         contentStatus, context.now) == 1, "community content moderation transition conflict");
                 content.setStatus(contentStatus).setVersion(content.getVersion() + 1).setUpdatedAt(context.now);
-                Map<String, Object> value = payload("run_id", command.getRunId(), "content_id", content.getContentId(),
-                        "author_principal_id", content.getAuthorPrincipalId(), "content_type", content.getContentType(),
-                        "body_ref", content.getBodyRef(), "previous_status", contentPrevious, "current_status", contentStatus,
-                        "source_system", content.getSourceSystem(), "source_type", content.getSourceType(),
-                        "source_id", content.getSourceId(), "moderation_case_id", row.getModerationCaseId());
+                Map<String, Object> value = contentStatusPayload(command.getRunId(), content, contentPrevious);
+                value.put("moderation_case_id", row.getModerationCaseId());
                 append(context.tenantId, "engagement.community.content_status_changed", "community_content", content.getContentId(),
                         content.getVersion(), (short) 1, command.getOccurredAt(), command.getCorrelationId(), command.getCausationId(),
                         command.getIdempotencyKey(), value, "DECIDE_MODERATION_CASE");
@@ -463,6 +579,17 @@ public class EngagementCommandServiceImpl implements EngagementCommandApi {
         append(context.tenantId, "engagement.community.moderation_status_changed", "community_moderation_case",
                 row.getModerationCaseId(), row.getVersion(), sequence, occurredAt, correlationId, causationId,
                 idempotencyKey, value, operation);
+    }
+
+    private static Map<String, Object> contentStatusPayload(String runId, CommunityContentDO row, String previous) {
+        return payload("run_id", runId, "content_id", row.getContentId(),
+                "author_principal_id", row.getAuthorPrincipalId(), "content_type", row.getContentType(),
+                "body_ref", row.getBodyRef(), "body_digest_sha256", row.getBodyDigestSha256(),
+                "canonical_spu_id", row.getCanonicalSpuId(), "canonical_sku_id", row.getCanonicalSkuId(),
+                "listing_id", row.getListingId(), "listing_offer_id", row.getListingOfferId(),
+                "previous_status", previous, "current_status", row.getStatus(),
+                "source_system", row.getSourceSystem(), "source_type", row.getSourceType(),
+                "source_id", row.getSourceId());
     }
 
     private void append(Long tenantId, String eventType, String aggregateType, String aggregateId, Long aggregateVersion,
@@ -538,6 +665,10 @@ public class EngagementCommandServiceImpl implements EngagementCommandApi {
 
     private static void requireText(String value, String field, int maxLength) {
         require(value != null && !value.isBlank() && value.length() <= maxLength, field + " is required");
+    }
+
+    private static void requireSha256(String value, String field) {
+        require(value != null && value.matches("^[0-9a-f]{64}$"), field + " must be lowercase SHA-256");
     }
 
     private static void require(boolean condition, String message) {

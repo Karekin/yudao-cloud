@@ -16,6 +16,9 @@ public class AppCheckoutDO {
     private String listingOfferId;
     private String canonicalSpuId;
     private String canonicalSkuId;
+    private String addressRef;
+    private Long addressSnapshotVersion;
+    private String destinationRegionCode;
     private BigDecimal quantity;
     private Long unitPriceMinor;
     private Long productAmountMinor;

@@ -77,8 +77,11 @@ public class AgentExecutionBindingService implements AgentExecutionBindingApi {
             requireText(command.getSupersedeReasonCode(), "supersedeReasonCode", 128);
             SkillTaskView previousTask = querySkillTask(tenantId, operatorUserId, workOrder,
                     () -> skillTasks.get(previous.getSkillTaskId()));
-            require("NEEDS_REVIEW".equals(previousTask.getStatus()),
-                    "only a NEEDS_REVIEW Skill Task can be replaced");
+            boolean staleRunBinding = !Objects.equals(previousTask.getRunId(), workOrder.getActiveRunId());
+            if (!staleRunBinding) {
+                require("NEEDS_REVIEW".equals(previousTask.getStatus()),
+                        "only a NEEDS_REVIEW Skill Task can be replaced");
+            }
             require(!Objects.equals(previous.getSkillTaskId(), command.getSkillTaskId()),
                     "replacement Skill Task must be a new task");
         }
@@ -128,6 +131,8 @@ public class AgentExecutionBindingService implements AgentExecutionBindingApi {
         requireRoleGrant(tenantId, operatorUserId, workOrder.getRoleCode(), now);
         SkillTaskTerminalProofView proof = querySkillTask(tenantId, operatorUserId, workOrder,
                 () -> skillTasks.getTerminalProof(binding.getSkillTaskId()));
+        require(Objects.equals(workOrder.getActiveRunId(), proof.getRunId()),
+                "terminal proof belongs to a stale Agent run");
         verifyTerminalProof(binding, proof);
         require(mapper.acceptExecutionBinding(tenantId, binding.getBindingId(), binding.getVersion(),
                 proof.getTerminalResultSha256(), now) == 1, "execution binding acceptance conflict");
@@ -156,6 +161,8 @@ public class AgentExecutionBindingService implements AgentExecutionBindingApi {
     }
 
     private void verifyFrozenExecution(WorkOrder workOrder, SkillTaskView task) {
+        require(Objects.equals(workOrder.getActiveRunId(), task.getRunId()),
+                "Skill Task does not belong to the current Agent run");
         require(Objects.equals(workOrder.getSkillId(), task.getSkillId()), "Skill ID does not match frozen action");
         require(Objects.equals(workOrder.getSkillVersion(), task.getSkillVersion()),
                 "Skill version does not match frozen action");

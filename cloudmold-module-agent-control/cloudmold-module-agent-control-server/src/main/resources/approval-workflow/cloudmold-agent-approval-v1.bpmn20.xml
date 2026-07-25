@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="https://cloudmold.cn/bpmn/agent-approval">
+  <process id="cloudmold-agent-approval-v1"
+           name="CloudMold Agent Approval v1"
+           isExecutable="true">
+    <documentation>CloudMold fixed approval flow for explicit, pre-granted human approvers.</documentation>
+
+    <startEvent id="start_event" name="提交审批"/>
+
+    <sequenceFlow id="flow_start_to_review"
+                  sourceRef="start_event"
+                  targetRef="approval_review"/>
+
+    <userTask id="approval_review"
+              name="审批人审核"
+              flowable:candidateStrategy="35"
+              flowable:approveType="1">
+      <documentation>候选审批人必须由 startUserSelectAssignees 显式注入。</documentation>
+    </userTask>
+
+    <sequenceFlow id="flow_review_to_end"
+                  sourceRef="approval_review"
+                  targetRef="approved_end"/>
+
+    <endEvent id="approved_end" name="审批结束"/>
+  </process>
+</definitions>

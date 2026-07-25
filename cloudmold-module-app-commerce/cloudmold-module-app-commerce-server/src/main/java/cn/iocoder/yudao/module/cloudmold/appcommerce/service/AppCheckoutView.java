@@ -15,6 +15,11 @@ public class AppCheckoutView {
     String listingOfferId;
     String canonicalSpuId;
     String canonicalSkuId;
+    String addressRef;
+    Long addressSnapshotVersion;
+    String destinationRegionCode;
+    String receiverSummary;
+    String mobileSummary;
     BigDecimal quantity;
     Long unitPriceMinor;
     Long productAmountMinor;

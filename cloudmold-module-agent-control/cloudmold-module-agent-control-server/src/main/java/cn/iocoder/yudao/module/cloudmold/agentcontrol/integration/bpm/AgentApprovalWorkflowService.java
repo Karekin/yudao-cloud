@@ -62,7 +62,8 @@ public class AgentApprovalWorkflowService implements AgentApprovalWorkflowRegist
                 .setApprovalId(approval.getApprovalId()).setTenantId(tenantId)
                 .setWorkOrderId(workOrder.getWorkOrderId()).setActionCode(workOrder.getActionCode())
                 .setRoleCode(workOrder.getRoleCode()).setRiskLevel(workOrder.getRiskLevel())
-                .setRequesterUserId(approval.getRequesterUserId()).setScopeHash(approval.getScopeHash())
+                .setRequesterUserId(approval.getRequesterUserId())
+                .setScopeHash(approval.getScopeHash())
                 .setProcessDefinitionKey(properties.getProcessDefinitionKey()).setBusinessKey(businessKey)
                 .setStatus("START_REQUESTED").setStartAttemptCount(0).setVersion(1L)
                 .setRequestedAt(now).setUpdatedAt(now);
@@ -83,7 +84,7 @@ public class AgentApprovalWorkflowService implements AgentApprovalWorkflowRegist
         String attemptToken = UUID.randomUUID().toString();
         LocalDateTime now = now();
         if (mapper.claimApprovalWorkflowStart(candidate.getTenantId(), candidate.getApprovalId(),
-                candidate.getVersion(), attemptToken, now) != 1) {
+                candidate.getVersion(), candidate.getApproverUserId(), attemptToken, now) != 1) {
             return false;
         }
         try {
@@ -140,12 +141,16 @@ public class AgentApprovalWorkflowService implements AgentApprovalWorkflowRegist
         ApprovalWorkflowEvent receipt = new ApprovalWorkflowEvent().setEventId(eventId)
                 .setTenantId(binding.getTenantId()).setApprovalId(binding.getApprovalId())
                 .setProcessInstanceId(event.getId()).setBpmStatus(event.getStatus())
-                .setObservedStatus(terminalStatus).setReasonSha256(reasonSha256).setObservedAt(now);
+                .setObservedStatus(terminalStatus).setReasonSha256(reasonSha256)
+                .setTerminalOperatorUserId(event.getTerminalOperatorUserId())
+                .setTerminalTaskId(event.getTerminalTaskId())
+                .setTerminalTaskDefinitionKey(event.getTerminalTaskDefinitionKey()).setObservedAt(now);
         if (mapper.insertApprovalWorkflowEvent(receipt) == 0) {
             return;
         }
         mapper.markApprovalWorkflowTerminal(binding.getTenantId(), binding.getApprovalId(), event.getId(),
-                event.getStatus(), terminalStatus, reasonSha256, now);
+                event.getStatus(), terminalStatus, reasonSha256, event.getTerminalOperatorUserId(),
+                event.getTerminalTaskId(), event.getTerminalTaskDefinitionKey(), now);
     }
 
     private static String terminalStatus(Integer bpmStatus) {

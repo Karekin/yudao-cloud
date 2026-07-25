@@ -4,6 +4,7 @@ import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.integration.bpm.AgentApprovalWorkflowAttestationGate;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.integration.bpm.AgentApprovalWorkflowRegistrar;
 import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
@@ -22,8 +23,10 @@ class AgentControlServiceImplTest {
     private static final Instant NOW = Instant.parse("2026-07-19T10:00:00Z");
 
     private final AgentControlStoreMapper mapper = mock(AgentControlStoreMapper.class);
+    private final AgentApprovalWorkflowAttestationGate approvalAttestations =
+            mock(AgentApprovalWorkflowAttestationGate.class);
     private final AgentControlServiceImpl service = new AgentControlServiceImpl(mapper,
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            Clock.fixed(NOW, ZoneOffset.UTC), AgentApprovalWorkflowRegistrar.DISABLED, approvalAttestations);
     private final AtomicReference<String> requestHash = new AtomicReference<>();
     private final AtomicReference<String> attemptToken = new AtomicReference<>();
     private final AtomicReference<WorkOrder> workOrder = new AtomicReference<>();
@@ -146,6 +149,7 @@ class AgentControlServiceImplTest {
 
         assertThat(decided.getStatus()).isEqualTo("APPROVED");
         assertThat(row.getStatus()).isEqualTo("READY");
+        verify(approvalAttestations).assertDecisionAllowed(17L, 200L, approval.get(), "APPROVE");
         verify(mapper, never()).selectEffectiveActorRoleGrant(eq(17L), eq(200L), eq("buyer"), any());
         verify(mapper).insertAuditEvent(argThat(event -> event.getActorUserId().equals(200L)
                 && event.getEventType().equals("agent_control.approval.decided")));

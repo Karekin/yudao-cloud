@@ -8,6 +8,7 @@ import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.*;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.dataobject.SupplyPlanningRecords.*;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.mysql.SupplyPlanningMapper;
+import cn.iocoder.yudao.module.cloudmold.supplyplanning.service.actor.SupplyPlanningActorPrincipalPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,14 +35,20 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
 
     private final SupplyPlanningMapper mapper;
     private final OutboxAppender outboxAppender;
+    private final SupplyPlanningActorPrincipalPort actorPrincipalPort;
+    private final ReplenishmentExecutionPort replenishmentExecutionPort;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public SupplyPlanningResult execute(SupplyPlanningCommand command) {
+    public SupplyPlanningResult execute(SupplyPlanningCommand command, String actorPrincipalId) {
         validateEnvelope(command);
+        requireRef(actorPrincipalId, "actorPrincipalId", 128);
+        actorPrincipalPort.requireActive(actorPrincipalId);
+        attestActor(command, actorPrincipalId);
         Long tenantId = TenantContextHolder.getRequiredTenantId();
         LocalDateTime now = LocalDateTime.ofInstant(command.getOccurredAt(), ZoneOffset.UTC);
-        String requestHash = DigestUtil.sha256Hex(JsonUtils.toJsonString(command));
+        String requestHash = DigestUtil.sha256Hex(
+                actorPrincipalId + "\n" + JsonUtils.toJsonString(command));
         String attemptToken = UUID.randomUUID().toString();
         mapper.insertOrResolveOperation(tenantId, command.getIdempotencyKey(), command.getOperation().name(),
                 requestHash, attemptToken, now);
@@ -470,15 +477,33 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         requireRef(input.getConvertedByPrincipalId(), "convertedByPrincipalId", 128);
         String targetType = upper(input.getTargetType());
         require(CONVERSION_TARGET_TYPES.contains(targetType), "unsupported replenishment targetType");
-        String targetReference = input.getTargetReference() == null
-                ? targetType.toLowerCase(Locale.ROOT) + ":" + UUID.randomUUID()
-                : input.getTargetReference();
-        requireRef(targetReference, "targetReference", 128);
+        requireSha256(input.getMappingEvidenceSha256(), "mappingEvidenceSha256");
         Replenishment row = nonNull(mapper.selectReplenishmentForUpdate(
                 tenantId, input.getRecommendationId()), "replenishment recommendation not found");
         requireExpectedVersion(input.getExpectedVersion(), row.getVersion());
         require("APPROVED".equals(row.getStatus()),
                 "only an approved replenishment recommendation can be converted");
+        ReplenishmentExecutionPort.ExecutionResult execution = nonNull(
+                replenishmentExecutionPort.createDraft(
+                        new ReplenishmentExecutionPort.ExecutionCommand(
+                                "supply-conversion:" + conversionId, conversionId, targetType,
+                                row.getCanonicalSkuId(), row.getWarehouseId(),
+                                row.getSuggestedQuantity(), row.getUomCode(), row.getNeedByDate(),
+                                input.getMappingEvidenceSha256(), input.getSupplierId(),
+                                input.getAccountId(), input.getErpProductId(),
+                                input.getErpProductUnitId(), input.getUnitCostMinor(),
+                                input.getTaxPercent(), input.getSourceWarehouseId(),
+                                input.getTargetWarehouseId(), input.getWmsSkuId(),
+                                command.getOccurredAt())),
+                "replenishment execution returned no draft evidence");
+        requireRef(execution.sourceSystem(), "execution sourceSystem", 64);
+        requireRef(execution.documentType(), "execution documentType", 64);
+        requireRef(execution.externalDocumentId(), "externalDocumentId", 128);
+        require("PREPARE".equals(execution.status()),
+                "replenishment execution must return a PREPARE draft");
+        String targetReference = execution.sourceSystem() + ":"
+                + execution.documentType() + ":" + execution.externalDocumentId();
+        requireRef(targetReference, "targetReference", 128);
         ReplenishmentConversion conversion = new ReplenishmentConversion()
                 .setConversionId(conversionId).setTenantId(tenantId)
                 .setRecommendationId(row.getRecommendationId()).setTargetType(targetType)
@@ -498,6 +523,8 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                         "conversion_id", conversionId, "target_type", targetType,
                         "target_reference", targetReference, "requested_quantity",
                         row.getSuggestedQuantity(), "uom_code", row.getUomCode(),
+                        "mapping_evidence_sha256", input.getMappingEvidenceSha256(),
+                        "external_document_no", execution.externalDocumentNo(),
                         "converted_by_principal_id", input.getConvertedByPrincipalId(),
                         "previous_status", "APPROVED", "current_status", "CONVERTED"));
     }
@@ -645,6 +672,9 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         requireExpectedVersion(input.getExpectedVersion(), row.getVersion());
         require(Set.of("OPEN", "ACKNOWLEDGED").contains(row.getStatus()),
                 "inventory issue is already terminal");
+        require(row.getOwnerPrincipalId() == null
+                        || row.getOwnerPrincipalId().equals(input.getOwnerPrincipalId()),
+                "only the inventory issue owner can resolve it");
         String before = row.getStatus();
         require(mapper.resolveInventoryIssue(tenantId, row.getIssueId(), row.getVersion(),
                         input.getOwnerPrincipalId(), upper(input.getResolutionCode()), now) == 1,
@@ -734,6 +764,44 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         requireUuid(command.getCorrelationId(), "correlationId");
         if (command.getCausationId() != null) requireUuid(command.getCausationId(), "causationId");
         require(command.getOccurredAt() != null, "occurredAt is required");
+    }
+
+    private static void attestActor(SupplyPlanningCommand command, String actorPrincipalId) {
+        switch (command.getOperation()) {
+            case SELECT_PLAN_SCENARIO -> {
+                if (command.getPlanScenario() != null) {
+                    command.getPlanScenario().setSelectedByPrincipalId(actorPrincipalId);
+                }
+            }
+            case APPROVE_SUPPLY_PLAN -> {
+                if (command.getSupplyPlan() != null) {
+                    command.getSupplyPlan().setApproverPrincipalId(actorPrincipalId);
+                }
+            }
+            case RELEASE_SUPPLY_PLAN -> {
+                if (command.getSupplyPlan() != null) {
+                    command.getSupplyPlan().setReleasePrincipalId(actorPrincipalId);
+                }
+            }
+            case DECIDE_REPLENISHMENT -> {
+                if (command.getReplenishment() != null) {
+                    command.getReplenishment().setDecisionPrincipalId(actorPrincipalId);
+                }
+            }
+            case CONVERT_REPLENISHMENT -> {
+                if (command.getReplenishmentConversion() != null) {
+                    command.getReplenishmentConversion().setConvertedByPrincipalId(actorPrincipalId);
+                }
+            }
+            case ACKNOWLEDGE_INVENTORY_ISSUE, RESOLVE_INVENTORY_ISSUE -> {
+                if (command.getInventoryIssue() != null) {
+                    command.getInventoryIssue().setOwnerPrincipalId(actorPrincipalId);
+                }
+            }
+            default -> {
+                // The remaining operations do not persist an actor field.
+            }
+        }
     }
 
     private static String valueOrUuid(String value) {

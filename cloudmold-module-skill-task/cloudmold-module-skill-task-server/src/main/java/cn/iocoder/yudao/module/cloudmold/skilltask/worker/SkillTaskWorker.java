@@ -104,7 +104,9 @@ public class SkillTaskWorker {
                 if ("WAIT_CHILD".equals(step.getStepKind()) && waitForChild(task, step, request)) {
                     return;
                 }
-                JsonNode result = executeStep(task, step, request);
+                Task executionTask = task;
+                JsonNode result = checkpoints.executeWithMissionFence(
+                        executionTask, () -> executeStep(executionTask, step, request));
                 String resultJson = json.canonical(result);
                 if ("WAIT_CAPABILITY".equals(step.getStepKind())
                         && waitForCapability(task, step, result, resultJson)) {

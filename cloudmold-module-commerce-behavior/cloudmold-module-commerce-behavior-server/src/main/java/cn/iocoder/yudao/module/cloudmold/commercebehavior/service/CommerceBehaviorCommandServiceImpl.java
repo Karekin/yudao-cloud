@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.cloudmold.commercebehavior.service;
 
+import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
@@ -40,13 +41,15 @@ public class CommerceBehaviorCommandServiceImpl implements CommerceBehaviorComma
     private static final Set<String> SESSION_STATUSES = Set.of("ACTIVE", "CHECKOUT_IN_PROGRESS", "ABANDONED", "EXPIRED");
     private static final Set<String> BEHAVIOR_TYPES = Set.of(
             "PDP_VIEWED", "SEARCH_REQUESTED", "SEARCH_RESULT_EXPOSED",
-            "SEARCH_RESULT_CLICKED", "CART_ADDED", "CART_REMOVED", "CHECKOUT_STARTED", "CHECKOUT_ABANDONED");
+            "SEARCH_RESULT_CLICKED", "CART_ADDED", "CART_REMOVED", "CHECKOUT_STARTED", "CHECKOUT_ABANDONED",
+            "RECOMMENDATION_EXPOSED", "RECOMMENDATION_CLICKED");
 
     private final CommerceBehaviorOperationMapper operationMapper;
     private final CommerceSessionMapper sessionMapper;
     private final CommerceSessionIdentityLinkMapper identityLinkMapper;
     private final CommerceBehaviorEventMapper behaviorEventMapper;
     private final CommerceSessionPaymentAttributionMapper paymentAttributionMapper;
+    private final AppRecommendationReadMapper appRecommendationReadMapper;
     private final PrincipalValidationApi principalValidationApi;
     private final ListingQueryApi listingQueryApi;
     private final OrderQueryApi orderQueryApi;
@@ -164,7 +167,9 @@ public class CommerceBehaviorCommandServiceImpl implements CommerceBehaviorComma
                 require(Objects.equals(session.getPrincipalId(), command.getPrincipalId()),
                         "principal must be linked to session before recording behavior");
             }
-            PublishedListingOfferView listingOffer = resolveListingOffer(command);
+            ResolvedBehaviorContext resolved = resolveBehaviorContext(context.tenantId, session.getSessionId(),
+                    command, context.now);
+            PublishedListingOfferView listingOffer = resolved.listingOffer();
             if (command.getExpectedSessionVersion() != null) {
                 require(Objects.equals(session.getVersion(), command.getExpectedSessionVersion()), "session version conflict");
             }
@@ -204,16 +209,16 @@ public class CommerceBehaviorCommandServiceImpl implements CommerceBehaviorComma
                     .setSessionVersion(eventSessionVersion)
                     .setBehaviorType(command.getBehaviorType())
                     .setPrincipalId(session.getPrincipalId())
-                    .setCanonicalSpuId(command.getCanonicalSpuId())
-                    .setSkuId(command.getSkuId())
+                    .setCanonicalSpuId(resolved.canonicalSpuId())
+                    .setSkuId(resolved.canonicalSkuId())
                     .setListingId(listingOffer == null ? null : listingOffer.getListingId())
                     .setListingOfferId(listingOffer == null ? null : listingOffer.getListingOfferId())
                     .setMerchantId(listingOffer == null ? null : listingOffer.getMerchantId())
                     .setShopId(listingOffer == null ? null : listingOffer.getShopId())
                     .setChannelCode(listingOffer == null ? null : listingOffer.getChannelCode())
                     .setSearchToken(command.getSearchToken())
-                    .setResultSetToken(command.getResultSetToken())
-                    .setResultPosition(command.getResultPosition())
+                    .setResultSetToken(resolved.resultSetToken())
+                    .setResultPosition(resolved.resultPosition())
                     .setQuantity(command.getQuantity())
                     .setCheckoutToken(command.getCheckoutToken())
                     .setSourceSystem(command.getSourceSystem())
@@ -231,16 +236,16 @@ public class CommerceBehaviorCommandServiceImpl implements CommerceBehaviorComma
                             "session_version", eventSessionVersion,
                             "behavior_type", command.getBehaviorType(),
                             "principal_id", session.getPrincipalId(),
-                            "canonical_spu_id", command.getCanonicalSpuId(),
-                            "sku_id", command.getSkuId(),
+                            "canonical_spu_id", resolved.canonicalSpuId(),
+                            "sku_id", resolved.canonicalSkuId(),
                             "listing_id", listingOffer == null ? null : listingOffer.getListingId(),
                             "listing_offer_id", listingOffer == null ? null : listingOffer.getListingOfferId(),
                             "merchant_id", listingOffer == null ? null : listingOffer.getMerchantId(),
                             "shop_id", listingOffer == null ? null : listingOffer.getShopId(),
                             "channel_code", listingOffer == null ? null : listingOffer.getChannelCode(),
                             "search_token", command.getSearchToken(),
-                            "result_set_token", command.getResultSetToken(),
-                            "result_position", command.getResultPosition(),
+                            "result_set_token", resolved.resultSetToken(),
+                            "result_position", resolved.resultPosition(),
                             "quantity", command.getQuantity(),
                             "checkout_token", command.getCheckoutToken(),
                             "occurred_at", command.getOccurredAt().toString(),
@@ -411,10 +416,13 @@ public class CommerceBehaviorCommandServiceImpl implements CommerceBehaviorComma
                 .build();
     }
 
-    private static String fingerprint(Object command) {
+    static String fingerprint(Object command) {
+        Map<String, Object> businessCommand = BeanUtil.beanToMap(
+                command, new LinkedHashMap<>(), false, true);
+        businessCommand.remove("occurredAt");
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("tenant_id", TenantContextHolder.getRequiredTenantId());
-        value.put("command", command);
+        value.put("command", businessCommand);
         return DigestUtil.sha256Hex(JsonUtils.toJsonString(value));
     }
 
@@ -483,14 +491,20 @@ public class CommerceBehaviorCommandServiceImpl implements CommerceBehaviorComma
                 require(command.getQuantity() != null && command.getQuantity() > 0, "quantity must be positive");
             }
             case "CHECKOUT_STARTED", "CHECKOUT_ABANDONED" -> requireToken(command.getCheckoutToken(), "checkoutToken");
+            case "RECOMMENDATION_EXPOSED", "RECOMMENDATION_CLICKED" -> {
+                requireToken(command.getResultSetToken(), "resultSetToken");
+                requireUuid(command.getListingId(), "listingId");
+                require(command.getResultPosition() != null && command.getResultPosition() > 0,
+                        "resultPosition must be positive");
+            }
             default -> {
             }
         }
         if (command.getSkuId() != null) requireUuid(command.getSkuId(), "skuId");
-        boolean hasListingContext = command.getListingId() != null
+        boolean hasListingContext = !isRecommendationBehavior(command.getBehaviorType()) && (command.getListingId() != null
                 || command.getListingOfferId() != null
                 || command.getExpectedPriceMinor() != null
-                || command.getCurrencyCode() != null;
+                || command.getCurrencyCode() != null);
         if (hasListingContext) {
             requireUuid(command.getListingId(), "listingId");
             requireUuid(command.getListingOfferId(), "listingOfferId");
@@ -499,6 +513,32 @@ public class CommerceBehaviorCommandServiceImpl implements CommerceBehaviorComma
                     "expectedPriceMinor must be nonnegative");
             requireText(command.getCurrencyCode(), "currencyCode", 8);
         }
+    }
+
+    private ResolvedBehaviorContext resolveBehaviorContext(Long tenantId, String sessionId,
+                                                           RecordCommerceBehaviorCommand command,
+                                                           LocalDateTime now) {
+        if (isRecommendationBehavior(command.getBehaviorType())) {
+            AppRecommendationSnapshotDO snapshot = appRecommendationReadMapper.selectSnapshot(
+                    tenantId, sessionId, command.getResultSetToken(), command.getListingId(),
+                    command.getResultPosition(), now);
+            require(snapshot != null, "recommendation token, listing, rank, or TTL is invalid");
+            PublishedListingOfferView offer = PublishedListingOfferView.builder()
+                    .listingId(snapshot.getListingId())
+                    .listingOfferId(snapshot.getListingOfferId())
+                    .merchantId(snapshot.getMerchantId())
+                    .shopId(snapshot.getShopId())
+                    .channelCode(snapshot.getChannelCode())
+                    .canonicalSpuId(snapshot.getCanonicalSpuId())
+                    .canonicalSkuId(snapshot.getCanonicalSkuId())
+                    .priceMinor(snapshot.getPriceMinor())
+                    .currencyCode(snapshot.getCurrencyCode())
+                    .build();
+            return new ResolvedBehaviorContext(snapshot.getCanonicalSpuId(), snapshot.getCanonicalSkuId(),
+                    offer, snapshot.getDecisionToken(), snapshot.getRankNo());
+        }
+        return new ResolvedBehaviorContext(command.getCanonicalSpuId(), command.getSkuId(),
+                resolveListingOffer(command), command.getResultSetToken(), command.getResultPosition());
     }
 
     private PublishedListingOfferView resolveListingOffer(RecordCommerceBehaviorCommand command) {
@@ -606,5 +646,15 @@ public class CommerceBehaviorCommandServiceImpl implements CommerceBehaviorComma
     }
 
     private record OperationContext(Long tenantId, Long operationId, LocalDateTime now) {
+    }
+
+    private record ResolvedBehaviorContext(String canonicalSpuId, String canonicalSkuId,
+                                           PublishedListingOfferView listingOffer, String resultSetToken,
+                                           Integer resultPosition) {
+    }
+
+    private static boolean isRecommendationBehavior(String behaviorType) {
+        return "RECOMMENDATION_EXPOSED".equals(behaviorType)
+                || "RECOMMENDATION_CLICKED".equals(behaviorType);
     }
 }

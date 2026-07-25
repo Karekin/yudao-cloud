@@ -38,6 +38,7 @@ class CommerceBehaviorCommandServiceImplTest {
     private final CommerceSessionIdentityLinkMapper identityLinkMapper = mock(CommerceSessionIdentityLinkMapper.class);
     private final CommerceBehaviorEventMapper behaviorEventMapper = mock(CommerceBehaviorEventMapper.class);
     private final CommerceSessionPaymentAttributionMapper paymentAttributionMapper = mock(CommerceSessionPaymentAttributionMapper.class);
+    private final AppRecommendationReadMapper appRecommendationReadMapper = mock(AppRecommendationReadMapper.class);
     private final PrincipalValidationApi principalValidationApi = mock(PrincipalValidationApi.class);
     private final ListingQueryApi listingQueryApi = mock(ListingQueryApi.class);
     private final OrderQueryApi orderQueryApi = mock(OrderQueryApi.class);
@@ -45,7 +46,7 @@ class CommerceBehaviorCommandServiceImplTest {
     private final AtomicReference<String> attemptToken = new AtomicReference<>();
     private final CommerceBehaviorCommandServiceImpl service = new CommerceBehaviorCommandServiceImpl(
             operationMapper, sessionMapper, identityLinkMapper, behaviorEventMapper, paymentAttributionMapper,
-            principalValidationApi, listingQueryApi, orderQueryApi, outboxAppender);
+            appRecommendationReadMapper, principalValidationApi, listingQueryApi, orderQueryApi, outboxAppender);
 
     @BeforeEach
     void setUp() {
@@ -302,6 +303,45 @@ class CommerceBehaviorCommandServiceImplTest {
     }
 
     @Test
+    void shouldValidateRecommendationTokenAndPersistServerResolvedExposure() {
+        claimNewOperation();
+        when(sessionMapper.selectForUpdate(7L, SESSION_ID)).thenReturn(new CommerceSessionDO()
+                .setSessionId(SESSION_ID).setTenantId(7L).setStatus("ACTIVE").setVersion(5L)
+                .setStartedAt(java.time.LocalDateTime.parse("2026-07-18T01:00:00"))
+                .setLastActivityAt(java.time.LocalDateTime.parse("2026-07-18T01:05:00")));
+        when(sessionMapper.advanceActivity(eq(7L), eq(SESSION_ID), eq(5L), any(), any())).thenReturn(1);
+        when(behaviorEventMapper.insert(any(CommerceBehaviorEventDO.class))).thenReturn(1);
+        when(appRecommendationReadMapper.selectSnapshot(eq(7L), eq(SESSION_ID), eq("recommend:12345678"),
+                eq("8fa63e30-c604-4573-8033-9f686573e34b"), eq(1), any()))
+                .thenReturn(recommendationSnapshot());
+
+        CommerceBehaviorCommandResult result = service.recordBehavior(RecordCommerceBehaviorCommand.builder()
+                .idempotencyKey("recommendation-exposure-0001")
+                .runId(RUN_ID)
+                .behaviorId(BEHAVIOR_ID)
+                .sessionId(SESSION_ID)
+                .behaviorType("RECOMMENDATION_EXPOSED")
+                .listingId("8fa63e30-c604-4573-8033-9f686573e34b")
+                .resultSetToken("recommend:12345678")
+                .resultPosition(1)
+                .sourceSystem("STORE_FRONT")
+                .sourceType("RECOMMENDATION")
+                .sourceId("recommendation-exposure-01")
+                .correlationId(CORRELATION_ID)
+                .occurredAt(Instant.parse("2026-07-18T01:05:30Z"))
+                .build());
+
+        assertThat(result.getAggregateVersion()).isEqualTo(6L);
+        verifyNoInteractions(principalValidationApi);
+        verify(outboxAppender).append(argThat(event ->
+                "commerce.behavior.recorded".equals(event.getEventType())
+                        && "RECOMMENDATION_EXPOSED".equals(event.getPayload().get("behavior_type"))
+                        && SPU_ID.equals(event.getPayload().get("canonical_spu_id"))
+                        && "4ae91ba4-a9bd-4417-a7ff-6253bcfd10b8".equals(event.getPayload().get("listing_offer_id"))
+                        && Integer.valueOf(1).equals(event.getPayload().get("result_position"))));
+    }
+
+    @Test
     void shouldReplayImmutableDuplicateWithoutDomainWrites() {
         AtomicReference<String> requestHash = new AtomicReference<>();
         when(operationMapper.insertOrResolve(anyLong(), anyString(), anyString(), anyString(), anyString(), any()))
@@ -322,6 +362,20 @@ class CommerceBehaviorCommandServiceImplTest {
 
         assertThat(replay.getDuplicate()).isTrue();
         verifyNoInteractions(principalValidationApi, sessionMapper, identityLinkMapper, behaviorEventMapper, outboxAppender);
+    }
+
+    @Test
+    void fingerprintShouldIgnoreExecutionTimeButRetainBusinessPayload() {
+        StartCommerceSessionCommand first = startCommand();
+        StartCommerceSessionCommand retry = startCommand();
+        retry.setOccurredAt(first.getOccurredAt().plusSeconds(30));
+
+        assertThat(CommerceBehaviorCommandServiceImpl.fingerprint(retry))
+                .isEqualTo(CommerceBehaviorCommandServiceImpl.fingerprint(first));
+
+        retry.setEntrypointCode("SEARCH");
+        assertThat(CommerceBehaviorCommandServiceImpl.fingerprint(retry))
+                .isNotEqualTo(CommerceBehaviorCommandServiceImpl.fingerprint(first));
     }
 
     @Test
@@ -551,5 +605,23 @@ class CommerceBehaviorCommandServiceImplTest {
                 .correlationId(CORRELATION_ID)
                 .occurredAt(Instant.parse("2026-07-18T01:00:00Z"))
                 .build();
+    }
+
+    private AppRecommendationSnapshotDO recommendationSnapshot() {
+        AppRecommendationSnapshotDO snapshot = new AppRecommendationSnapshotDO();
+        snapshot.setDecisionId("decision-1");
+        snapshot.setDecisionToken("recommend:12345678");
+        snapshot.setSessionId(SESSION_ID);
+        snapshot.setListingId("8fa63e30-c604-4573-8033-9f686573e34b");
+        snapshot.setListingOfferId("4ae91ba4-a9bd-4417-a7ff-6253bcfd10b8");
+        snapshot.setMerchantId("e2f33091-a702-48fd-af1e-c33280cd8d34");
+        snapshot.setShopId("74ad9d20-9202-4f81-aa7b-e38d6474fd35");
+        snapshot.setChannelCode("HOME_FEED");
+        snapshot.setCanonicalSpuId(SPU_ID);
+        snapshot.setCanonicalSkuId("e28705da-ab41-4c42-af9f-bb6bf4703546");
+        snapshot.setPriceMinor(39800L);
+        snapshot.setCurrencyCode("CNY");
+        snapshot.setRankNo(1);
+        return snapshot;
     }
 }

@@ -152,7 +152,16 @@ public class SupplyPlanningCommand {
         private String recommendationId;
         private Long expectedVersion;
         private String targetType;
-        private String targetReference;
+        private String mappingEvidenceSha256;
+        private Long supplierId;
+        private Long accountId;
+        private Long erpProductId;
+        private Long erpProductUnitId;
+        private Long unitCostMinor;
+        private BigDecimal taxPercent;
+        private Long sourceWarehouseId;
+        private Long targetWarehouseId;
+        private Long wmsSkuId;
         private String convertedByPrincipalId;
     }
 

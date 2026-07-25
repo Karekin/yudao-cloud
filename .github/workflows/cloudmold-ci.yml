@@ -3,6 +3,7 @@ name: CloudMold backend CI
 on:
   push:
     branches:
+      - master
       - feature/y-shopping-jdk17
       - cloudmold/main
   pull_request:
@@ -67,6 +68,9 @@ jobs:
 
       - name: Test the Demo database preflight gate
         run: bash deploy/demo/test-database-preflight.sh
+
+      - name: Verify BPM approval deployment preflight
+        run: bash deploy/demo/test-cloudmold-agent-approval-bpm-preflight.sh
 
       - name: Verify CloudMold admin write permissions
         run: bash deploy/demo/test-cloudmold-write-permission-gate.sh

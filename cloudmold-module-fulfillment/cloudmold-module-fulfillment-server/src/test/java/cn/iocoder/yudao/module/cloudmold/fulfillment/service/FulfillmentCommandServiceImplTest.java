@@ -7,6 +7,7 @@ import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
 import cn.iocoder.yudao.module.cloudmold.fulfillment.api.*;
 import cn.iocoder.yudao.module.cloudmold.fulfillment.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.fulfillment.dal.mysql.*;
+import cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryReservationQueryApi;
 import cn.iocoder.yudao.module.cloudmold.order.api.*;
 import org.junit.jupiter.api.*;
 
@@ -29,10 +30,12 @@ class FulfillmentCommandServiceImplTest {
     private final TrackingEventMapper trackingEventMapper = mock(TrackingEventMapper.class);
     private final FulfillmentStatusHistoryMapper historyMapper = mock(FulfillmentStatusHistoryMapper.class);
     private final OrderQueryApi orderQueryApi = mock(OrderQueryApi.class);
+    private final InventoryReservationQueryApi inventoryReservationQueryApi =
+            mock(InventoryReservationQueryApi.class);
     private final OutboxAppender outboxAppender = mock(OutboxAppender.class);
     private final FulfillmentCommandServiceImpl service = new FulfillmentCommandServiceImpl(operationMapper,
             fulfillmentMapper, itemMapper, shipmentMapper, shipmentItemMapper, trackingEventMapper, historyMapper,
-            orderQueryApi, outboxAppender);
+            orderQueryApi, inventoryReservationQueryApi, outboxAppender);
 
     @BeforeEach
     void setUp() {
@@ -119,6 +122,26 @@ class FulfillmentCommandServiceImplTest {
         verify(shipmentItemMapper, times(2)).insert(any(ShipmentItemDO.class));
         verify(trackingEventMapper).insert(argThat((TrackingEventDO event) ->
                 event.getTrackingStatus().equals("SHIPPED")));
+        verify(inventoryReservationQueryApi).requireCommitted("res-1", "order-1", "item-1");
+        verify(inventoryReservationQueryApi).requireCommitted("res-2", "order-1", "item-2");
+    }
+
+    @Test
+    void shouldRejectShipmentBeforeInventoryCommit() {
+        claimNewOperation();
+        when(fulfillmentMapper.selectForUpdate(1L, "fulfillment-1"))
+                .thenReturn(fulfillment("CREATED", 1L));
+        when(itemMapper.selectByFulfillment(1L, "fulfillment-1")).thenReturn(items());
+        when(shipmentMapper.selectByFulfillment(1L, "fulfillment-1")).thenReturn(null);
+        doThrow(new IllegalArgumentException("inventory reservation is not committed for shipment"))
+                .when(inventoryReservationQueryApi).requireCommitted("res-1", "order-1", "item-1");
+
+        assertThatThrownBy(() -> service.execute(transition(FulfillmentOperation.SHIP, 1L)
+                .setCarrierCode("INTERNAL_TEST").setWaybillNo("WB-001")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("inventory reservation is not committed for shipment");
+
+        verify(shipmentMapper, never()).insert(any(ShipmentDO.class));
     }
 
     @Test

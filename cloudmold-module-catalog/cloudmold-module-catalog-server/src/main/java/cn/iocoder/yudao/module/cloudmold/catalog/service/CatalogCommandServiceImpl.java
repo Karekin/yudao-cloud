@@ -30,7 +30,15 @@ public class CatalogCommandServiceImpl implements CatalogCommandApi {
     static final int OPERATION_PROCESSING = 0;
     static final int OPERATION_SUCCEEDED = 10;
     static final int STATUS_DRAFT = 0;
+    static final int STATUS_ACTIVE = 10;
+    static final int STATUS_INACTIVE = 20;
+    static final int STATUS_ARCHIVED = 90;
+    static final int SPU_STATUS_SUBMITTED = 10;
+    static final int SPU_STATUS_APPROVED = 20;
+    static final int SPU_STATUS_ACTIVE = 30;
+    static final int SPU_STATUS_INACTIVE = 40;
     static final int BARCODE_ACTIVE = 10;
+    static final int BARCODE_RETIRED = 90;
     private static final Set<String> SEASONS = Set.of("SPRING", "SUMMER", "AUTUMN", "WINTER", "ALL_SEASON");
     private static final Set<String> BARCODE_TYPES = Set.of("EAN13", "EAN8", "UPC", "CODE128", "INTERNAL");
 
@@ -101,6 +109,105 @@ public class CatalogCommandServiceImpl implements CatalogCommandApi {
                 .build();
         require(operationMapper.markSucceeded(operationId, tenantId, JsonUtils.toJsonString(result), now) == 1,
                 "Catalog operation completion conflict");
+        return result;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public CatalogMetadataUpdateResult updateMetadata(CatalogMetadataUpdateCommand rawCommand) {
+        NormalizedMetadataCommand command = normalize(rawCommand);
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        String requestHash = DigestUtil.sha256Hex(tenantId + "\u001f" + JsonUtils.toJsonString(command));
+        String attemptToken = UUID.randomUUID().toString();
+
+        operationMapper.insertOrResolve(tenantId, command.idempotencyKey(), requestHash, attemptToken, now);
+        Long operationId = operationMapper.selectLastInsertId();
+        require(operationId != null && operationId > 0, "failed to resolve Catalog metadata operation");
+        CatalogOperationDO operation = operationMapper.selectForUpdate(operationId, tenantId);
+        require(operation != null, "Catalog metadata operation disappeared");
+        if (!attemptToken.equals(operation.getAttemptToken())) {
+            require(Objects.equals(operation.getRequestHash(), requestHash),
+                    "idempotency key conflicts with a different Catalog metadata payload");
+            require(operation.getStatus() == OPERATION_SUCCEEDED && operation.getResultJson() != null,
+                    "existing Catalog metadata operation is not complete");
+            CatalogMetadataUpdateResult replay = JsonUtils.parseObject(operation.getResultJson(), CatalogMetadataUpdateResult.class);
+            replay.setDuplicate(true);
+            return replay;
+        }
+
+        MetadataOutcome outcome = switch (command.entityType()) {
+            case STYLE -> updateStyleMetadata(tenantId, command, now);
+            case SPU -> updateSpuMetadata(tenantId, command, now);
+            case SKU -> updateSkuMetadata(tenantId, command, now);
+            default -> throw new IllegalArgumentException("Catalog metadata update only supports STYLE, SPU, and SKU");
+        };
+        if (outcome.changed()) {
+            appendMetadataUpdatedEvent(tenantId, command, outcome);
+        }
+        CatalogMetadataUpdateResult result = CatalogMetadataUpdateResult.builder()
+                .operationId(operationId).entityType(command.entityType()).entityId(command.entityId())
+                .businessCode(outcome.businessCode()).currentStatus(statusName(command.entityType(), outcome.status()))
+                .aggregateVersion(outcome.aggregateVersion()).duplicate(false).build();
+        require(operationMapper.markSucceeded(operationId, tenantId, JsonUtils.toJsonString(result), now) == 1,
+                "Catalog metadata operation completion conflict");
+        return result;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public CatalogBarcodeRotateResult rotateBarcode(CatalogBarcodeRotateCommand rawCommand) {
+        NormalizedBarcodeRotateCommand command = normalize(rawCommand);
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        String requestHash = DigestUtil.sha256Hex(tenantId + "\u001f" + JsonUtils.toJsonString(command));
+        String attemptToken = UUID.randomUUID().toString();
+
+        operationMapper.insertOrResolve(tenantId, command.idempotencyKey(), requestHash, attemptToken, now);
+        Long operationId = operationMapper.selectLastInsertId();
+        require(operationId != null && operationId > 0, "failed to resolve Catalog barcode operation");
+        CatalogOperationDO operation = operationMapper.selectForUpdate(operationId, tenantId);
+        require(operation != null, "Catalog barcode operation disappeared");
+        if (!attemptToken.equals(operation.getAttemptToken())) {
+            require(Objects.equals(operation.getRequestHash(), requestHash),
+                    "idempotency key conflicts with a different Catalog barcode payload");
+            require(operation.getStatus() == OPERATION_SUCCEEDED && operation.getResultJson() != null,
+                    "existing Catalog barcode operation is not complete");
+            CatalogBarcodeRotateResult replay = JsonUtils.parseObject(operation.getResultJson(), CatalogBarcodeRotateResult.class);
+            replay.setDuplicate(true);
+            return replay;
+        }
+
+        CatalogSkuDO sku = requireNonNull(lifecycleMapper.selectSkuForUpdate(tenantId, command.skuId()),
+                "Catalog SKU does not exist");
+        require(Objects.equals(sku.getVersion(), command.expectedVersion()), "Catalog expectedVersion conflict");
+        require(sku.getStatus() != STATUS_ARCHIVED, "archived Catalog SKU cannot rotate its primary barcode");
+        CatalogBarcodeDO previous = requireNonNull(masterDataMapper.selectActivePrimaryBarcode(tenantId, sku.getSkuId()),
+                "Catalog SKU has no active primary Barcode to rotate");
+        require(!Objects.equals(previous.getBarcode(), command.barcode()),
+                "new primary barcode must differ from the current primary barcode");
+        CatalogBarcodeDO existing = masterDataMapper.selectBarcode(tenantId, command.barcode());
+        require(existing == null, "barcode already exists in Catalog history");
+        require(masterDataMapper.retirePrimaryBarcode(tenantId, previous.getBarcodeId(), previous.getVersion(), now) == 1,
+                "Catalog primary Barcode retirement conflict");
+        require(masterDataMapper.insertPrimaryBarcode(UUID.randomUUID().toString(), tenantId, sku.getSkuId(),
+                command.barcode(), command.barcodeType(), now) == 1, "failed to persist the new primary Barcode");
+        CatalogBarcodeDO current = masterDataMapper.selectBarcode(tenantId, command.barcode());
+        require(current != null && Objects.equals(current.getSkuId(), sku.getSkuId())
+                        && Boolean.TRUE.equals(current.getIsPrimary()) && current.getStatus() == BARCODE_ACTIVE,
+                "rotated primary barcode was not persisted");
+        require(masterDataMapper.bumpSkuVersion(tenantId, sku.getSkuId(), sku.getVersion(), now) == 1,
+                "Catalog SKU version bump conflict");
+        long newVersion = sku.getVersion() + 1;
+        appendBarcodeRotatedEvent(tenantId, command, sku, previous, current, newVersion);
+
+        CatalogBarcodeRotateResult result = CatalogBarcodeRotateResult.builder()
+                .operationId(operationId).skuId(sku.getSkuId()).previousBarcodeId(previous.getBarcodeId())
+                .previousBarcode(previous.getBarcode()).currentBarcodeId(current.getBarcodeId())
+                .currentBarcode(current.getBarcode()).barcodeType(current.getBarcodeType())
+                .aggregateVersion(newVersion).duplicate(false).build();
+        require(operationMapper.markSucceeded(operationId, tenantId, JsonUtils.toJsonString(result), now) == 1,
+                "Catalog barcode operation completion conflict");
         return result;
     }
 
@@ -187,7 +294,7 @@ public class CatalogCommandServiceImpl implements CatalogCommandApi {
         if (command.entityType() == CatalogEntityType.SPU && command.action() == CatalogLifecycleAction.SUBMIT) {
             CatalogSpuDO spu = (CatalogSpuDO) entity.value();
             CatalogStyleDO style = lifecycleMapper.selectStyle(tenantId, spu.getStyleId());
-            require(style != null && style.getStatus() == 10, "Style must be ACTIVE before SPU submission");
+            require(style != null && style.getStatus() == STATUS_ACTIVE, "Style must be ACTIVE before SPU submission");
         }
         if (command.entityType() == CatalogEntityType.SPU && targetStatus == 30) {
             require(lifecycleMapper.countActiveSkus(tenantId, entity.id()) > 0,
@@ -196,7 +303,7 @@ public class CatalogCommandServiceImpl implements CatalogCommandApi {
         if (command.entityType() == CatalogEntityType.SIZE && targetStatus == 10) {
             CatalogSizeDO size = (CatalogSizeDO) entity.value();
             CatalogSizeGroupDO group = lifecycleMapper.selectSizeGroup(tenantId, size.getSizeGroupId());
-            require(group != null && group.getStatus() == 10, "Size Group must be ACTIVE before Size activation");
+            require(group != null && group.getStatus() == STATUS_ACTIVE, "Size Group must be ACTIVE before Size activation");
         }
         if (command.entityType() == CatalogEntityType.SKU && targetStatus == 10) {
             CatalogSkuDO sku = (CatalogSkuDO) entity.value();
@@ -204,13 +311,34 @@ public class CatalogCommandServiceImpl implements CatalogCommandApi {
             CatalogColorDO color = lifecycleMapper.selectColor(tenantId, sku.getColorId());
             CatalogSizeDO size = lifecycleMapper.selectSize(tenantId, sku.getSizeId());
             CatalogSizeGroupDO group = size == null ? null : lifecycleMapper.selectSizeGroup(tenantId, size.getSizeGroupId());
-            require(spu != null && (spu.getStatus() == 20 || spu.getStatus() == 30),
+            require(spu != null && (spu.getStatus() == SPU_STATUS_APPROVED || spu.getStatus() == SPU_STATUS_ACTIVE),
                     "SPU must be APPROVED or ACTIVE before SKU activation");
-            require(color != null && color.getStatus() == 10, "Color must be ACTIVE before SKU activation");
-            require(size != null && size.getStatus() == 10, "Size must be ACTIVE before SKU activation");
-            require(group != null && group.getStatus() == 10, "Size Group must be ACTIVE before SKU activation");
+            require(color != null && color.getStatus() == STATUS_ACTIVE, "Color must be ACTIVE before SKU activation");
+            require(size != null && size.getStatus() == STATUS_ACTIVE, "Size must be ACTIVE before SKU activation");
+            require(group != null && group.getStatus() == STATUS_ACTIVE, "Size Group must be ACTIVE before SKU activation");
             require(lifecycleMapper.countActivePrimaryBarcodes(tenantId, sku.getSkuId()) == 1,
                     "SKU requires exactly one active primary Barcode before activation");
+        }
+        if (command.action() == CatalogLifecycleAction.DEACTIVATE) {
+            switch (command.entityType()) {
+                case STYLE -> require(lifecycleMapper.countActiveSpus(tenantId, entity.id()) == 0,
+                        "Style cannot be deactivated while ACTIVE SPU still reference it");
+                case SPU -> require(lifecycleMapper.countActiveSkus(tenantId, entity.id()) == 0,
+                        "SPU cannot be deactivated while ACTIVE SKU still reference it");
+                case COLOR -> require(lifecycleMapper.countActiveColorSkus(tenantId, entity.id()) == 0,
+                        "Color cannot be deactivated while ACTIVE SKU still reference it");
+                case SIZE_GROUP -> {
+                    require(lifecycleMapper.countActiveSizes(tenantId, entity.id()) == 0,
+                            "Size Group cannot be deactivated while ACTIVE Size still reference it");
+                    require(lifecycleMapper.countActiveSizeGroupSkus(tenantId, entity.id()) == 0,
+                            "Size Group cannot be deactivated while ACTIVE SKU still reference it");
+                }
+                case SIZE -> require(lifecycleMapper.countActiveSizeSkus(tenantId, entity.id()) == 0,
+                        "Size cannot be deactivated while ACTIVE SKU still reference it");
+                case SKU -> {
+                    // no additional child fence
+                }
+            }
         }
         if (command.action() == CatalogLifecycleAction.ARCHIVE) {
             int children = switch (command.entityType()) {
@@ -422,6 +550,124 @@ public class CatalogCommandServiceImpl implements CatalogCommandApi {
                 .destination("catalog-events").build());
     }
 
+    private MetadataOutcome updateStyleMetadata(Long tenantId, NormalizedMetadataCommand command, LocalDateTime now) {
+        CatalogStyleDO current = requireNonNull(lifecycleMapper.selectStyleForUpdate(tenantId, command.entityId()),
+                "Catalog Style does not exist");
+        require(current.getStatus() != STATUS_ARCHIVED, "archived Catalog Style cannot be updated");
+        require(Objects.equals(current.getVersion(), command.expectedVersion()), "Catalog expectedVersion conflict");
+        CatalogStyleDO existing = masterDataMapper.selectStyle(tenantId, command.styleCode());
+        require(existing == null || Objects.equals(existing.getStyleId(), current.getStyleId()),
+                "styleCode already belongs to another Style");
+        if (Objects.equals(current.getStyleCode(), command.styleCode())
+                && Objects.equals(current.getStyleName(), command.styleName())
+                && Objects.equals(current.getPlanningCategoryRef(), command.planningCategoryRef())
+                && Objects.equals(current.getBrandRef(), command.brandRef())
+                && Objects.equals(current.getPlanningYear(), command.planningYear())
+                && Objects.equals(current.getSeasonCode(), command.seasonCode())
+                && Objects.equals(current.getWaveCode(), command.waveCode())) {
+            return new MetadataOutcome(current.getStyleId(), current.getStyleCode(), current.getStatus(),
+                    current.getVersion(), false);
+        }
+        require(masterDataMapper.updateStyleMetadata(tenantId, current.getStyleId(), command.styleCode(),
+                command.styleName(), command.planningCategoryRef(), command.brandRef(), command.planningYear(),
+                command.seasonCode(), command.waveCode(), current.getVersion(), now) == 1,
+                "Catalog Style metadata update conflict");
+        return new MetadataOutcome(current.getStyleId(), command.styleCode(), current.getStatus(),
+                current.getVersion() + 1, true);
+    }
+
+    private MetadataOutcome updateSpuMetadata(Long tenantId, NormalizedMetadataCommand command, LocalDateTime now) {
+        CatalogSpuDO current = requireNonNull(lifecycleMapper.selectSpuForUpdate(tenantId, command.entityId()),
+                "Catalog SPU does not exist");
+        require(current.getStatus() != STATUS_ARCHIVED, "archived Catalog SPU cannot be updated");
+        require(Objects.equals(current.getVersion(), command.expectedVersion()), "Catalog expectedVersion conflict");
+        CatalogSpuDO existing = masterDataMapper.selectSpu(tenantId, command.spuCode());
+        require(existing == null || Objects.equals(existing.getSpuId(), current.getSpuId()),
+                "spuCode already belongs to another SPU");
+        if (Objects.equals(current.getSpuCode(), command.spuCode())
+                && Objects.equals(current.getProductName(), command.productName())
+                && Objects.equals(current.getSalesCategoryRef(), command.salesCategoryRef())) {
+            return new MetadataOutcome(current.getSpuId(), current.getSpuCode(), current.getStatus(),
+                    current.getVersion(), false);
+        }
+        require(masterDataMapper.updateSpuMetadata(tenantId, current.getSpuId(), command.spuCode(),
+                command.productName(), command.salesCategoryRef(), current.getVersion(), now) == 1,
+                "Catalog SPU metadata update conflict");
+        return new MetadataOutcome(current.getSpuId(), command.spuCode(), current.getStatus(),
+                current.getVersion() + 1, true);
+    }
+
+    private MetadataOutcome updateSkuMetadata(Long tenantId, NormalizedMetadataCommand command, LocalDateTime now) {
+        CatalogSkuDO current = requireNonNull(lifecycleMapper.selectSkuForUpdate(tenantId, command.entityId()),
+                "Catalog SKU does not exist");
+        require(current.getStatus() != STATUS_ARCHIVED, "archived Catalog SKU cannot be updated");
+        require(Objects.equals(current.getVersion(), command.expectedVersion()), "Catalog expectedVersion conflict");
+        CatalogSkuDO existing = masterDataMapper.selectSku(tenantId, command.skuCode());
+        require(existing == null || Objects.equals(existing.getSkuId(), current.getSkuId()),
+                "skuCode already belongs to another SKU");
+        if (Objects.equals(current.getSkuCode(), command.skuCode())) {
+            return new MetadataOutcome(current.getSkuId(), current.getSkuCode(), current.getStatus(),
+                    current.getVersion(), false);
+        }
+        require(masterDataMapper.updateSkuMetadata(tenantId, current.getSkuId(), command.skuCode(),
+                current.getVersion(), now) == 1, "Catalog SKU metadata update conflict");
+        return new MetadataOutcome(current.getSkuId(), command.skuCode(), current.getStatus(),
+                current.getVersion() + 1, true);
+    }
+
+    private void appendMetadataUpdatedEvent(Long tenantId, NormalizedMetadataCommand command, MetadataOutcome outcome) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("entity_type", command.entityType().name());
+        payload.put("entity_id", outcome.entityId());
+        payload.put("business_code", outcome.businessCode());
+        payload.put("status", statusName(command.entityType(), outcome.status()));
+        payload.put("reason", command.reason());
+        if (command.entityType() == CatalogEntityType.STYLE) {
+            payload.put("style_code", command.styleCode());
+            payload.put("style_name", command.styleName());
+            payload.put("planning_category_ref", command.planningCategoryRef());
+            payload.put("brand_ref", command.brandRef());
+            payload.put("planning_year", command.planningYear());
+            payload.put("season_code", command.seasonCode());
+            payload.put("wave_code", command.waveCode());
+        } else if (command.entityType() == CatalogEntityType.SPU) {
+            payload.put("spu_code", command.spuCode());
+            payload.put("product_name", command.productName());
+            payload.put("sales_category_ref", command.salesCategoryRef());
+        } else {
+            payload.put("sku_code", command.skuCode());
+        }
+        payload.put("version", outcome.aggregateVersion());
+        outboxAppender.append(AppendDomainEventCommand.builder()
+                .eventType("catalog.entity.metadata_updated").schemaVersion(1).sourceSystem("cloudmold-catalog")
+                .tenantId(tenantId).aggregateType("catalog_entity").aggregateId(outcome.entityId())
+                .aggregateVersion(outcome.aggregateVersion()).eventSequence((short) 1)
+                .occurredAt(command.occurredAt()).correlationId(command.correlationId())
+                .causationId(command.causationId()).idempotencyKey(command.idempotencyKey()).payload(payload)
+                .headers(Map.of("business_code", outcome.businessCode())).destination("catalog-events").build());
+    }
+
+    private void appendBarcodeRotatedEvent(Long tenantId, NormalizedBarcodeRotateCommand command, CatalogSkuDO sku,
+                                           CatalogBarcodeDO previous, CatalogBarcodeDO current, long newVersion) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("canonical_sku_id", sku.getSkuId());
+        payload.put("sku_code", sku.getSkuCode());
+        payload.put("previous_barcode_id", previous.getBarcodeId());
+        payload.put("previous_barcode", previous.getBarcode());
+        payload.put("current_barcode_id", current.getBarcodeId());
+        payload.put("current_barcode", current.getBarcode());
+        payload.put("barcode_type", current.getBarcodeType());
+        payload.put("reason", command.reason());
+        payload.put("version", newVersion);
+        outboxAppender.append(AppendDomainEventCommand.builder()
+                .eventType("catalog.barcode.rotated").schemaVersion(1).sourceSystem("cloudmold-catalog")
+                .tenantId(tenantId).aggregateType("catalog_sku").aggregateId(sku.getSkuId())
+                .aggregateVersion(newVersion).eventSequence((short) 1).occurredAt(command.occurredAt())
+                .correlationId(command.correlationId()).causationId(command.causationId())
+                .idempotencyKey(command.idempotencyKey()).payload(payload)
+                .headers(Map.of("sku_code", sku.getSkuCode())).destination("catalog-events").build());
+    }
+
     private static NormalizedLifecycleCommand normalize(CatalogLifecycleCommand command) {
         require(command != null && command.getEntityType() != null, "Catalog entityType is required");
         require(command.getAction() != null, "Catalog lifecycle action is required");
@@ -480,6 +726,75 @@ public class CatalogCommandServiceImpl implements CatalogCommandApi {
                 command.getCausationId(), command.getOccurredAt());
     }
 
+    private static NormalizedMetadataCommand normalize(CatalogMetadataUpdateCommand command) {
+        require(command != null && command.getEntityType() != null, "Catalog entityType is required");
+        require(command.getEntityType() == CatalogEntityType.STYLE
+                        || command.getEntityType() == CatalogEntityType.SPU
+                        || command.getEntityType() == CatalogEntityType.SKU,
+                "Catalog metadata update only supports STYLE, SPU, and SKU");
+        requireUuid(command.getEntityId(), "entityId");
+        require(command.getExpectedVersion() != null && command.getExpectedVersion() >= 1,
+                "expectedVersion must be positive");
+        requireText(command.getIdempotencyKey(), "idempotencyKey", 128);
+        requireText(command.getReason(), "reason", 512);
+        require(command.getOccurredAt() != null, "occurredAt is required");
+        requireUuid(command.getCorrelationId(), "correlationId");
+        if (command.getCausationId() != null) requireUuid(command.getCausationId(), "causationId");
+
+        return switch (command.getEntityType()) {
+            case STYLE -> {
+                String styleCode = code(command.getStyleCode(), "styleCode", 64);
+                String season = upper(command.getSeasonCode());
+                require(SEASONS.contains(season), "seasonCode is invalid");
+                require(command.getPlanningYear() != null && command.getPlanningYear() >= 2000
+                        && command.getPlanningYear() <= 2100, "planningYear must be between 2000 and 2100");
+                requireSourceRef(command.getPlanningCategoryRef(), "planningCategoryRef");
+                requireSourceRef(command.getBrandRef(), "brandRef");
+                requireText(command.getStyleName(), "styleName", 255);
+                yield new NormalizedMetadataCommand(command.getEntityType(), command.getEntityId(),
+                        command.getExpectedVersion(), command.getIdempotencyKey().trim(), command.getReason().trim(),
+                        styleCode, command.getStyleName().trim(), command.getPlanningCategoryRef().trim(),
+                        command.getBrandRef().trim(), command.getPlanningYear(), season, blankToNull(command.getWaveCode()),
+                        null, null, null, null, command.getCorrelationId(), command.getCausationId(),
+                        command.getOccurredAt());
+            }
+            case SPU -> {
+                String spuCode = code(command.getSpuCode(), "spuCode", 64);
+                requireText(command.getProductName(), "productName", 255);
+                requireSourceRef(command.getSalesCategoryRef(), "salesCategoryRef");
+                yield new NormalizedMetadataCommand(command.getEntityType(), command.getEntityId(),
+                        command.getExpectedVersion(), command.getIdempotencyKey().trim(), command.getReason().trim(),
+                        null, null, null, null, null, null, null, spuCode, command.getProductName().trim(),
+                        command.getSalesCategoryRef().trim(), null, command.getCorrelationId(),
+                        command.getCausationId(), command.getOccurredAt());
+            }
+            case SKU -> new NormalizedMetadataCommand(command.getEntityType(), command.getEntityId(),
+                    command.getExpectedVersion(), command.getIdempotencyKey().trim(), command.getReason().trim(),
+                    null, null, null, null, null, null, null, null, null, null,
+                    code(command.getSkuCode(), "skuCode", 64), command.getCorrelationId(),
+                    command.getCausationId(), command.getOccurredAt());
+            default -> throw new IllegalArgumentException("Catalog metadata update only supports STYLE, SPU, and SKU");
+        };
+    }
+
+    private static NormalizedBarcodeRotateCommand normalize(CatalogBarcodeRotateCommand command) {
+        require(command != null, "Catalog barcode rotation command is required");
+        requireUuid(command.getSkuId(), "skuId");
+        require(command.getExpectedVersion() != null && command.getExpectedVersion() >= 1,
+                "expectedVersion must be positive");
+        requireText(command.getIdempotencyKey(), "idempotencyKey", 128);
+        requireText(command.getReason(), "reason", 512);
+        require(command.getOccurredAt() != null, "occurredAt is required");
+        requireUuid(command.getCorrelationId(), "correlationId");
+        if (command.getCausationId() != null) requireUuid(command.getCausationId(), "causationId");
+        String barcodeType = upper(command.getBarcodeType());
+        require(BARCODE_TYPES.contains(barcodeType), "barcodeType is invalid");
+        requireText(command.getBarcode(), "barcode", 64);
+        return new NormalizedBarcodeRotateCommand(command.getSkuId(), command.getExpectedVersion(),
+                command.getIdempotencyKey().trim(), command.getReason().trim(), command.getBarcode().trim(),
+                barcodeType, command.getCorrelationId(), command.getCausationId(), command.getOccurredAt());
+    }
+
     private static String fingerprint(Long tenantId, NormalizedCommand command) {
         return DigestUtil.sha256Hex(tenantId + "\u001f" + JsonUtils.toJsonString(command));
     }
@@ -526,6 +841,11 @@ public class CatalogCommandServiceImpl implements CatalogCommandApi {
         }
     }
 
+    private static <T> T requireNonNull(T value, String message) {
+        require(value != null, message);
+        return value;
+    }
+
     private record NormalizedCommand(String idempotencyKey, String styleCode, String styleName,
                                      String planningCategoryRef, String brandRef, Integer planningYear,
                                      String seasonCode, String waveCode, String spuCode, String productName,
@@ -538,10 +858,29 @@ public class CatalogCommandServiceImpl implements CatalogCommandApi {
     private record ResolvedSku(CatalogSkuDO sku, boolean created) {
     }
 
+    private record MetadataOutcome(String entityId, String businessCode, Integer status,
+                                   Long aggregateVersion, boolean changed) {
+    }
+
     private record NormalizedLifecycleCommand(CatalogEntityType entityType, String entityId,
                                               CatalogLifecycleAction action, Long expectedVersion,
                                               String idempotencyKey, String reason, String correlationId,
                                               String causationId, java.time.Instant occurredAt) {
+    }
+
+    private record NormalizedMetadataCommand(CatalogEntityType entityType, String entityId, Long expectedVersion,
+                                             String idempotencyKey, String reason, String styleCode,
+                                             String styleName, String planningCategoryRef, String brandRef,
+                                             Integer planningYear, String seasonCode, String waveCode,
+                                             String spuCode, String productName, String salesCategoryRef,
+                                             String skuCode, String correlationId, String causationId,
+                                             java.time.Instant occurredAt) {
+    }
+
+    private record NormalizedBarcodeRotateCommand(String skuId, Long expectedVersion, String idempotencyKey,
+                                                  String reason, String barcode, String barcodeType,
+                                                  String correlationId, String causationId,
+                                                  java.time.Instant occurredAt) {
     }
 
     private record LifecycleEntity(String id, String businessCode, Integer status, Long version, Object value) {

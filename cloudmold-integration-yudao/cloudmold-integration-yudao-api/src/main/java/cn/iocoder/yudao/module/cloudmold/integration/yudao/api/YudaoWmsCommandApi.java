@@ -17,21 +17,48 @@ public interface YudaoWmsCommandApi {
 
     Long createReceiptOrder(ReceiptOrderCommand command);
 
-    Boolean completeReceiptOrder(DocumentActionCommand command);
+    PhysicalOperationResult completeReceiptOrder(DocumentActionCommand command);
 
     Long createShipmentOrder(ShipmentOrderCommand command);
 
-    Boolean completeShipmentOrder(DocumentActionCommand command);
+    PhysicalOperationResult completeShipmentOrder(DocumentActionCommand command);
 
     Long createMovementOrder(MovementOrderCommand command);
 
-    Boolean completeMovementOrder(DocumentActionCommand command);
+    PhysicalOperationResult completeMovementOrder(DocumentActionCommand command);
 
     Long createCheckOrder(CheckOrderCommand command);
 
-    Boolean completeCheckOrder(DocumentActionCommand command);
+    PhysicalOperationResult completeCheckOrder(DocumentActionCommand command);
 
-    record DocumentActionCommand(String idempotencyKey, Long documentId) implements Serializable {
+    PhysicalOperationResult completePutaway(DocumentActionCommand command);
+
+    PhysicalOperationResult completePicking(DocumentActionCommand command);
+
+    record DocumentActionCommand(String idempotencyKey,
+                                 Long documentId,
+                                 Integer expectedCurrentStatus,
+                                 Long expectedDocumentVersion) implements Serializable {
+    }
+
+    record PhysicalOrderView(String sourceSystem,
+                             String documentType,
+                             Long documentId,
+                             String documentNo,
+                             Integer status,
+                             String businessTime,
+                             Long warehouseId,
+                             BigDecimal quantity,
+                             BigDecimal amount,
+                             String remark) implements Serializable {
+    }
+
+    record PhysicalOperationResult(boolean success,
+                                   boolean supported,
+                                   String operationType,
+                                   String failureCode,
+                                   String failureMessage,
+                                   PhysicalOrderView snapshot) implements Serializable {
     }
 
     record MerchantCommand(String idempotencyKey, String code, String name, Integer type,

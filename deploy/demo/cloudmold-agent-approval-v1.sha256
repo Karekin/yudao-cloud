@@ -1,0 +1,4 @@
+c5a165684173bc4ca6c746b38a065dbb322578248d58af51e8e2ace45065866b  cloudmold-module-agent-control/cloudmold-module-agent-control-server/src/main/resources/approval-workflow/cloudmold-agent-approval-v1.bpmn20.xml
+dc4d14996c55f8652ae90dc23c2cb9f0730164be0a2681834eb4553ec1b3bdf6  deploy/demo/cloudmold-agent-approval-v1.manifest.json
+c8046d25d4139696ec6f49d0b209a045b17d4107ef5fc7dd7a7f1a82de2c053f  deploy/demo/cloudmold-agent-approval-bpm-preflight.sh
+5aa3c36d8321e552d53376b2f50997fb6d9ac19c20bd390b87f309239b8146cf  deploy/demo/cloudmold-agent-approval-bpm-deploy.sh

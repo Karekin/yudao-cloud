@@ -1,0 +1,15 @@
+{
+  "manifest_version": 1,
+  "process_definition_key": "cloudmold-agent-approval-v1",
+  "approval_task_definition_key": "approval_review",
+  "model_key": "cloudmold-agent-approval-v1",
+  "model_name": "CloudMold Agent Approval v1",
+  "category": "cloudmold-agent-control",
+  "model_type": 10,
+  "form_type": 20,
+  "bpmn_resource": "cloudmold-module-agent-control/cloudmold-module-agent-control-server/src/main/resources/approval-workflow/cloudmold-agent-approval-v1.bpmn20.xml",
+  "bpmn_sha256": "c5a165684173bc4ca6c746b38a065dbb322578248d58af51e8e2ace45065866b",
+  "deployment_profile": "cloudmold-agent-approval-bpm",
+  "requires_explicit_start_user_select_assignees": true,
+  "requires_distinct_requester_and_approver": true
+}

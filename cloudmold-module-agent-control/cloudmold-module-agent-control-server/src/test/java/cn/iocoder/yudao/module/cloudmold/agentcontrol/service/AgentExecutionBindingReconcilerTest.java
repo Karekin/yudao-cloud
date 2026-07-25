@@ -29,7 +29,7 @@ class AgentExecutionBindingReconcilerTest {
                 .setSkillId("skill.inventory").setRunId("run-1");
         when(mapper.selectExecutionReconcileCandidates(100)).thenReturn(List.of(candidate));
         when(skillTasks.get("task-1")).thenReturn(SkillTaskView.builder().taskId("task-1")
-                .status("SUCCEEDED").build());
+                .runId("run-1").status("SUCCEEDED").build());
 
         reconciler.reconcile();
 
@@ -43,7 +43,7 @@ class AgentExecutionBindingReconcilerTest {
                 .setSkillId("skill.inventory").setRunId("run-1");
         when(mapper.selectExecutionReconcileCandidates(100)).thenReturn(List.of(candidate));
         when(skillTasks.get("task-1")).thenReturn(SkillTaskView.builder().taskId("task-1")
-                .status("RUNNING").build());
+                .runId("run-1").status("RUNNING").build());
 
         reconciler.reconcile();
 
@@ -59,5 +59,20 @@ class AgentExecutionBindingReconcilerTest {
         reconciler.reconcile();
 
         verify(missionRuntime).resolveCompletedWorkOrder("wo-completed");
+    }
+
+    @Test
+    void ignoresSucceededTasksThatBelongToTheOldRunAfterTakeover() {
+        ExecutionReconcileCandidate candidate = new ExecutionReconcileCandidate().setTenantId(1L)
+                .setBindingId("binding-1").setOperatorUserId(7L).setSkillTaskId("task-1")
+                .setSkillId("skill.inventory").setRunId("run-current");
+        when(mapper.selectExecutionReconcileCandidates(100)).thenReturn(List.of(candidate));
+        when(mapper.selectMissionResolutionCandidates(100)).thenReturn(List.of());
+        when(skillTasks.get("task-1")).thenReturn(SkillTaskView.builder().taskId("task-1")
+                .runId("run-old").status("SUCCEEDED").build());
+
+        reconciler.reconcile();
+
+        verifyNoInteractions(bindings);
     }
 }

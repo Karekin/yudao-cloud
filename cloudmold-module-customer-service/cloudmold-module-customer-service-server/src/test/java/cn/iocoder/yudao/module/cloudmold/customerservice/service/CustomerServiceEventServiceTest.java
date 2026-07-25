@@ -87,7 +87,7 @@ class CustomerServiceEventServiceTest {
             String json = JsonUtils.toJsonString(event.getPayload());
             assertThat(json).doesNotContain("message_body", "file_url", "13800138000",
                     "https://bucket.example/customer/id-card.png",
-                    "restricted:objecttoken12345678", "sha256:" + "a".repeat(64), "sha256:" + "c".repeat(64));
+                    "restricted:objecttoken12345678", "sha256:" + "a".repeat(64));
         });
         AppendDomainEventCommand messageEvent = captor.getAllValues().get(1);
         assertThat(messageEvent.getPayload()).containsEntry("has_content", true)
@@ -102,9 +102,9 @@ class CustomerServiceEventServiceTest {
         assertThat(feedbackEvent.getPayload()).containsEntry("touchpoint_code", "TICKET_RESOLUTION")
                 .containsEntry("sentiment_code", "SATISFIED")
                 .containsEntry("score_basis_points", 10000)
-                .containsEntry("has_comment", true)
-                .containsEntry("comment_digest_sha256", "c".repeat(64))
-                .doesNotContainKeys("comment_token", "reviewer_principal_id", "message_body", "customer_phone");
+                .containsEntry("comment_token", "sha256:" + "c".repeat(64))
+                .doesNotContainKeys("has_comment", "comment_digest_sha256",
+                        "reviewer_principal_id", "message_body", "customer_phone");
         verify(mapper, times(2)).insertHistory(any(CustomerServiceStatusHistoryDO.class));
     }
 }

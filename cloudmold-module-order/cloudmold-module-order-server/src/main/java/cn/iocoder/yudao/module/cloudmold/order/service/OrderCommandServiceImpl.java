@@ -100,7 +100,8 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         require(Objects.equals(order.getPayableAmountMinor(), amountMinor), "payment amount does not match order");
         require(Objects.equals(order.getCurrencyCode(), currencyCode), "payment currency does not match order");
         return OrderPaymentView.builder().orderId(order.getOrderId()).orderNo(order.getOrderNo())
-                .buyerId(order.getBuyerId()).status(order.getStatus()).payableAmountMinor(order.getPayableAmountMinor())
+                .runId(order.getRunId()).buyerId(order.getBuyerId()).status(order.getStatus())
+                .payableAmountMinor(order.getPayableAmountMinor())
                 .currencyCode(order.getCurrencyCode()).aggregateVersion(order.getVersion()).build();
     }
 
@@ -185,6 +186,9 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         require(payable >= 0, "payable amount cannot be negative");
         OrderHeaderDO order = new OrderHeaderDO().setOrderId(orderId).setTenantId(tenantId).setOrderNo(orderNo)
                 .setRunId(command.getRunId()).setBuyerId(command.getBuyerId()).setStatus("PLACED")
+                .setAddressRef(command.getAddressRef())
+                .setAddressSnapshotVersion(command.getAddressSnapshotVersion())
+                .setDestinationRegionCode(command.getDestinationRegionCode())
                 .setTotalQuantity(totalQuantity).setProductAmountMinor(productAmount)
                 .setShippingAmountMinor(command.getShippingAmountMinor())
                 .setDiscountAmountMinor(command.getDiscountAmountMinor()).setPayableAmountMinor(payable)
@@ -428,6 +432,12 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         payload.put("order_id", order.getOrderId());
         payload.put("order_no", order.getOrderNo());
         payload.put("buyer_id", order.getBuyerId());
+        boolean hasCanonicalAddress = order.getAddressRef() != null;
+        if (hasCanonicalAddress) {
+            payload.put("address_ref", order.getAddressRef());
+            payload.put("address_snapshot_version", order.getAddressSnapshotVersion());
+            payload.put("destination_region_code", order.getDestinationRegionCode());
+        }
         payload.put("previous_status", previous);
         payload.put("current_status", current);
         payload.put("product_amount_minor", order.getProductAmountMinor());
@@ -448,7 +458,8 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         payload.put("reason", command.getReason());
         payload.put("items", eventItems);
         outboxAppender.append(AppendDomainEventCommand.builder().eventType("order.status.changed")
-                .schemaVersion("PAID_UNSHIPPED".equals(command.getCancellationMode()) ? 3
+                .schemaVersion(hasCanonicalAddress ? 4
+                        : "PAID_UNSHIPPED".equals(command.getCancellationMode()) ? 3
                         : items.stream().allMatch(item -> item.getListingId() != null) ? 2 : 1)
                 .sourceSystem("cloudmold-order").tenantId(tenantId)
                 .aggregateType("order").aggregateId(order.getOrderId()).aggregateVersion(version)
@@ -681,6 +692,13 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
     private static void validatePlace(OrderCommand command) {
         require(command.getOrderId() == null, "PLACE does not accept orderId");
         requireText(command.getBuyerId(), "buyerId", 128);
+        if (command.getOperation() == OrderOperation.PLACE_FROM_LISTING) {
+            requireUuid(command.getAddressRef(), "addressRef");
+            require(command.getAddressSnapshotVersion() != null
+                            && command.getAddressSnapshotVersion() > 0,
+                    "addressSnapshotVersion must be positive");
+            requireText(command.getDestinationRegionCode(), "destinationRegionCode", 32);
+        }
         require(command.getItems() != null && !command.getItems().isEmpty() && command.getItems().size() <= 100,
                 "PLACE requires 1 to 100 items");
         require(CURRENCY_CNY.equals(command.getCurrencyCode()), "first slice supports CNY only");
@@ -822,6 +840,9 @@ public class OrderCommandServiceImpl implements OrderCommandApi, OrderQueryApi {
         value.put("tenant_id", tenantId); value.put("operation", command.getOperation());
         value.put("run_id", command.getRunId()); value.put("order_id", command.getOrderId());
         value.put("expected_version", command.getExpectedVersion()); value.put("buyer_id", command.getBuyerId());
+        value.put("address_ref", command.getAddressRef());
+        value.put("address_snapshot_version", command.getAddressSnapshotVersion());
+        value.put("destination_region_code", command.getDestinationRegionCode());
         value.put("items", command.getItems()); value.put("shipping", command.getShippingAmountMinor());
         value.put("discount", command.getDiscountAmountMinor()); value.put("currency", command.getCurrencyCode());
         value.put("benefit_applications", command.getBenefitApplications());

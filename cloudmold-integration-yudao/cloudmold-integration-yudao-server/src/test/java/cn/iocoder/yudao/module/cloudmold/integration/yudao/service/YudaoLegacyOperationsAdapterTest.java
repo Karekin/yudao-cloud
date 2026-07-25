@@ -2,8 +2,8 @@ package cn.iocoder.yudao.module.cloudmold.integration.yudao.service;
 
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoErpCommandApi;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoLegacyOperationsQueryApi;
-import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoWmsCommandApi;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.bridge.YudaoLegacyOperationsAdapter;
+import cn.iocoder.yudao.module.cloudmold.integration.yudao.wms.LegacyWmsPhysicalOperationsPort;
 import cn.iocoder.yudao.module.erp.controller.admin.purchase.vo.order.ErpPurchaseOrderSaveReqVO;
 import cn.iocoder.yudao.module.erp.controller.admin.purchase.vo.in.ErpPurchaseInSaveReqVO;
 import cn.iocoder.yudao.module.erp.controller.admin.sale.vo.customer.ErpCustomerSaveReqVO;
@@ -28,16 +28,11 @@ import cn.iocoder.yudao.module.mes.service.pro.workorder.MesProWorkOrderService;
 import cn.iocoder.yudao.module.mes.service.md.item.MesMdItemService;
 import cn.iocoder.yudao.module.mes.service.md.item.MesMdItemTypeService;
 import cn.iocoder.yudao.module.mes.service.md.unitmeasure.MesMdUnitMeasureService;
-import cn.iocoder.yudao.module.wms.service.inventory.WmsInventoryService;
 import cn.iocoder.yudao.module.wms.service.md.item.WmsItemCategoryService;
 import cn.iocoder.yudao.module.wms.service.md.item.WmsItemService;
 import cn.iocoder.yudao.module.wms.service.md.item.WmsItemSkuService;
 import cn.iocoder.yudao.module.wms.service.md.merchant.WmsMerchantService;
 import cn.iocoder.yudao.module.wms.service.md.warehouse.WmsWarehouseService;
-import cn.iocoder.yudao.module.wms.service.order.check.WmsCheckOrderService;
-import cn.iocoder.yudao.module.wms.service.order.movement.WmsMovementOrderService;
-import cn.iocoder.yudao.module.wms.service.order.receipt.WmsReceiptOrderService;
-import cn.iocoder.yudao.module.wms.service.order.shipment.WmsShipmentOrderService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.mockito.ArgumentCaptor;
@@ -71,11 +66,7 @@ class YudaoLegacyOperationsAdapterTest {
     private final WmsItemCategoryService wmsItemCategoryService = mock(WmsItemCategoryService.class);
     private final WmsItemService wmsItemService = mock(WmsItemService.class);
     private final WmsItemSkuService wmsItemSkuService = mock(WmsItemSkuService.class);
-    private final WmsInventoryService wmsInventoryService = mock(WmsInventoryService.class);
-    private final WmsReceiptOrderService receiptOrderService = mock(WmsReceiptOrderService.class);
-    private final WmsShipmentOrderService shipmentOrderService = mock(WmsShipmentOrderService.class);
-    private final WmsMovementOrderService movementOrderService = mock(WmsMovementOrderService.class);
-    private final WmsCheckOrderService checkOrderService = mock(WmsCheckOrderService.class);
+    private final LegacyWmsPhysicalOperationsPort wmsPhysicalOperationsPort = mock(LegacyWmsPhysicalOperationsPort.class);
     private final MesMdUnitMeasureService mesUnitMeasureService = mock(MesMdUnitMeasureService.class);
     private final MesMdItemTypeService mesItemTypeService = mock(MesMdItemTypeService.class);
     private final MesMdItemService mesItemService = mock(MesMdItemService.class);
@@ -85,9 +76,8 @@ class YudaoLegacyOperationsAdapterTest {
             purchaseOrderService, purchaseInService, customerService, saleOrderService, saleOutService,
             stockMoveService, stockCheckService, erpWarehouseService,
             financePaymentService, financeReceiptService, wmsMerchantService, wmsWarehouseService,
-            wmsItemCategoryService, wmsItemService, wmsItemSkuService, wmsInventoryService,
-            receiptOrderService, shipmentOrderService,
-            movementOrderService, checkOrderService, mesUnitMeasureService, mesItemTypeService,
+            wmsItemCategoryService, wmsItemService, wmsItemSkuService, wmsPhysicalOperationsPort,
+            mesUnitMeasureService, mesItemTypeService,
             mesItemService, workOrderService, operationService);
 
     @BeforeEach
@@ -196,13 +186,6 @@ class YudaoLegacyOperationsAdapterTest {
     }
 
     @Test
-    void shouldDelegatePhysicalWmsCompletionAsAnAtomicCapability() {
-        assertThat(adapter.completeReceiptOrder(new YudaoWmsCommandApi.DocumentActionCommand(
-                "receipt-complete-001", 41L))).isTrue();
-        verify(receiptOrderService).completeReceiptOrder(41L);
-    }
-
-    @Test
     void shouldBuildMesMasterDataThroughTypedIdempotentCapabilities() {
         when(mesUnitMeasureService.createUnitMeasure(any())).thenReturn(101L);
         when(mesItemTypeService.createItemType(any())).thenReturn(102L);
@@ -250,5 +233,24 @@ class YudaoLegacyOperationsAdapterTest {
         assertThat(result.warehouseId()).isEqualTo(61L);
         assertThat(result.name()).isEqualTo("Shanghai");
         assertThat(result.status()).isZero();
+    }
+
+    @Test
+    void shouldDelegateWmsOperationalReadModelsThroughTheDedicatedPhysicalPort() {
+        when(wmsPhysicalOperationsPort.getReceiptOrder(41L)).thenReturn(
+                new LegacyWmsPhysicalOperationsPort.PhysicalOrderSnapshot(
+                        "WMS", "RECEIPT_ORDER", 41L, "RK-41", 4,
+                        "2026-07-25T11:00:00", 100L, new BigDecimal("2"),
+                        new BigDecimal("40"), "done"));
+        when(wmsPhysicalOperationsPort.getWmsInventory(100L, 200L)).thenReturn(
+                new LegacyWmsPhysicalOperationsPort.InventorySnapshot(301L, 100L, 200L, new BigDecimal("8")));
+
+        var receipt = adapter.getReceiptOrder(41L);
+        var inventory = adapter.getWmsInventory(100L, 200L);
+
+        assertThat(receipt.documentNo()).isEqualTo("RK-41");
+        assertThat(receipt.status()).isEqualTo(4);
+        assertThat(inventory.inventoryId()).isEqualTo(301L);
+        assertThat(inventory.quantity()).isEqualByComparingTo("8");
     }
 }

@@ -33,7 +33,11 @@ public class SkillTaskProperties {
          */
         private String hmacSecret = "";
         private boolean legacyHmacEnabled = true;
+        private String authorityMode = "LOCAL_TEST_HMAC";
+        private String issuer = "cloudmold.agent-control";
+        private String audience = "cloudmold.skill-task";
         private Map<String, VerificationKey> keys = new LinkedHashMap<>();
+        private Map<String, AsymmetricVerificationKey> asymmetricKeys = new LinkedHashMap<>();
         private Duration maxValidity = Duration.ofHours(4);
         private Duration clockSkew = Duration.ofSeconds(30);
     }
@@ -45,6 +49,16 @@ public class SkillTaskProperties {
          * Secret owned by the external approval authority. It is never exposed through MCP.
          */
         private String secret = "";
+        private Instant notBefore;
+        private Instant expiresAt;
+        private Instant revokedAt;
+    }
+
+    @Data
+    public static class AsymmetricVerificationKey {
+
+        private String algorithm = "RS256";
+        private String publicKeyPem = "";
         private Instant notBefore;
         private Instant expiresAt;
         private Instant revokedAt;

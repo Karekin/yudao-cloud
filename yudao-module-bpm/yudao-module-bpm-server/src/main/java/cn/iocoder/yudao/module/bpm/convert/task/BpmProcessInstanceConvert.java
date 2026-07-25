@@ -126,7 +126,13 @@ public interface BpmProcessInstanceConvert {
     default BpmProcessInstanceStatusEvent buildProcessInstanceStatusEvent(Object source, ProcessInstance instance,
                                                                           Integer status, String reason) {
         return new BpmProcessInstanceStatusEvent(source).setId(instance.getId()).setStatus(status).setReason(reason)
-                .setProcessDefinitionKey(instance.getProcessDefinitionKey()).setBusinessKey(instance.getBusinessKey());
+                .setProcessDefinitionKey(instance.getProcessDefinitionKey()).setBusinessKey(instance.getBusinessKey())
+                .setTerminalOperatorUserId(NumberUtils.parseLong(Objects.toString(instance.getProcessVariables()
+                        .get(BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_TERMINAL_OPERATOR_USER_ID), null)))
+                .setTerminalTaskId(Objects.toString(instance.getProcessVariables()
+                        .get(BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_TERMINAL_TASK_ID), null))
+                .setTerminalTaskDefinitionKey(Objects.toString(instance.getProcessVariables()
+                        .get(BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_TERMINAL_TASK_DEFINITION_KEY), null));
     }
 
     default BpmMessageSendWhenProcessInstanceApproveReqDTO buildProcessInstanceApproveMessage(ProcessInstance instance) {

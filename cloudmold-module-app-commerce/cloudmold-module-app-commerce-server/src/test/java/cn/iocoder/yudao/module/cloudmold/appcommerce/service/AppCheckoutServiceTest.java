@@ -43,6 +43,8 @@ import static org.mockito.Mockito.*;
 
 class AppCheckoutServiceTest {
 
+    private static final String ADDRESS_REF = "11111111-1111-4111-8111-111111111111";
+
     private final AppMemberPrincipalResolver principalResolver = mock(AppMemberPrincipalResolver.class);
     private final AppListingQueryApi appListingQueryApi = mock(AppListingQueryApi.class);
     private final ListingQueryApi listingQueryApi = mock(ListingQueryApi.class);
@@ -56,11 +58,12 @@ class AppCheckoutServiceTest {
     private final QualityConsumerEvidenceApi qualityConsumerEvidenceApi = mock(QualityConsumerEvidenceApi.class);
     private final Environment environment = mock(Environment.class);
     private final AppFacadeOperationService facadeOperationService = mock(AppFacadeOperationService.class);
+    private final AppAddressVaultService addressVaultService = mock(AppAddressVaultService.class);
 
     private final AppCheckoutService service = new AppCheckoutService(principalResolver, appListingQueryApi,
             listingQueryApi, inventoryAvailabilityQueryApi, reservationApi, orderCommandApi, appOrderQueryApi,
             paymentCommandApi, checkoutMapper, outboxAppender, qualityConsumerEvidenceApi, environment,
-            facadeOperationService);
+            facadeOperationService, addressVaultService);
 
     @BeforeEach
     void setUp() {
@@ -75,6 +78,12 @@ class AppCheckoutServiceTest {
         when(inventoryAvailabilityQueryApi.getBySku(eq("sku-1"), any(Instant.class)))
                 .thenReturn(InventorySkuAvailabilityView.builder().canonicalSkuId("sku-1")
                         .allocatableQuantity(new BigDecimal("8.000000")).inventoryVersion(6L).build());
+        when(addressVaultService.requireOwned(eq(ADDRESS_REF), anyString()))
+                .thenReturn(AppAddressSnapshotView.builder()
+                        .addressRef(ADDRESS_REF).snapshotVersion(1L)
+                        .destinationRegionCode("440305")
+                        .receiverSummary("张**").mobileSummary("138****0000")
+                        .duplicate(false).build());
     }
 
     @AfterEach
@@ -96,8 +105,10 @@ class AppCheckoutServiceTest {
         when(checkoutMapper.selectByIdempotency(11L, "principal-member-1", "preview-idem-001"))
                 .thenAnswer(invocation -> copy(stored.get()));
 
-        AppCheckoutView first = service.preview("preview-idem-001", "listing-1", "offer-1", "sku-1", 2);
-        AppCheckoutView replay = service.preview("preview-idem-001", "listing-1", "offer-1", "sku-1", 2);
+        AppCheckoutView first = service.preview(
+                "preview-idem-001", "listing-1", "offer-1", "sku-1", 2, ADDRESS_REF);
+        AppCheckoutView replay = service.preview(
+                "preview-idem-001", "listing-1", "offer-1", "sku-1", 2, ADDRESS_REF);
 
         assertThat(first.getDuplicate()).isFalse();
         assertThat(replay.getDuplicate()).isTrue();
@@ -111,7 +122,8 @@ class AppCheckoutServiceTest {
                 .thenReturn(InventorySkuAvailabilityView.builder().canonicalSkuId("sku-1")
                         .allocatableQuantity(new BigDecimal("1.000000")).inventoryVersion(6L).build());
 
-        assertThatThrownBy(() -> service.preview("preview-idem-002", "listing-1", "offer-1", "sku-1", 2))
+        assertThatThrownBy(() -> service.preview(
+                "preview-idem-002", "listing-1", "offer-1", "sku-1", 2, ADDRESS_REF))
                 .hasMessage("insufficient allocatable inventory");
         verify(checkoutMapper, never()).insertIgnore(any());
     }
@@ -126,7 +138,8 @@ class AppCheckoutServiceTest {
         when(checkoutMapper.selectByIdempotency(11L, "principal-member-1", "preview-idem-003"))
                 .thenReturn(existing);
 
-        assertThatThrownBy(() -> service.preview("preview-idem-003", "listing-1", "offer-1", "sku-1", 3))
+        assertThatThrownBy(() -> service.preview(
+                "preview-idem-003", "listing-1", "offer-1", "sku-1", 3, ADDRESS_REF))
                 .hasMessage("idempotency key conflicts with a different checkout payload");
     }
 
@@ -143,11 +156,13 @@ class AppCheckoutServiceTest {
         when(checkoutMapper.selectByIdempotency(eq(11L), anyString(), eq("shared-idem-001")))
                 .thenAnswer(invocation -> copy(stored.get(invocation.getArgument(1) + "|shared-idem-001")));
 
-        AppCheckoutView first = service.preview("shared-idem-001", "listing-1", "offer-1", "sku-1", 1);
+        AppCheckoutView first = service.preview(
+                "shared-idem-001", "listing-1", "offer-1", "sku-1", 1, ADDRESS_REF);
         when(principalResolver.requireCurrent()).thenReturn(AppMemberPrincipalView.builder()
                 .memberUserId(1002L).principalId("principal-member-2").principalStatus("ACTIVE")
                 .sourceSystem("MEMBER").sourceType("MEMBER_USER").build());
-        AppCheckoutView second = service.preview("shared-idem-001", "listing-1", "offer-1", "sku-1", 1);
+        AppCheckoutView second = service.preview(
+                "shared-idem-001", "listing-1", "offer-1", "sku-1", 1, ADDRESS_REF);
 
         assertThat(first.getPrincipalId()).isEqualTo("principal-member-1");
         assertThat(second.getPrincipalId()).isEqualTo("principal-member-2");
@@ -211,13 +226,40 @@ class AppCheckoutServiceTest {
     }
 
     @Test
+    void createOrderShouldRejectQualityRecallAfterPreview() {
+        AppCheckoutDO checkout = baseCheckout().setCheckoutToken("checkout-recalled");
+        when(checkoutMapper.selectForUpdate(11L, "checkout-recalled")).thenReturn(checkout);
+        when(qualityConsumerEvidenceApi.getLatestBySku("sku-1")).thenReturn(
+                QualityConsumerEvidenceView.builder().canonicalSkuId("sku-1").status("RECALLED").build());
+
+        assertThatThrownBy(() -> service.createOrder("order-idem-recalled", "checkout-recalled"))
+                .hasMessage("canonical SKU lacks approved consumer quality evidence");
+        verifyNoInteractions(orderCommandApi, reservationApi);
+    }
+
+    @Test
+    void maximumLengthExternalKeyShouldProduceBoundedStableInternalKeys() {
+        String externalKey = "x".repeat(128);
+
+        String reserveKey = AppCheckoutService.internalKey("reserve", externalKey);
+        String replayKey = AppCheckoutService.internalKey("reserve", externalKey);
+
+        assertThat(reserveKey).isEqualTo(replayKey).hasSizeLessThanOrEqualTo(128);
+        assertThat(reserveKey).startsWith("app-commerce:reserve:");
+    }
+
+    @Test
     void captureShouldUseOwnedServerAmountAndReplayWithoutDoubleCapture() {
         ReflectionTestUtils.setField(service, "internalTestPaymentEnabled", true);
         when(environment.getActiveProfiles()).thenReturn(new String[]{"test"});
         when(appOrderQueryApi.requireOwned("principal-member-1", "order-pay-1")).thenReturn(AppOrderView.builder()
-                .orderId("order-pay-1").buyerPrincipalId("principal-member-1")
+                .orderId("order-pay-1").runId("checkout-lineage-1").buyerPrincipalId("principal-member-1")
                 .status("INVENTORY_RESERVED").aggregateVersion(3L)
-                .payableAmountMinor(39800L).currencyCode("CNY").build());
+                .payableAmountMinor(39800L).currencyCode("CNY")
+                .items(List.of(OrderLineView.builder().orderItemId("item-pay-1")
+                        .canonicalSkuId("sku-1").listingId("listing-1").listingOfferId("offer-1")
+                        .unitPriceMinor(19900L).quantity(new BigDecimal("2")).build()))
+                .build());
         PaymentCommandResult paid = PaymentCommandResult.builder()
                 .paymentId("payment-1").orderId("order-pay-1").capturedAmountMinor(39800L)
                 .currencyCode("CNY").currentStatus("CAPTURED").duplicate(false).build();
@@ -244,11 +286,42 @@ class AppCheckoutServiceTest {
         assertThat(replay.getDuplicate()).isTrue();
         verify(paymentCommandApi, times(1)).execute(argThat(command ->
                 command.getAmountMinor().equals(39800L)
+                        && "checkout-lineage-1".equals(command.getRunId())
                         && "CNY".equals(command.getCurrencyCode())
                         && "INTERNAL_TEST".equals(command.getProviderCode())));
         verify(orderCommandApi, times(1)).execute(argThat(command ->
                 command.getOperation().name().equals("CONFIRM_PAYMENT")
+                        && "checkout-lineage-1".equals(command.getRunId())
                         && command.getExpectedVersion().equals(3L)));
+    }
+
+    @Test
+    void captureShouldRejectQualityRecallAfterInventoryReservation() {
+        ReflectionTestUtils.setField(service, "internalTestPaymentEnabled", true);
+        when(environment.getActiveProfiles()).thenReturn(new String[]{"test"});
+        when(appOrderQueryApi.requireOwned("principal-member-1", "order-pay-recalled")).thenReturn(
+                AppOrderView.builder().orderId("order-pay-recalled").buyerPrincipalId("principal-member-1")
+                        .runId("checkout-lineage-recalled")
+                        .status("INVENTORY_RESERVED").aggregateVersion(3L)
+                        .payableAmountMinor(39800L).currencyCode("CNY")
+                        .items(List.of(OrderLineView.builder().orderItemId("item-pay-recalled")
+                                .canonicalSkuId("sku-1").listingId("listing-1").listingOfferId("offer-1")
+                                .unitPriceMinor(19900L).quantity(new BigDecimal("2")).build()))
+                        .build());
+        when(qualityConsumerEvidenceApi.getLatestBySku("sku-1")).thenReturn(
+                QualityConsumerEvidenceView.builder().canonicalSkuId("sku-1").status("RECALLED").build());
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            AppFacadeOperationService.Operation<PaymentCommandResult> operation = invocation.getArgument(5);
+            return new AppFacadeOperationService.Replay<>(
+                    operation.run(Instant.parse("2026-07-25T00:00:00Z")), false);
+        }).when(facadeOperationService).execute(eq("CAPTURE_INTERNAL_TEST"), eq("payment-idem-recalled"),
+                eq("principal-member-1"), any(), eq(PaymentCommandResult.class), any());
+
+        assertThatThrownBy(() -> service.captureInternalTest(
+                "payment-idem-recalled", "order-pay-recalled", 3L))
+                .hasMessage("canonical SKU lacks approved consumer quality evidence");
+        verifyNoInteractions(paymentCommandApi);
     }
 
     @Test
@@ -289,6 +362,9 @@ class AppCheckoutServiceTest {
                 .setListingOfferId("offer-1")
                 .setCanonicalSpuId("spu-1")
                 .setCanonicalSkuId("sku-1")
+                .setAddressRef(ADDRESS_REF)
+                .setAddressSnapshotVersion(1L)
+                .setDestinationRegionCode("440305")
                 .setQuantity(new BigDecimal("2"))
                 .setUnitPriceMinor(19900L)
                 .setProductAmountMinor(39800L)
@@ -317,6 +393,9 @@ class AppCheckoutServiceTest {
                 .setListingOfferId(source.getListingOfferId())
                 .setCanonicalSpuId(source.getCanonicalSpuId())
                 .setCanonicalSkuId(source.getCanonicalSkuId())
+                .setAddressRef(source.getAddressRef())
+                .setAddressSnapshotVersion(source.getAddressSnapshotVersion())
+                .setDestinationRegionCode(source.getDestinationRegionCode())
                 .setQuantity(source.getQuantity())
                 .setUnitPriceMinor(source.getUnitPriceMinor())
                 .setProductAmountMinor(source.getProductAmountMinor())

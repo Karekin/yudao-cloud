@@ -39,6 +39,22 @@ public class BpmProcessInstanceStatusEvent extends ApplicationEvent {
      */
     private String businessKey;
 
+    /**
+     * 触发流程终态的认证操作人编号。
+     *
+     * <p>自动完成、管理员取消等无法归因到具体任务操作人的终态可为空；需要
+     * 强身份归因的消费方必须对此字段 fail closed。</p>
+     */
+    private Long terminalOperatorUserId;
+    /**
+     * 触发流程终态的任务实例编号。
+     */
+    private String terminalTaskId;
+    /**
+     * 触发流程终态的任务定义键。
+     */
+    private String terminalTaskDefinitionKey;
+
     public BpmProcessInstanceStatusEvent() {
         // new Object() 保证非空
         super(new Object());

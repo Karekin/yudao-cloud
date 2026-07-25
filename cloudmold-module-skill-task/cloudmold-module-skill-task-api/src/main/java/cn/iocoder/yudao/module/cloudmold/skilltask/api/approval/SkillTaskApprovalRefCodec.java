@@ -18,7 +18,7 @@ public final class SkillTaskApprovalRefCodec {
     public static final String CLAIMS_VERSION = "cma3";
     public static final String LEGACY_VERIFIER = LEGACY_VERSION + ":hmac-sha256";
     public static final String VERIFIER = VERSION + ":hmac-sha256-keyed";
-    public static final String CLAIMS_VERIFIER = CLAIMS_VERSION + ":hmac-sha256-claims";
+    public static final String CLAIMS_VERIFIER = CLAIMS_VERSION + ":claims";
     public static final String DEFAULT_ISSUER = "cloudmold.agent-control";
     public static final String DEFAULT_AUDIENCE = "cloudmold.skill-task";
     public static final String LOCAL_HMAC_KEY_ID = "local-hmac";
@@ -29,6 +29,8 @@ public final class SkillTaskApprovalRefCodec {
     private static final Pattern WORK_ORDER_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}");
     private static final Pattern PERMIT_ID = Pattern.compile("[A-Za-z0-9._-]{8,128}");
     private static final Pattern SUBJECT = Pattern.compile("[0-9]+:[0-9]+");
+    private static final Pattern MISSION_RUN_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{0,63}");
+    private static final Pattern LEASE_OWNER = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}");
 
     private SkillTaskApprovalRefCodec() {
     }
@@ -98,10 +100,11 @@ public final class SkillTaskApprovalRefCodec {
         }
         String payload = new String(payloadBytes, StandardCharsets.UTF_8);
         String[] fields = payload.split("\n", -1);
-        if (fields.length != 16) {
+        if (fields.length != 16 && fields.length != 20) {
             throw new IllegalArgumentException("approvalRef payload is invalid");
         }
-        SkillTaskApprovalPermitClaims claims = new SkillTaskApprovalPermitClaims(
+        boolean missionFieldsPresent = fields.length == 20;
+        SkillTaskApprovalPermitClaims claims = requireClaims(new SkillTaskApprovalPermitClaims(
                 CLAIMS_VERSION,
                 requireKeyId(parts[1]),
                 requireText(fields[0], "issuer"),
@@ -119,8 +122,12 @@ public final class SkillTaskApprovalRefCodec {
                 requirePositiveLong(fields[12], "tenantId"),
                 parseInstant(parseEpoch(fields[13], "not-before"), "not-before"),
                 parseInstant(parseEpoch(fields[14], "issued-at"), "issued-at"),
-                parseInstant(parseEpoch(fields[15], "expiry"), "expiry"));
-        byte[] signature = parseSignature(parts[3]);
+                parseInstant(parseEpoch(fields[15], "expiry"), "expiry"),
+                missionFieldsPresent ? optionalMissionRunId(fields[16]) : null,
+                missionFieldsPresent ? optionalPositiveLong(fields[17], "fencingToken") : null,
+                missionFieldsPresent ? optionalLeaseOwner(fields[18]) : null,
+                missionFieldsPresent ? optionalPositiveLong(fields[19], "leaseEpoch") : null));
+        byte[] signature = parseClaimsSignature(parts[3]);
         return new ParsedClaimsApprovalRef(claims, payload, signature);
     }
 
@@ -159,6 +166,15 @@ public final class SkillTaskApprovalRefCodec {
         SkillTaskApprovalPermitClaims normalized = requireClaims(claims);
         String payload = claimsPayload(normalized);
         byte[] signature = sign(secret, claimsMessage(normalized.keyId(), payload));
+        return issueClaimsWithSignature(normalized, signature);
+    }
+
+    public static String issueClaimsWithSignature(SkillTaskApprovalPermitClaims claims, byte[] signature) {
+        SkillTaskApprovalPermitClaims normalized = requireClaims(claims);
+        if (signature == null || signature.length < 32 || signature.length > 1024) {
+            throw new IllegalArgumentException("approvalRef signature is invalid");
+        }
+        String payload = claimsPayload(normalized);
         return String.join(":", CLAIMS_VERSION, normalized.keyId(),
                 Base64.getUrlEncoder().withoutPadding()
                         .encodeToString(payload.getBytes(StandardCharsets.UTF_8)),
@@ -315,6 +331,19 @@ public final class SkillTaskApprovalRefCodec {
         return signature;
     }
 
+    private static byte[] parseClaimsSignature(String value) {
+        byte[] signature;
+        try {
+            signature = HexFormat.of().parseHex(value);
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("approvalRef signature is invalid", ex);
+        }
+        if (signature.length < 32 || signature.length > 1024) {
+            throw new IllegalArgumentException("approvalRef signature is invalid");
+        }
+        return signature;
+    }
+
     private static Instant parseInstant(long value, String field) {
         try {
             return Instant.ofEpochSecond(value);
@@ -351,6 +380,34 @@ public final class SkillTaskApprovalRefCodec {
         return parsed;
     }
 
+    private static Long optionalPositiveLong(String value, String field) {
+        String normalized = optionalText(value);
+        return normalized == null ? null : requirePositiveLong(normalized, field);
+    }
+
+    private static Long optionalPositiveLong(Long value, String field) {
+        if (value != null && value <= 0) {
+            throw new IllegalArgumentException(field + " is invalid");
+        }
+        return value;
+    }
+
+    private static String optionalMissionRunId(String value) {
+        String result = optionalText(value);
+        if (result != null && !MISSION_RUN_ID.matcher(result).matches()) {
+            throw new IllegalArgumentException("missionRunId has an unsupported format");
+        }
+        return result;
+    }
+
+    private static String optionalLeaseOwner(String value) {
+        String result = optionalText(value);
+        if (result != null && !LEASE_OWNER.matcher(result).matches()) {
+            throw new IllegalArgumentException("leaseOwner has an unsupported format");
+        }
+        return result;
+    }
+
     private static SkillTaskApprovalPermitClaims requireClaims(SkillTaskApprovalPermitClaims claims) {
         SkillTaskApprovalPermitClaims value = requireNonNull(claims, "claims");
         Instant nbf = requireNonNull(value.notBefore(), "notBefore");
@@ -361,6 +418,17 @@ public final class SkillTaskApprovalRefCodec {
         }
         if (nbf.getEpochSecond() > iat.getEpochSecond()) {
             throw new IllegalArgumentException("approvalRef notBefore must not be after issuedAt");
+        }
+        String missionRunId = optionalMissionRunId(value.missionRunId());
+        Long fencingToken = optionalPositiveLong(value.fencingToken(), "fencingToken");
+        String leaseOwner = optionalLeaseOwner(value.leaseOwner());
+        Long leaseEpoch = optionalPositiveLong(value.leaseEpoch(), "leaseEpoch");
+        boolean anyMissionField = missionRunId != null || fencingToken != null || leaseOwner != null
+                || leaseEpoch != null;
+        boolean allMissionFields = missionRunId != null && fencingToken != null && leaseOwner != null
+                && leaseEpoch != null;
+        if (anyMissionField && !allMissionFields) {
+            throw new IllegalArgumentException("mission lease fence must contain all fields");
         }
         return new SkillTaskApprovalPermitClaims(
                 CLAIMS_VERSION,
@@ -378,27 +446,40 @@ public final class SkillTaskApprovalRefCodec {
                 requireRisk(value.riskLevel()),
                 requireSubject(value.subject()),
                 value.tenantId() > 0 ? value.tenantId() : requirePositiveLong(Long.toString(value.tenantId()), "tenantId"),
-                nbf, iat, exp);
+                nbf, iat, exp, missionRunId, fencingToken, leaseOwner, leaseEpoch);
     }
 
-    private static String claimsPayload(SkillTaskApprovalPermitClaims claims) {
+    public static String claimsPayload(SkillTaskApprovalPermitClaims claims) {
+        SkillTaskApprovalPermitClaims normalized = requireClaims(claims);
         return String.join("\n",
-                claims.issuer(),
-                claims.audience(),
-                claims.permitId(),
-                claims.workOrderId(),
-                claims.approvalId(),
-                claims.rootRequestIdentity(),
-                claims.skillId(),
-                claims.skillVersion(),
-                claims.definitionClosureSha256(),
-                claims.inputSha256(),
-                claims.riskLevel(),
-                claims.subject(),
-                Long.toString(claims.tenantId()),
-                Long.toString(claims.notBefore().getEpochSecond()),
-                Long.toString(claims.issuedAt().getEpochSecond()),
-                Long.toString(claims.expiresAt().getEpochSecond()));
+                normalized.issuer(),
+                normalized.audience(),
+                normalized.permitId(),
+                normalized.workOrderId(),
+                normalized.approvalId(),
+                normalized.rootRequestIdentity(),
+                normalized.skillId(),
+                normalized.skillVersion(),
+                normalized.definitionClosureSha256(),
+                normalized.inputSha256(),
+                normalized.riskLevel(),
+                normalized.subject(),
+                Long.toString(normalized.tenantId()),
+                Long.toString(normalized.notBefore().getEpochSecond()),
+                Long.toString(normalized.issuedAt().getEpochSecond()),
+                Long.toString(normalized.expiresAt().getEpochSecond()),
+                nullToEmpty(normalized.missionRunId()),
+                normalized.fencingToken() == null ? "" : Long.toString(normalized.fencingToken()),
+                nullToEmpty(normalized.leaseOwner()),
+                normalized.leaseEpoch() == null ? "" : Long.toString(normalized.leaseEpoch()));
+    }
+
+    private static String optionalText(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private static String requireText(String value, String field) {

@@ -53,7 +53,11 @@ public class AgentExecutionBindingReconciler implements ApplicationListener<Appl
             try (CloudMoldRpcCallContext.Scope ignored = CloudMoldRpcCallContext.open(context)) {
                 task = skillTasks.get(candidate.getSkillTaskId());
             }
-            if ("SUCCEEDED".equals(task.getStatus())) {
+            if (!java.util.Objects.equals(candidate.getRunId(), task.getRunId())) {
+                log.info("Agent execution binding is stale after run takeover tenant={} binding={} task={} taskRun={} activeRun={}",
+                        candidate.getTenantId(), candidate.getBindingId(), candidate.getSkillTaskId(),
+                        task.getRunId(), candidate.getRunId());
+            } else if ("SUCCEEDED".equals(task.getStatus())) {
                 bindings.reconcile(candidate.getBindingId(), candidate.getOperatorUserId());
             } else if ("NEEDS_REVIEW".equals(task.getStatus())) {
                 log.warn("Agent execution awaits review tenant={} binding={} task={}", candidate.getTenantId(),

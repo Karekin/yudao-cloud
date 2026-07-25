@@ -5,9 +5,16 @@ import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventCommand;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
+import cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryLotCommand;
+import cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryLotCommandApi;
+import cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryLotOperation;
+import cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryLotQueryApi;
+import cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryLotResult;
+import cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryLotView;
 import cn.iocoder.yudao.module.cloudmold.quality.api.*;
 import cn.iocoder.yudao.module.cloudmold.quality.dal.dataobject.QualityRecords.*;
 import cn.iocoder.yudao.module.cloudmold.quality.dal.mysql.QualityMapper;
+import cn.iocoder.yudao.module.cloudmold.quality.service.actor.QualityActorPrincipalPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,14 +40,21 @@ public class QualityServiceImpl implements QualityCommandApi {
 
     private final QualityMapper mapper;
     private final OutboxAppender outboxAppender;
+    private final QualityActorPrincipalPort actorPrincipalPort;
+    private final InventoryLotQueryApi inventoryLotQueryApi;
+    private final InventoryLotCommandApi inventoryLotCommandApi;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public QualityResult execute(QualityCommand command) {
+    public QualityResult execute(QualityCommand command, String actorPrincipalId) {
         validateEnvelope(command);
+        requireRef(actorPrincipalId, "actorPrincipalId", 128);
+        actorPrincipalPort.requireActive(actorPrincipalId);
+        attestActor(command, actorPrincipalId);
         Long tenantId = TenantContextHolder.getRequiredTenantId();
         LocalDateTime now = LocalDateTime.ofInstant(command.getOccurredAt(), ZoneOffset.UTC);
-        String requestHash = DigestUtil.sha256Hex(JsonUtils.toJsonString(command));
+        String requestHash = DigestUtil.sha256Hex(
+                actorPrincipalId + "\n" + JsonUtils.toJsonString(command));
         String attemptToken = UUID.randomUUID().toString();
         mapper.insertOrResolveOperation(tenantId, command.getIdempotencyKey(),
                 command.getOperation().name(), requestHash, attemptToken, now);
@@ -65,24 +79,26 @@ public class QualityServiceImpl implements QualityCommandApi {
             case REVOKE_AUTHENTICATOR -> revokeAuthenticator(tenantId, command, now);
             case CREATE_INSPECTION_TASK -> createInspectionTask(tenantId, operationId, command, now);
             case ASSIGN_INSPECTION_TASK -> transitionTask(
-                    tenantId, operationId, command, now, "CREATED", "ASSIGNED");
+                    tenantId, operationId, command, now, "CREATED", "ASSIGNED", actorPrincipalId);
             case START_INSPECTION_TASK -> transitionTask(
-                    tenantId, operationId, command, now, "ASSIGNED", "IN_PROGRESS");
+                    tenantId, operationId, command, now, "ASSIGNED", "IN_PROGRESS", actorPrincipalId);
             case DECIDE_INSPECTION_TASK -> transitionTask(
-                    tenantId, operationId, command, now, "IN_PROGRESS", "DECIDED");
+                    tenantId, operationId, command, now, "IN_PROGRESS", "DECIDED", actorPrincipalId);
             case REQUEST_RECHECK, ASSIGN_RECHECK_REVIEWER -> assignRecheckReviewer(
-                    tenantId, operationId, command, now);
+                    tenantId, operationId, command, now, actorPrincipalId);
             case SUBMIT_RECHECK_DECISION -> submitRecheckDecision(
-                    tenantId, operationId, command, now);
+                    tenantId, operationId, command, now, actorPrincipalId);
             case ADJUDICATE_INSPECTION_TASK -> adjudicateInspectionTask(
                     tenantId, operationId, command, now);
             case COMPLETE_INSPECTION_TASK -> completeInspectionTask(
-                    tenantId, operationId, command, now);
+                    tenantId, operationId, command, now, actorPrincipalId);
             case OPEN_CAPA -> openCapa(tenantId, command, now);
-            case RESOLVE_CAPA -> resolveCapa(tenantId, command, now);
+            case RESOLVE_CAPA -> resolveCapa(tenantId, command, now, actorPrincipalId);
             case OPEN_RECALL_ACTION -> openRecallAction(tenantId, command, now);
-            case ACKNOWLEDGE_RECALL_ACTION -> acknowledgeRecallAction(tenantId, command, now);
-            case RESOLVE_RECALL_ACTION -> resolveRecallAction(tenantId, command, now);
+            case ACKNOWLEDGE_RECALL_ACTION ->
+                    acknowledgeRecallAction(tenantId, command, now, actorPrincipalId);
+            case RESOLVE_RECALL_ACTION ->
+                    resolveRecallAction(tenantId, command, now, actorPrincipalId);
         };
         appendEvent(tenantId, command, outcome);
         QualityResult result = QualityResult.builder()
@@ -234,7 +250,8 @@ public class QualityServiceImpl implements QualityCommandApi {
     }
 
     private Outcome transitionTask(Long tenantId, Long operationId, QualityCommand command,
-                                   LocalDateTime now, String expectedStatus, String nextStatus) {
+                                   LocalDateTime now, String expectedStatus, String nextStatus,
+                                   String actorPrincipalId) {
         QualityCommand.InspectionTaskDefinition input =
                 nonNull(command.getInspectionTask(), "inspectionTask is required");
         requireRef(input.getTaskId(), "taskId", 128);
@@ -262,11 +279,15 @@ public class QualityServiceImpl implements QualityCommandApi {
                     "authenticator has no active certification for this standard");
             principal = input.getAuthenticatorPrincipalId();
             assignedAt = now;
-            actor = principal;
+            actor = actorPrincipalId;
         } else if ("IN_PROGRESS".equals(nextStatus)) {
-            actor = nonNull(principal, "assigned authenticator is missing");
+            require(actorPrincipalId.equals(nonNull(principal, "assigned authenticator is missing")),
+                    "only the assigned authenticator can start the inspection task");
+            actor = actorPrincipalId;
             startedAt = now;
         } else if ("DECIDED".equals(nextStatus)) {
+            require(actorPrincipalId.equals(nonNull(principal, "assigned authenticator is missing")),
+                    "only the assigned authenticator can decide the inspection task");
             decision = upper(input.getDecision());
             require(Set.of("PASS", "FAIL").contains(decision), "decision must be PASS or FAIL");
             requireEvidenceRef(input.getEvidenceRef(), "evidenceRef");
@@ -279,7 +300,7 @@ public class QualityServiceImpl implements QualityCommandApi {
                 defectCode = null;
             }
             decidedAt = now;
-            actor = nonNull(principal, "assigned authenticator is missing");
+            actor = actorPrincipalId;
         } else if ("RECHECK_REQUIRED".equals(nextStatus)) {
             requireCode(input.getRecheckReasonCode(), "recheckReasonCode");
             recheckReason = upper(input.getRecheckReasonCode());
@@ -301,7 +322,8 @@ public class QualityServiceImpl implements QualityCommandApi {
     }
 
     private Outcome assignRecheckReviewer(Long tenantId, Long operationId,
-                                          QualityCommand command, LocalDateTime now) {
+                                          QualityCommand command, LocalDateTime now,
+                                          String actorPrincipalId) {
         QualityCommand.InspectionTaskDefinition input =
                 nonNull(command.getInspectionTask(), "inspectionTask is required");
         requireRef(input.getTaskId(), "taskId", 128);
@@ -313,6 +335,10 @@ public class QualityServiceImpl implements QualityCommandApi {
         requireExpectedVersion(input.getExpectedVersion(), row.getVersion());
         require("DECIDED".equals(row.getStatus()),
                 "only a decided task can enter independent recheck");
+        if (command.getOperation() == QualityOperation.REQUEST_RECHECK) {
+            require(actorPrincipalId.equals(row.getAuthenticatorPrincipalId()),
+                    "only the primary authenticator can request a recheck");
+        }
         require(!input.getSecondaryAuthenticatorPrincipalId()
                         .equals(row.getAuthenticatorPrincipalId()),
                 "secondary reviewer must be independent from the primary reviewer");
@@ -329,13 +355,14 @@ public class QualityServiceImpl implements QualityCommandApi {
                 .setSecondaryAuthenticatorPrincipalId(input.getSecondaryAuthenticatorPrincipalId())
                 .setRecheckReasonCode(reason).setVersion(row.getVersion() + 1).setUpdatedAt(now);
         insertHistory(tenantId, operationId, row, before, "RECHECK_REQUIRED",
-                input.getSecondaryAuthenticatorPrincipalId(), reason, now);
+                actorPrincipalId, reason, now);
         return taskOutcome("quality.inspection_task.recheck_assigned",
                 row, before, "RECHECK_REQUIRED");
     }
 
     private Outcome submitRecheckDecision(Long tenantId, Long operationId,
-                                          QualityCommand command, LocalDateTime now) {
+                                          QualityCommand command, LocalDateTime now,
+                                          String actorPrincipalId) {
         QualityCommand.InspectionTaskDefinition input =
                 nonNull(command.getInspectionTask(), "inspectionTask is required");
         requireRef(input.getTaskId(), "taskId", 128);
@@ -346,6 +373,8 @@ public class QualityServiceImpl implements QualityCommandApi {
                 "inspection task is not awaiting an independent recheck");
         require(row.getSecondaryAuthenticatorPrincipalId() != null,
                 "secondary reviewer has not been assigned");
+        require(actorPrincipalId.equals(row.getSecondaryAuthenticatorPrincipalId()),
+                "only the assigned secondary authenticator can submit the recheck");
         String decision = validateInspectionDecision(
                 input.getDecision(), input.getDefectCode(), input.getEvidenceRef());
         String defectCode = "FAIL".equals(decision) ? upper(input.getDefectCode()) : null;
@@ -366,7 +395,7 @@ public class QualityServiceImpl implements QualityCommandApi {
                 .setGroundTruthEvidenceRef(groundTruthEvidenceRef)
                 .setRecheckedAt(now).setVersion(row.getVersion() + 1).setUpdatedAt(now);
         insertHistory(tenantId, operationId, row, before, after,
-                row.getSecondaryAuthenticatorPrincipalId(),
+                actorPrincipalId,
                 agrees ? "RECHECK_AGREED" : "RECHECK_CONFLICT", now);
         return taskOutcome(agrees
                         ? "quality.inspection_task.recheck_agreed"
@@ -410,7 +439,8 @@ public class QualityServiceImpl implements QualityCommandApi {
     }
 
     private Outcome completeInspectionTask(Long tenantId, Long operationId,
-                                           QualityCommand command, LocalDateTime now) {
+                                           QualityCommand command, LocalDateTime now,
+                                           String actorPrincipalId) {
         QualityCommand.InspectionTaskDefinition input =
                 nonNull(command.getInspectionTask(), "inspectionTask is required");
         requireRef(input.getTaskId(), "taskId", 128);
@@ -419,6 +449,8 @@ public class QualityServiceImpl implements QualityCommandApi {
         requireExpectedVersion(input.getExpectedVersion(), row.getVersion());
         require("DECIDED".equals(row.getStatus()),
                 "only a final decided task can be completed");
+        require(actorPrincipalId.equals(finalDecisionActor(row)),
+                "only the final decision actor can complete the inspection task");
         String before = row.getStatus();
         require(mapper.transitionInspectionTask(tenantId, row.getTaskId(), row.getVersion(),
                         before, "COMPLETED", row.getAuthenticatorPrincipalId(), row.getDecision(),
@@ -428,7 +460,7 @@ public class QualityServiceImpl implements QualityCommandApi {
         row.setStatus("COMPLETED").setVersion(row.getVersion() + 1)
                 .setCompletedAt(now).setUpdatedAt(now);
         insertHistory(tenantId, operationId, row, before, "COMPLETED",
-                finalDecisionActor(row), row.getRecheckReasonCode(), now);
+                actorPrincipalId, row.getRecheckReasonCode(), now);
         return taskOutcome("quality.inspection_task.status_changed", row, before, "COMPLETED");
     }
 
@@ -460,13 +492,16 @@ public class QualityServiceImpl implements QualityCommandApi {
                         "due_date", row.getDueDate().toString()));
     }
 
-    private Outcome resolveCapa(Long tenantId, QualityCommand command, LocalDateTime now) {
+    private Outcome resolveCapa(Long tenantId, QualityCommand command, LocalDateTime now,
+                                String actorPrincipalId) {
         QualityCommand.CapaDefinition input = nonNull(command.getCapa(), "capa is required");
         requireRef(input.getCapaId(), "capaId", 128);
         requireEvidenceRef(input.getEffectivenessEvidenceRef(), "effectivenessEvidenceRef");
         Capa row = nonNull(mapper.selectCapaForUpdate(tenantId, input.getCapaId()), "CAPA not found");
         requireExpectedVersion(input.getExpectedVersion(), row.getVersion());
         require("OPEN".equals(row.getStatus()), "only an open CAPA can be verified");
+        require(actorPrincipalId.equals(row.getOwnerPrincipalId()),
+                "only the CAPA owner can verify it");
         require(mapper.resolveCapa(tenantId, row.getCapaId(), row.getVersion(),
                         input.getEffectivenessEvidenceRef(), now) == 1,
                 "CAPA resolution conflict");
@@ -490,6 +525,24 @@ public class QualityServiceImpl implements QualityCommandApi {
                         && "FAIL".equals(finalDecision(task)),
                 "recall action requires a final failed inspection");
         require(task.getLotId() != null, "recall action requires a governed lot reference");
+        InventoryLotView lot = inventoryLotQueryApi.requireCurrent(task.getLotId(), command.getOccurredAt());
+        require(Objects.equals(task.getCanonicalSkuId(), lot.getCanonicalSkuId()),
+                "inspection task SKU does not match governed inventory Lot");
+        require("ACTIVE".equals(lot.getStatus()), "quality recall requires an active inventory Lot");
+        InventoryLotResult lotRecall = inventoryLotCommandApi.execute(new InventoryLotCommand()
+                .setOperation(InventoryLotOperation.RECALL)
+                .setIdempotencyKey("quality-recall:" + id)
+                .setSourceEventId("quality-recall:" + id)
+                .setRunId(command.getRunId())
+                .setLotId(lot.getLotId())
+                .setExpectedLotVersion(lot.getVersion())
+                .setReasonCode(upper(input.getReasonCode()))
+                .setRecallReference("quality-recall:" + id)
+                .setCorrelationId(command.getCorrelationId())
+                .setCausationId(command.getCausationId())
+                .setOccurredAt(command.getOccurredAt()));
+        require("RECALLED".equals(lotRecall.getLotStatus()),
+                "inventory Lot recall did not reach RECALLED");
         RecallAction row = new RecallAction().setRecallActionId(id).setTenantId(tenantId)
                 .setInspectionTaskId(task.getTaskId()).setCanonicalSkuId(task.getCanonicalSkuId())
                 .setLotId(task.getLotId()).setWarehouseId(task.getWarehouseId())
@@ -500,7 +553,8 @@ public class QualityServiceImpl implements QualityCommandApi {
         return recallOutcome("quality.recall_action.opened", row, null, "OPEN");
     }
 
-    private Outcome acknowledgeRecallAction(Long tenantId, QualityCommand command, LocalDateTime now) {
+    private Outcome acknowledgeRecallAction(Long tenantId, QualityCommand command,
+                                             LocalDateTime now, String actorPrincipalId) {
         QualityCommand.RecallActionDefinition input =
                 nonNull(command.getRecallAction(), "recallAction is required");
         requireRef(input.getRecallActionId(), "recallActionId", 128);
@@ -509,6 +563,8 @@ public class QualityServiceImpl implements QualityCommandApi {
                 tenantId, input.getRecallActionId()), "quality recall action not found");
         requireExpectedVersion(input.getExpectedVersion(), row.getVersion());
         require("OPEN".equals(row.getStatus()), "only an open recall action can be acknowledged");
+        require(actorPrincipalId.equals(row.getOwnerPrincipalId()),
+                "only the recall action owner can acknowledge it");
         require(mapper.acknowledgeRecallAction(tenantId, row.getRecallActionId(), row.getVersion(),
                         input.getOwnerPrincipalId(), now) == 1,
                 "quality recall acknowledgement conflict");
@@ -517,7 +573,8 @@ public class QualityServiceImpl implements QualityCommandApi {
         return recallOutcome("quality.recall_action.acknowledged", row, "OPEN", "ACKNOWLEDGED");
     }
 
-    private Outcome resolveRecallAction(Long tenantId, QualityCommand command, LocalDateTime now) {
+    private Outcome resolveRecallAction(Long tenantId, QualityCommand command,
+                                        LocalDateTime now, String actorPrincipalId) {
         QualityCommand.RecallActionDefinition input =
                 nonNull(command.getRecallAction(), "recallAction is required");
         requireRef(input.getRecallActionId(), "recallActionId", 128);
@@ -528,6 +585,8 @@ public class QualityServiceImpl implements QualityCommandApi {
         requireExpectedVersion(input.getExpectedVersion(), row.getVersion());
         require(Set.of("OPEN", "ACKNOWLEDGED").contains(row.getStatus()),
                 "only an active recall action can be resolved");
+        require(actorPrincipalId.equals(row.getOwnerPrincipalId()),
+                "only the recall action owner can resolve it");
         String before = row.getStatus();
         require(mapper.resolveRecallAction(tenantId, row.getRecallActionId(), row.getVersion(),
                         input.getOwnerPrincipalId(), upper(input.getResolutionCode()), now) == 1,
@@ -636,6 +695,29 @@ public class QualityServiceImpl implements QualityCommandApi {
         requireUuid(command.getCorrelationId(), "correlationId");
         if (command.getCausationId() != null) requireUuid(command.getCausationId(), "causationId");
         require(command.getOccurredAt() != null, "occurredAt is required");
+    }
+
+    private static void attestActor(QualityCommand command, String actorPrincipalId) {
+        switch (command.getOperation()) {
+            case PUBLISH_STANDARD -> {
+                if (command.getStandard() != null) {
+                    command.getStandard().setApproverPrincipalId(actorPrincipalId);
+                }
+            }
+            case ADJUDICATE_INSPECTION_TASK -> {
+                if (command.getInspectionTask() != null) {
+                    command.getInspectionTask().setAdjudicatorPrincipalId(actorPrincipalId);
+                }
+            }
+            case ACKNOWLEDGE_RECALL_ACTION, RESOLVE_RECALL_ACTION -> {
+                if (command.getRecallAction() != null) {
+                    command.getRecallAction().setOwnerPrincipalId(actorPrincipalId);
+                }
+            }
+            default -> {
+                // Assignment targets remain caller-selected; action actors are passed separately.
+            }
+        }
     }
 
     private static Outcome outcome(String eventType, String aggregateType, String aggregateId,

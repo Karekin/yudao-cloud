@@ -24,6 +24,20 @@ public interface CatalogMasterDataMapper {
     @Select("SELECT * FROM cloudmold_catalog_style WHERE tenant_id = #{tenantId} AND style_code = #{code} FOR UPDATE")
     CatalogStyleDO selectStyle(@Param("tenantId") Long tenantId, @Param("code") String code);
 
+    @Update("""
+            UPDATE cloudmold_catalog_style
+            SET style_code=#{styleCode}, style_name=#{styleName}, planning_category_ref=#{planningCategoryRef},
+                brand_ref=#{brandRef}, planning_year=#{planningYear}, season_code=#{seasonCode},
+                wave_code=#{waveCode}, version=version+1, updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND style_id=#{styleId} AND version=#{expectedVersion}
+            """)
+    int updateStyleMetadata(@Param("tenantId") Long tenantId, @Param("styleId") String styleId,
+                            @Param("styleCode") String styleCode, @Param("styleName") String styleName,
+                            @Param("planningCategoryRef") String planningCategoryRef, @Param("brandRef") String brandRef,
+                            @Param("planningYear") Integer planningYear, @Param("seasonCode") String seasonCode,
+                            @Param("waveCode") String waveCode, @Param("expectedVersion") Long expectedVersion,
+                            @Param("now") LocalDateTime now);
+
     @Insert("""
             INSERT IGNORE INTO cloudmold_catalog_spu
               (spu_id, tenant_id, style_id, spu_code, product_name, sales_category_ref, status, version, created_at, updated_at)
@@ -35,6 +49,17 @@ public interface CatalogMasterDataMapper {
 
     @Select("SELECT * FROM cloudmold_catalog_spu WHERE tenant_id = #{tenantId} AND spu_code = #{code} FOR UPDATE")
     CatalogSpuDO selectSpu(@Param("tenantId") Long tenantId, @Param("code") String code);
+
+    @Update("""
+            UPDATE cloudmold_catalog_spu
+            SET spu_code=#{spuCode}, product_name=#{productName}, sales_category_ref=#{salesCategoryRef},
+                version=version+1, updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND spu_id=#{spuId} AND version=#{expectedVersion}
+            """)
+    int updateSpuMetadata(@Param("tenantId") Long tenantId, @Param("spuId") String spuId,
+                          @Param("spuCode") String spuCode, @Param("productName") String productName,
+                          @Param("salesCategoryRef") String salesCategoryRef,
+                          @Param("expectedVersion") Long expectedVersion, @Param("now") LocalDateTime now);
 
     @Insert("""
             INSERT IGNORE INTO cloudmold_catalog_color
@@ -91,6 +116,23 @@ public interface CatalogMasterDataMapper {
     @Select("SELECT * FROM cloudmold_catalog_sku WHERE tenant_id = #{tenantId} AND sku_code = #{code} FOR UPDATE")
     CatalogSkuDO selectSku(@Param("tenantId") Long tenantId, @Param("code") String code);
 
+    @Update("""
+            UPDATE cloudmold_catalog_sku
+            SET sku_code=#{skuCode}, version=version+1, updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND sku_id=#{skuId} AND version=#{expectedVersion}
+            """)
+    int updateSkuMetadata(@Param("tenantId") Long tenantId, @Param("skuId") String skuId,
+                          @Param("skuCode") String skuCode, @Param("expectedVersion") Long expectedVersion,
+                          @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE cloudmold_catalog_sku
+            SET version=version+1, updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND sku_id=#{skuId} AND version=#{expectedVersion}
+            """)
+    int bumpSkuVersion(@Param("tenantId") Long tenantId, @Param("skuId") String skuId,
+                       @Param("expectedVersion") Long expectedVersion, @Param("now") LocalDateTime now);
+
     @Insert("""
             INSERT IGNORE INTO cloudmold_catalog_barcode
               (barcode_id, tenant_id, sku_id, barcode, barcode_type, is_primary, status, version,
@@ -104,4 +146,21 @@ public interface CatalogMasterDataMapper {
 
     @Select("SELECT * FROM cloudmold_catalog_barcode WHERE tenant_id = #{tenantId} AND barcode = #{barcode} FOR UPDATE")
     CatalogBarcodeDO selectBarcode(@Param("tenantId") Long tenantId, @Param("barcode") String barcode);
+
+    @Select("""
+            SELECT * FROM cloudmold_catalog_barcode
+            WHERE tenant_id=#{tenantId} AND sku_id=#{skuId} AND status=10 AND is_primary=b'1'
+              AND valid_to IS NULL
+            ORDER BY barcode_id LIMIT 1 FOR UPDATE
+            """)
+    CatalogBarcodeDO selectActivePrimaryBarcode(@Param("tenantId") Long tenantId, @Param("skuId") String skuId);
+
+    @Update("""
+            UPDATE cloudmold_catalog_barcode
+            SET is_primary=b'0', status=90, valid_to=#{now}, version=version+1, updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND barcode_id=#{barcodeId} AND version=#{expectedVersion}
+              AND status=10 AND is_primary=b'1' AND valid_to IS NULL
+            """)
+    int retirePrimaryBarcode(@Param("tenantId") Long tenantId, @Param("barcodeId") String barcodeId,
+                             @Param("expectedVersion") Long expectedVersion, @Param("now") LocalDateTime now);
 }

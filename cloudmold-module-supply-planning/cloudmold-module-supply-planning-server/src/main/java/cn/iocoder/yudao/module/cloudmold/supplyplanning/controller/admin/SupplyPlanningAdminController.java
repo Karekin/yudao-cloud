@@ -6,6 +6,7 @@ import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningComman
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningCommandApi;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningResult;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.controller.admin.vo.SupplyPlanningPageReqVO;
+import cn.iocoder.yudao.module.cloudmold.supplyplanning.service.actor.SupplyPlanningActorPrincipalPort;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.service.query.SupplyPlanningQueryService;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.service.query.SupplyPlanningWorkItem;
 import io.swagger.v3.oas.annotations.Operation;
@@ -16,6 +17,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
+import static cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils.getLoginUserId;
 
 @Tag(name = "CloudMold - Supply Planning")
 @RestController
@@ -25,12 +27,15 @@ public class SupplyPlanningAdminController {
     private SupplyPlanningCommandApi commandApi;
     @Resource
     private SupplyPlanningQueryService queryService;
+    @Resource
+    private SupplyPlanningActorPrincipalPort actorPrincipalPort;
 
     @PostMapping("/command")
     @Operation(summary = "执行需求预测、S&OP、补货和库存健康命令")
     @PreAuthorize("@ss.hasPermission('cloudmold:supply-planning:command')")
     public CommonResult<SupplyPlanningResult> execute(@RequestBody SupplyPlanningCommand command) {
-        return success(commandApi.execute(command));
+        String actorPrincipalId = actorPrincipalPort.resolveSystemAdmin(getLoginUserId());
+        return success(commandApi.execute(command, actorPrincipalId));
     }
 
     @GetMapping("/work-item/page")

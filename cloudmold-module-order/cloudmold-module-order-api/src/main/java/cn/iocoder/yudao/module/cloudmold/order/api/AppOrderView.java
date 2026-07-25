@@ -15,7 +15,11 @@ import java.util.List;
 public class AppOrderView {
     private String orderId;
     private String orderNo;
+    private String runId;
     private String buyerPrincipalId;
+    private String addressRef;
+    private Long addressSnapshotVersion;
+    private String destinationRegionCode;
     private String status;
     private Long aggregateVersion;
     private BigDecimal totalQuantity;

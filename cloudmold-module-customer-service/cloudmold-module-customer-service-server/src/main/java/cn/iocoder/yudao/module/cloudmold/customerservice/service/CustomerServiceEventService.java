@@ -96,8 +96,8 @@ public class CustomerServiceEventService {
         payload.put("sentiment_code", feedback.getSentimentCode());
         payload.put("score_basis_points", feedback.getScoreBasisPoints());
         payload.put("reason_code", feedback.getReasonCode());
-        payload.put("has_comment", hasText(feedback.getCommentToken()));
-        payload.put("comment_digest_sha256", safeDigest(feedback.getCommentToken()));
+        payload.put("comment_token", hasText(feedback.getCommentToken())
+                ? "sha256:" + safeDigest(feedback.getCommentToken()) : null);
         payload.put("occurred_at", occurredAt.toString());
         append("customer_service.buyer_feedback.recorded", "customer_service_buyer_feedback",
                 feedback.getFeedbackId(), 1L, feedback.getTenantId(), feedback.getRunId(), command, occurredAt,

@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 public class OrderPaymentView {
     private String orderId;
     private String orderNo;
+    private String runId;
     private String buyerId;
     private String status;
     private Long payableAmountMinor;

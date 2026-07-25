@@ -161,6 +161,105 @@ class CatalogCommandServiceImplTest {
     }
 
     @Test
+    void shouldUpdateStyleMetadataWithVersionCheckAndAppendEvent() {
+        prepareNewOperation();
+        when(lifecycleMapper.selectStyleForUpdate(1L, "11111111-1111-4111-8111-111111111111"))
+                .thenReturn(style().setStyleId("11111111-1111-4111-8111-111111111111"));
+        when(masterDataMapper.selectStyle(1L, "YS2026-DRESS-001-REV1"))
+                .thenReturn(style().setStyleId("11111111-1111-4111-8111-111111111111"));
+        when(masterDataMapper.updateStyleMetadata(eq(1L), eq("11111111-1111-4111-8111-111111111111"),
+                eq("YS2026-DRESS-001-REV1"), eq("夏季连衣裙升级版"), eq("INTERNAL:CATEGORY:DRESS"),
+                eq("INTERNAL:BRAND:YSHOPPING"), eq(2026), eq("AUTUMN"), eq("WAVE-02"), eq(1L), any())).thenReturn(1);
+        when(outboxAppender.append(any())).thenReturn(new AppendDomainEventResult("event-style-update", "c".repeat(64), false));
+        when(operationMapper.markSucceeded(eq(101L), eq(1L), anyString(), any())).thenReturn(1);
+
+        CatalogMetadataUpdateResult result = service.updateMetadata(styleUpdate());
+
+        assertThat(result.getBusinessCode()).isEqualTo("YS2026-DRESS-001-REV1");
+        assertThat(result.getCurrentStatus()).isEqualTo("DRAFT");
+        assertThat(result.getAggregateVersion()).isEqualTo(2L);
+        verify(outboxAppender).append(argThat(event -> event.getEventType().equals("catalog.entity.metadata_updated")
+                && event.getAggregateId().equals("11111111-1111-4111-8111-111111111111")
+                && event.getPayload().get("style_code").equals("YS2026-DRESS-001-REV1")
+                && event.getPayload().get("season_code").equals("AUTUMN")));
+    }
+
+    @Test
+    void shouldUpdateSpuMetadataWithVersionCheck() {
+        prepareNewOperation();
+        when(lifecycleMapper.selectSpuForUpdate(1L, "22222222-2222-4222-8222-222222222222"))
+                .thenReturn(spu().setSpuId("22222222-2222-4222-8222-222222222222"));
+        when(masterDataMapper.selectSpu(1L, "YS2026-DRESS-001-REV1"))
+                .thenReturn(spu().setSpuId("22222222-2222-4222-8222-222222222222"));
+        when(masterDataMapper.updateSpuMetadata(eq(1L), eq("22222222-2222-4222-8222-222222222222"),
+                eq("YS2026-DRESS-001-REV1"), eq("夏季连衣裙 2026 升级版"),
+                eq("INTERNAL:CATEGORY:DRESS"), eq(1L), any())).thenReturn(1);
+        when(outboxAppender.append(any())).thenReturn(new AppendDomainEventResult("event-spu-update", "d".repeat(64), false));
+        when(operationMapper.markSucceeded(eq(101L), eq(1L), anyString(), any())).thenReturn(1);
+
+        CatalogMetadataUpdateResult result = service.updateMetadata(spuUpdate());
+
+        assertThat(result.getBusinessCode()).isEqualTo("YS2026-DRESS-001-REV1");
+        assertThat(result.getAggregateVersion()).isEqualTo(2L);
+        verify(masterDataMapper).updateSpuMetadata(eq(1L), eq("22222222-2222-4222-8222-222222222222"),
+                eq("YS2026-DRESS-001-REV1"), eq("夏季连衣裙 2026 升级版"),
+                eq("INTERNAL:CATEGORY:DRESS"), eq(1L), any());
+    }
+
+    @Test
+    void shouldUpdateSkuBusinessCodeWithoutTouchingPricingOrInventory() {
+        prepareNewOperation();
+        when(lifecycleMapper.selectSkuForUpdate(1L, "33333333-3333-4333-8333-333333333333"))
+                .thenReturn(sku().setSkuId("33333333-3333-4333-8333-333333333333"));
+        when(masterDataMapper.selectSku(1L, "YS2026-DRESS-001-BLK-M-REV1"))
+                .thenReturn(sku().setSkuId("33333333-3333-4333-8333-333333333333"));
+        when(masterDataMapper.updateSkuMetadata(eq(1L), eq("33333333-3333-4333-8333-333333333333"),
+                eq("YS2026-DRESS-001-BLK-M-REV1"), eq(1L), any())).thenReturn(1);
+        when(outboxAppender.append(any())).thenReturn(new AppendDomainEventResult("event-sku-update", "e".repeat(64), false));
+        when(operationMapper.markSucceeded(eq(101L), eq(1L), anyString(), any())).thenReturn(1);
+
+        CatalogMetadataUpdateResult result = service.updateMetadata(skuUpdate());
+
+        assertThat(result.getBusinessCode()).isEqualTo("YS2026-DRESS-001-BLK-M-REV1");
+        assertThat(result.getAggregateVersion()).isEqualTo(2L);
+        verify(masterDataMapper).updateSkuMetadata(eq(1L), eq("33333333-3333-4333-8333-333333333333"),
+                eq("YS2026-DRESS-001-BLK-M-REV1"), eq(1L), any());
+        verify(masterDataMapper, never()).updateStyleMetadata(anyLong(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyInt(), anyString(), anyString(), anyLong(), any());
+        verify(masterDataMapper, never()).updateSpuMetadata(anyLong(), anyString(), anyString(), anyString(),
+                anyString(), anyLong(), any());
+    }
+
+    @Test
+    void shouldRotatePrimaryBarcodeAndBumpSkuAggregateVersion() {
+        prepareNewOperation();
+        CatalogSkuDO currentSku = sku().setSkuId("33333333-3333-4333-8333-333333333333");
+        CatalogBarcodeDO previous = barcode().setSkuId(currentSku.getSkuId());
+        CatalogBarcodeDO rotated = barcode().setBarcodeId("barcode-2").setBarcode("6901234567893")
+                .setSkuId(currentSku.getSkuId()).setVersion(1L);
+        when(lifecycleMapper.selectSkuForUpdate(1L, currentSku.getSkuId())).thenReturn(currentSku);
+        when(masterDataMapper.selectActivePrimaryBarcode(1L, currentSku.getSkuId())).thenReturn(previous);
+        when(masterDataMapper.selectBarcode(1L, "6901234567893")).thenReturn(null, rotated);
+        when(masterDataMapper.retirePrimaryBarcode(eq(1L), eq("barcode-1"), eq(1L), any())).thenReturn(1);
+        when(masterDataMapper.insertPrimaryBarcode(anyString(), eq(1L), eq(currentSku.getSkuId()),
+                eq("6901234567893"), eq("EAN13"), any())).thenReturn(1);
+        when(masterDataMapper.bumpSkuVersion(eq(1L), eq(currentSku.getSkuId()), eq(1L), any())).thenReturn(1);
+        when(outboxAppender.append(any())).thenReturn(new AppendDomainEventResult("event-barcode-rotate", "f".repeat(64), false));
+        when(operationMapper.markSucceeded(eq(101L), eq(1L), anyString(), any())).thenReturn(1);
+
+        CatalogBarcodeRotateResult result = service.rotateBarcode(barcodeRotate());
+
+        assertThat(result.getPreviousBarcode()).isEqualTo("6901234567892");
+        assertThat(result.getCurrentBarcode()).isEqualTo("6901234567893");
+        assertThat(result.getAggregateVersion()).isEqualTo(2L);
+        verify(masterDataMapper).retirePrimaryBarcode(eq(1L), eq("barcode-1"), eq(1L), any());
+        verify(masterDataMapper).bumpSkuVersion(eq(1L), eq(currentSku.getSkuId()), eq(1L), any());
+        verify(outboxAppender).append(argThat(event -> event.getEventType().equals("catalog.barcode.rotated")
+                && event.getAggregateId().equals(currentSku.getSkuId())
+                && event.getPayload().get("current_barcode").equals("6901234567893")));
+    }
+
+    @Test
     void shouldRejectSkuActivationBeforeSpuApproval() {
         prepareNewOperation();
         CatalogSkuDO sku = sku().setSkuId("33333333-3333-4333-8333-333333333333");
@@ -188,6 +287,20 @@ class CatalogCommandServiceImplTest {
                 "44444444-4444-4444-8444-444444444444", CatalogLifecycleAction.ACTIVATE, 1L)))
                 .isInstanceOf(IllegalArgumentException.class).hasMessage("Catalog expectedVersion conflict");
         verify(lifecycleMapper, never()).updateColor(anyLong(), anyString(), anyInt(), anyInt(), anyLong(), any());
+    }
+
+    @Test
+    void shouldRejectStyleDeactivationWhileActiveSpuStillReferenceIt() {
+        prepareNewOperation();
+        when(lifecycleMapper.selectStyleForUpdate(1L, "11111111-1111-4111-8111-111111111111"))
+                .thenReturn(style().setStyleId("11111111-1111-4111-8111-111111111111").setStatus(10));
+        when(lifecycleMapper.countActiveSpus(1L, "11111111-1111-4111-8111-111111111111")).thenReturn(1);
+
+        assertThatThrownBy(() -> service.changeStatus(lifecycle(CatalogEntityType.STYLE,
+                "11111111-1111-4111-8111-111111111111", CatalogLifecycleAction.DEACTIVATE, 1L)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Style cannot be deactivated while ACTIVE SPU still reference it");
+        verify(lifecycleMapper, never()).updateStyle(anyLong(), anyString(), anyInt(), anyInt(), anyLong(), any());
     }
 
     private void prepareNewOperation() {
@@ -279,5 +392,44 @@ class CatalogCommandServiceImplTest {
                 .reason("automated lifecycle test")
                 .correlationId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
                 .occurredAt(Instant.parse("2026-07-12T11:00:00Z")).build();
+    }
+
+    private static CatalogMetadataUpdateCommand styleUpdate() {
+        return CatalogMetadataUpdateCommand.builder().entityType(CatalogEntityType.STYLE)
+                .entityId("11111111-1111-4111-8111-111111111111").expectedVersion(1L)
+                .idempotencyKey("catalog-style-update-1").reason("rename style after planning review")
+                .styleCode("ys2026-dress-001-rev1").styleName("夏季连衣裙升级版")
+                .planningCategoryRef("INTERNAL:CATEGORY:DRESS").brandRef("INTERNAL:BRAND:YSHOPPING")
+                .planningYear(2026).seasonCode("autumn").waveCode("wave-02")
+                .correlationId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+                .occurredAt(Instant.parse("2026-07-12T12:00:00Z")).build();
+    }
+
+    private static CatalogMetadataUpdateCommand spuUpdate() {
+        return CatalogMetadataUpdateCommand.builder().entityType(CatalogEntityType.SPU)
+                .entityId("22222222-2222-4222-8222-222222222222").expectedVersion(1L)
+                .idempotencyKey("catalog-spu-update-1").reason("refresh product naming after content review")
+                .spuCode("ys2026-dress-001-rev1").productName("夏季连衣裙 2026 升级版")
+                .salesCategoryRef("INTERNAL:CATEGORY:DRESS")
+                .correlationId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+                .occurredAt(Instant.parse("2026-07-12T12:05:00Z")).build();
+    }
+
+    private static CatalogMetadataUpdateCommand skuUpdate() {
+        return CatalogMetadataUpdateCommand.builder().entityType(CatalogEntityType.SKU)
+                .entityId("33333333-3333-4333-8333-333333333333").expectedVersion(1L)
+                .idempotencyKey("catalog-sku-update-1").reason("align sku code with approved copy deck")
+                .skuCode("ys2026-dress-001-blk-m-rev1")
+                .correlationId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+                .occurredAt(Instant.parse("2026-07-12T12:10:00Z")).build();
+    }
+
+    private static CatalogBarcodeRotateCommand barcodeRotate() {
+        return CatalogBarcodeRotateCommand.builder().skuId("33333333-3333-4333-8333-333333333333")
+                .expectedVersion(1L).idempotencyKey("catalog-barcode-rotate-1")
+                .reason("replace sampled internal barcode with approved retail barcode")
+                .barcode("6901234567893").barcodeType("EAN13")
+                .correlationId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+                .occurredAt(Instant.parse("2026-07-12T12:15:00Z")).build();
     }
 }

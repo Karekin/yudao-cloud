@@ -5,4 +5,7 @@ public interface InventoryReservationQueryApi {
                                                      String businessId, String businessItemId);
     InventoryReservationView requireReleased(String reservationId, String businessType,
                                               String businessId, String businessItemId);
+
+    InventoryReservationView requireCommitted(String reservationId, String businessId,
+                                               String businessItemId);
 }

@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.util.List;
 
 public interface EngagementQueryApi {
 
@@ -16,6 +17,12 @@ public interface EngagementQueryApi {
     NotificationDeliveryView getNotificationDelivery(String deliveryId);
 
     CommunityContentView getCommunityContent(String contentId);
+
+    CommunityContentPageView pagePublishedCommunityContent(int pageNo, int pageSize, String currentPrincipalId);
+
+    CommunityContentView getPublishedCommunityContent(String contentId, String currentPrincipalId);
+
+    CommunityCommentPageView pageCommunityComments(String contentId, int pageNo, int pageSize);
 
     ModerationCaseView getModerationCase(String moderationCaseId);
 
@@ -63,9 +70,52 @@ public interface EngagementQueryApi {
         private String authorPrincipalId;
         private String contentType;
         private String bodyRef;
+        private String bodyKeyId;
+        private byte[] bodyIv;
+        private byte[] bodyCiphertext;
+        private String bodyDigestSha256;
+        private String canonicalSpuId;
+        private String canonicalSkuId;
+        private String listingId;
+        private String listingOfferId;
         private String status;
         private Long version;
+        private long likeCount;
+        private long commentCount;
+        private boolean likedByCurrentUser;
+        private String currentUserReactionId;
+        private Long currentUserReactionVersion;
+        private Instant createdAt;
         private Instant updatedAt;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    class CommunityContentPageView {
+        private List<CommunityContentView> list;
+        private long total;
+        private int pageNo;
+        private int pageSize;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    class CommunityCommentView {
+        private String interactionId;
+        private String actorPrincipalId;
+        private String targetContentId;
+        private String payloadRef;
+        private String payloadKeyId;
+        private byte[] payloadIv;
+        private byte[] payloadCiphertext;
+        private String payloadDigestSha256;
+        private Instant occurredAt;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    class CommunityCommentPageView {
+        private List<CommunityCommentView> list;
+        private long total;
+        private int pageNo;
+        private int pageSize;
     }
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor

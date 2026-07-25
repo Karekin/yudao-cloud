@@ -6,6 +6,7 @@ import cn.iocoder.yudao.module.cloudmold.quality.api.QualityCommand;
 import cn.iocoder.yudao.module.cloudmold.quality.api.QualityCommandApi;
 import cn.iocoder.yudao.module.cloudmold.quality.api.QualityResult;
 import cn.iocoder.yudao.module.cloudmold.quality.controller.admin.vo.QualityPageReqVO;
+import cn.iocoder.yudao.module.cloudmold.quality.service.actor.QualityActorPrincipalPort;
 import cn.iocoder.yudao.module.cloudmold.quality.service.query.QualityQueryService;
 import cn.iocoder.yudao.module.cloudmold.quality.service.query.QualityWorkItem;
 import io.swagger.v3.oas.annotations.Operation;
@@ -16,6 +17,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
+import static cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils.getLoginUserId;
 
 @Tag(name = "CloudMold - Authentication and Quality")
 @RestController
@@ -25,12 +27,15 @@ public class QualityAdminController {
     private QualityCommandApi commandApi;
     @Resource
     private QualityQueryService queryService;
+    @Resource
+    private QualityActorPrincipalPort actorPrincipalPort;
 
     @PostMapping("/command")
     @Operation(summary = "执行标准、鉴别师资质、质检任务和 CAPA 命令")
     @PreAuthorize("@ss.hasPermission('cloudmold:quality:command')")
     public CommonResult<QualityResult> execute(@RequestBody QualityCommand command) {
-        return success(commandApi.execute(command));
+        String actorPrincipalId = actorPrincipalPort.resolveSystemAdmin(getLoginUserId());
+        return success(commandApi.execute(command, actorPrincipalId));
     }
 
     @GetMapping("/work-item/page")

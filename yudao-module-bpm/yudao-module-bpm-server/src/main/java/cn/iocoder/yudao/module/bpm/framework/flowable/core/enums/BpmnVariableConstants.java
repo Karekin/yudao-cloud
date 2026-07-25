@@ -24,6 +24,17 @@ public class BpmnVariableConstants {
      */
     public static final String PROCESS_INSTANCE_VARIABLE_REASON = "PROCESS_REASON";
     /**
+     * 流程实例的变量 - 最近一次经过认证的任务终态操作人 ID
+     *
+     * @see ProcessInstance#getProcessVariables()
+     */
+    public static final String PROCESS_INSTANCE_VARIABLE_TERMINAL_OPERATOR_USER_ID =
+            "PROCESS_TERMINAL_OPERATOR_USER_ID";
+    public static final String PROCESS_INSTANCE_VARIABLE_TERMINAL_TASK_ID =
+            "PROCESS_TERMINAL_TASK_ID";
+    public static final String PROCESS_INSTANCE_VARIABLE_TERMINAL_TASK_DEFINITION_KEY =
+            "PROCESS_TERMINAL_TASK_DEFINITION_KEY";
+    /**
      * 流程实例的变量 - 发起用户选择的审批人 Map
      *
      * @see ProcessInstance#getProcessVariables()

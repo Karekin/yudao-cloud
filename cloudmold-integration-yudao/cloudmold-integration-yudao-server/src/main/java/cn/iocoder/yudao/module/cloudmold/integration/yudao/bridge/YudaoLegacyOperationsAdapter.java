@@ -6,6 +6,8 @@ import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoLegacyMaster
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoMesCommandApi;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoWmsCommandApi;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.service.YudaoCommandOperationService;
+import cn.iocoder.yudao.module.cloudmold.integration.yudao.wms.LegacyWmsMasterDataPort;
+import cn.iocoder.yudao.module.cloudmold.integration.yudao.wms.LegacyWmsPhysicalOperationsPort;
 import cn.iocoder.yudao.module.erp.controller.admin.finance.vo.payment.ErpFinancePaymentSaveReqVO;
 import cn.iocoder.yudao.module.erp.controller.admin.finance.vo.receipt.ErpFinanceReceiptSaveReqVO;
 import cn.iocoder.yudao.module.erp.controller.admin.purchase.vo.order.ErpPurchaseOrderSaveReqVO;
@@ -44,30 +46,11 @@ import cn.iocoder.yudao.module.mes.service.md.item.MesMdItemService;
 import cn.iocoder.yudao.module.mes.service.md.item.MesMdItemTypeService;
 import cn.iocoder.yudao.module.mes.service.md.unitmeasure.MesMdUnitMeasureService;
 import cn.iocoder.yudao.module.mes.service.pro.workorder.MesProWorkOrderService;
-import cn.iocoder.yudao.module.wms.controller.admin.order.check.vo.detail.WmsCheckOrderDetailSaveReqVO;
-import cn.iocoder.yudao.module.wms.controller.admin.order.check.vo.order.WmsCheckOrderSaveReqVO;
-import cn.iocoder.yudao.module.wms.controller.admin.order.movement.vo.detail.WmsMovementOrderDetailSaveReqVO;
-import cn.iocoder.yudao.module.wms.controller.admin.order.movement.vo.order.WmsMovementOrderSaveReqVO;
-import cn.iocoder.yudao.module.wms.controller.admin.order.receipt.vo.detail.WmsReceiptOrderDetailSaveReqVO;
-import cn.iocoder.yudao.module.wms.controller.admin.order.receipt.vo.order.WmsReceiptOrderSaveReqVO;
-import cn.iocoder.yudao.module.wms.controller.admin.order.shipment.vo.detail.WmsShipmentOrderDetailSaveReqVO;
-import cn.iocoder.yudao.module.wms.controller.admin.order.shipment.vo.order.WmsShipmentOrderSaveReqVO;
-import cn.iocoder.yudao.module.wms.controller.admin.inventory.vo.WmsInventoryListReqVO;
 import cn.iocoder.yudao.module.wms.controller.admin.md.item.vo.category.WmsItemCategorySaveReqVO;
 import cn.iocoder.yudao.module.wms.controller.admin.md.item.vo.item.WmsItemSaveReqVO;
 import cn.iocoder.yudao.module.wms.controller.admin.md.item.vo.sku.WmsItemSkuSaveReqVO;
 import cn.iocoder.yudao.module.wms.controller.admin.md.merchant.vo.WmsMerchantSaveReqVO;
 import cn.iocoder.yudao.module.wms.controller.admin.md.warehouse.vo.WmsWarehouseSaveReqVO;
-import cn.iocoder.yudao.module.wms.dal.dataobject.inventory.WmsInventoryDO;
-import cn.iocoder.yudao.module.wms.dal.dataobject.order.check.WmsCheckOrderDO;
-import cn.iocoder.yudao.module.wms.dal.dataobject.order.movement.WmsMovementOrderDO;
-import cn.iocoder.yudao.module.wms.dal.dataobject.order.receipt.WmsReceiptOrderDO;
-import cn.iocoder.yudao.module.wms.dal.dataobject.order.shipment.WmsShipmentOrderDO;
-import cn.iocoder.yudao.module.wms.service.order.check.WmsCheckOrderService;
-import cn.iocoder.yudao.module.wms.service.order.movement.WmsMovementOrderService;
-import cn.iocoder.yudao.module.wms.service.order.receipt.WmsReceiptOrderService;
-import cn.iocoder.yudao.module.wms.service.order.shipment.WmsShipmentOrderService;
-import cn.iocoder.yudao.module.wms.service.inventory.WmsInventoryService;
 import cn.iocoder.yudao.module.wms.service.md.item.WmsItemCategoryService;
 import cn.iocoder.yudao.module.wms.service.md.item.WmsItemService;
 import cn.iocoder.yudao.module.wms.service.md.item.WmsItemSkuService;
@@ -85,8 +68,9 @@ import java.util.List;
  */
 @Service
 @RequiredArgsConstructor
-public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi, YudaoWmsCommandApi,
-        YudaoMesCommandApi, YudaoLegacyOperationsQueryApi, YudaoLegacyMasterDataQueryApi {
+public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi,
+        YudaoMesCommandApi, YudaoLegacyOperationsQueryApi, YudaoLegacyMasterDataQueryApi,
+        LegacyWmsMasterDataPort {
 
     private final ErpPurchaseOrderService purchaseOrderService;
     private final ErpPurchaseInService purchaseInService;
@@ -103,11 +87,7 @@ public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi, YudaoWm
     private final WmsItemCategoryService wmsItemCategoryService;
     private final WmsItemService wmsItemService;
     private final WmsItemSkuService wmsItemSkuService;
-    private final WmsInventoryService wmsInventoryService;
-    private final WmsReceiptOrderService receiptOrderService;
-    private final WmsShipmentOrderService shipmentOrderService;
-    private final WmsMovementOrderService movementOrderService;
-    private final WmsCheckOrderService checkOrderService;
+    private final LegacyWmsPhysicalOperationsPort wmsPhysicalOperationsPort;
     private final MesMdUnitMeasureService mesUnitMeasureService;
     private final MesMdItemTypeService mesItemTypeService;
     private final MesMdItemService mesItemService;
@@ -471,114 +451,6 @@ public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi, YudaoWm
     }
 
     @Override
-    public Long createReceiptOrder(ReceiptOrderCommand command) {
-        WmsReceiptOrderSaveReqVO request = new WmsReceiptOrderSaveReqVO();
-        request.setNo(command.no());
-        request.setType(command.type());
-        request.setOrderTime(parseBusinessTime(command.orderTime(), "orderTime"));
-        request.setBizOrderNo(command.bizOrderNo());
-        request.setMerchantId(command.merchantId());
-        request.setRemark(command.remark());
-        request.setWarehouseId(command.warehouseId());
-        request.setDetails(command.details().stream().map(line -> {
-            WmsReceiptOrderDetailSaveReqVO item = new WmsReceiptOrderDetailSaveReqVO();
-            copyQuantityLine(line, item);
-            return item;
-        }).toList());
-        return operationService.executeLong("CREATE_WMS_RECEIPT_ORDER", command.idempotencyKey(), command,
-                () -> receiptOrderService.createReceiptOrder(request));
-    }
-
-    @Override
-    public Boolean completeReceiptOrder(YudaoWmsCommandApi.DocumentActionCommand command) {
-        return operationService.executeBoolean("COMPLETE_WMS_RECEIPT_ORDER", command.idempotencyKey(), command, () -> {
-            receiptOrderService.completeReceiptOrder(command.documentId());
-            return true;
-        });
-    }
-
-    @Override
-    public Long createShipmentOrder(ShipmentOrderCommand command) {
-        WmsShipmentOrderSaveReqVO request = new WmsShipmentOrderSaveReqVO();
-        request.setNo(command.no());
-        request.setType(command.type());
-        request.setOrderTime(parseBusinessTime(command.orderTime(), "orderTime"));
-        request.setBizOrderNo(command.bizOrderNo());
-        request.setMerchantId(command.merchantId());
-        request.setRemark(command.remark());
-        request.setWarehouseId(command.warehouseId());
-        request.setDetails(command.details().stream().map(line -> {
-            WmsShipmentOrderDetailSaveReqVO item = new WmsShipmentOrderDetailSaveReqVO();
-            copyQuantityLine(line, item);
-            return item;
-        }).toList());
-        return operationService.executeLong("CREATE_WMS_SHIPMENT_ORDER", command.idempotencyKey(), command,
-                () -> shipmentOrderService.createShipmentOrder(request));
-    }
-
-    @Override
-    public Boolean completeShipmentOrder(YudaoWmsCommandApi.DocumentActionCommand command) {
-        return operationService.executeBoolean("COMPLETE_WMS_SHIPMENT_ORDER", command.idempotencyKey(), command, () -> {
-            shipmentOrderService.completeShipmentOrder(command.documentId());
-            return true;
-        });
-    }
-
-    @Override
-    public Long createMovementOrder(MovementOrderCommand command) {
-        WmsMovementOrderSaveReqVO request = new WmsMovementOrderSaveReqVO();
-        request.setNo(command.no());
-        request.setOrderTime(parseBusinessTime(command.orderTime(), "orderTime"));
-        request.setRemark(command.remark());
-        request.setSourceWarehouseId(command.sourceWarehouseId());
-        request.setTargetWarehouseId(command.targetWarehouseId());
-        request.setDetails(command.details().stream().map(line -> {
-            WmsMovementOrderDetailSaveReqVO item = new WmsMovementOrderDetailSaveReqVO();
-            copyQuantityLine(line, item);
-            return item;
-        }).toList());
-        return operationService.executeLong("CREATE_WMS_MOVEMENT_ORDER", command.idempotencyKey(), command,
-                () -> movementOrderService.createMovementOrder(request));
-    }
-
-    @Override
-    public Boolean completeMovementOrder(YudaoWmsCommandApi.DocumentActionCommand command) {
-        return operationService.executeBoolean("COMPLETE_WMS_MOVEMENT_ORDER", command.idempotencyKey(), command, () -> {
-            movementOrderService.completeMovementOrder(command.documentId());
-            return true;
-        });
-    }
-
-    @Override
-    public Long createCheckOrder(CheckOrderCommand command) {
-        WmsCheckOrderSaveReqVO request = new WmsCheckOrderSaveReqVO();
-        request.setNo(command.no());
-        request.setOrderTime(parseBusinessTime(command.orderTime(), "orderTime"));
-        request.setRemark(command.remark());
-        request.setWarehouseId(command.warehouseId());
-        request.setDetails(command.details().stream().map(line -> {
-            WmsCheckOrderDetailSaveReqVO item = new WmsCheckOrderDetailSaveReqVO();
-            item.setSkuId(line.skuId());
-            item.setInventoryId(line.inventoryId());
-            item.setReceiptTime(parseBusinessTime(line.receiptTime(), "receiptTime"));
-            item.setQuantity(line.quantity());
-            item.setCheckQuantity(line.checkQuantity());
-            item.setPrice(line.price());
-            return item;
-        }).toList());
-        return operationService.executeLong("CREATE_WMS_CHECK_ORDER", command.idempotencyKey(), command,
-                () -> checkOrderService.createCheckOrder(request));
-    }
-
-    @Override
-    public Boolean completeCheckOrder(YudaoWmsCommandApi.DocumentActionCommand command) {
-        return operationService.executeBoolean("COMPLETE_WMS_CHECK_ORDER", command.idempotencyKey(), command, () -> {
-            checkOrderService.completeCheckOrder(command.documentId());
-            return true;
-        });
-    }
-
-    @Override
     public Long createUnitMeasure(YudaoMesCommandApi.UnitMeasureCommand command) {
         MesMdUnitMeasureSaveReqVO request = new MesMdUnitMeasureSaveReqVO();
         request.setCode(command.code());
@@ -718,30 +590,22 @@ public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi, YudaoWm
 
     @Override
     public LegacyDocumentView getReceiptOrder(Long documentId) {
-        WmsReceiptOrderDO value = receiptOrderService.getReceiptOrder(documentId);
-        return value == null ? null : view("WMS", "RECEIPT_ORDER", value.getId(), value.getNo(),
-                value.getStatus(), value.getOrderTime(), value.getTotalQuantity(), value.getTotalPrice(), value.getRemark());
+        return toLegacyDocument(wmsPhysicalOperationsPort.getReceiptOrder(documentId));
     }
 
     @Override
     public LegacyDocumentView getShipmentOrder(Long documentId) {
-        WmsShipmentOrderDO value = shipmentOrderService.getShipmentOrder(documentId);
-        return value == null ? null : view("WMS", "SHIPMENT_ORDER", value.getId(), value.getNo(),
-                value.getStatus(), value.getOrderTime(), value.getTotalQuantity(), value.getTotalPrice(), value.getRemark());
+        return toLegacyDocument(wmsPhysicalOperationsPort.getShipmentOrder(documentId));
     }
 
     @Override
     public LegacyDocumentView getMovementOrder(Long documentId) {
-        WmsMovementOrderDO value = movementOrderService.getMovementOrder(documentId);
-        return value == null ? null : view("WMS", "MOVEMENT_ORDER", value.getId(), value.getNo(),
-                value.getStatus(), value.getOrderTime(), value.getTotalQuantity(), value.getTotalPrice(), value.getRemark());
+        return toLegacyDocument(wmsPhysicalOperationsPort.getMovementOrder(documentId));
     }
 
     @Override
     public LegacyDocumentView getCheckOrder(Long documentId) {
-        WmsCheckOrderDO value = checkOrderService.getCheckOrder(documentId);
-        return value == null ? null : view("WMS", "CHECK_ORDER", value.getId(), value.getNo(),
-                value.getStatus(), value.getOrderTime(), value.getTotalQuantity(), value.getTotalPrice(), value.getRemark());
+        return toLegacyDocument(wmsPhysicalOperationsPort.getCheckOrder(documentId));
     }
 
     @Override
@@ -767,36 +631,8 @@ public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi, YudaoWm
 
     @Override
     public WmsInventoryView getWmsInventory(Long warehouseId, Long skuId) {
-        WmsInventoryListReqVO request = new WmsInventoryListReqVO();
-        request.setWarehouseId(warehouseId);
-        WmsInventoryDO inventory = wmsInventoryService.getInventoryList(request).stream()
-                .filter(value -> value.getSkuId().equals(skuId))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "WMS inventory does not exist for warehouse=" + warehouseId + ", sku=" + skuId));
-        return new WmsInventoryView(inventory.getId(), inventory.getWarehouseId(), inventory.getSkuId(),
-                inventory.getQuantity());
-    }
-
-    private static void copyQuantityLine(QuantityLine line, WmsReceiptOrderDetailSaveReqVO item) {
-        item.setSkuId(line.skuId());
-        item.setQuantity(line.quantity());
-        item.setPrice(line.price());
-        item.setTotalPrice(line.totalPrice());
-    }
-
-    private static void copyQuantityLine(QuantityLine line, WmsShipmentOrderDetailSaveReqVO item) {
-        item.setSkuId(line.skuId());
-        item.setQuantity(line.quantity());
-        item.setPrice(line.price());
-        item.setTotalPrice(line.totalPrice());
-    }
-
-    private static void copyQuantityLine(QuantityLine line, WmsMovementOrderDetailSaveReqVO item) {
-        item.setSkuId(line.skuId());
-        item.setQuantity(line.quantity());
-        item.setPrice(line.price());
-        item.setTotalPrice(line.totalPrice());
+        LegacyWmsPhysicalOperationsPort.InventorySnapshot snapshot = wmsPhysicalOperationsPort.getWmsInventory(warehouseId, skuId);
+        return new WmsInventoryView(snapshot.inventoryId(), snapshot.warehouseId(), snapshot.skuId(), snapshot.quantity());
     }
 
     private static LegacyDocumentView view(String sourceSystem, String documentType, Long documentId,
@@ -805,6 +641,19 @@ public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi, YudaoWm
                                            BigDecimal amount, String remark) {
         return new LegacyDocumentView(sourceSystem, documentType, documentId, documentNo, status,
                 businessTime == null ? null : businessTime.toString(), quantity, amount, remark);
+    }
+
+    private static LegacyDocumentView toLegacyDocument(LegacyWmsPhysicalOperationsPort.PhysicalOrderSnapshot snapshot) {
+        return snapshot == null ? null : new LegacyDocumentView(
+                snapshot.sourceSystem(),
+                snapshot.documentType(),
+                snapshot.documentId(),
+                snapshot.documentNo(),
+                snapshot.status(),
+                snapshot.businessTime(),
+                snapshot.quantity(),
+                snapshot.amount(),
+                snapshot.remark());
     }
 
     private static java.time.LocalDateTime parseBusinessTime(String value, String field) {

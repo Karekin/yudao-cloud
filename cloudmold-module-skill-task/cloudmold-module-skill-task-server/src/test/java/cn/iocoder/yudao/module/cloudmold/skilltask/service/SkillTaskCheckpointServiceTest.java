@@ -1,7 +1,11 @@
 package cn.iocoder.yudao.module.cloudmold.skilltask.service;
 
 import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskMissionLeaseFencePort;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskMapper;
+import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Candidate;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Step;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Task;
 import org.junit.jupiter.api.Test;
@@ -13,12 +17,16 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -27,8 +35,10 @@ class SkillTaskCheckpointServiceTest {
     private final SkillTaskMapper mapper = mock(SkillTaskMapper.class);
     private final Clock clock = Clock.fixed(Instant.parse("2026-07-18T12:00:00Z"), ZoneOffset.UTC);
     private final SkillTaskJson json = new SkillTaskJson(new ObjectMapper(), new SkillTaskProperties());
+    private final SkillTaskMissionLeaseFencePort missionLeaseFenceApi = mock(SkillTaskMissionLeaseFencePort.class);
     private final SkillTaskCheckpointService service =
-            new SkillTaskCheckpointService(mapper, new SkillTaskProperties(), json, clock);
+            new SkillTaskCheckpointService(mapper, new SkillTaskProperties(), json,
+                    Optional.of(missionLeaseFenceApi), clock);
 
     @Test
     void persistsStepResultAndNextCheckpointInOneTransition() {
@@ -92,6 +102,61 @@ class SkillTaskCheckpointServiceTest {
                 eq(LocalDateTime.of(2026, 7, 18, 12, 0)));
     }
 
+    @Test
+    void rollsBackWorkerClaimWhenMissionTakeoverMadeThePermitStale() {
+        Candidate candidate = new Candidate();
+        candidate.setTenantId(8L);
+        candidate.setTaskId("task-1");
+        candidate.setStatus("QUEUED");
+        candidate.setVersion(0L);
+        Task task = runningTask();
+        task.setApprovalRef(missionApprovalRef());
+        when(mapper.claim(eq(8L), eq("task-1"), eq(0L), eq("skill-worker-1"),
+                any(LocalDateTime.class), any(LocalDateTime.class))).thenReturn(1);
+        when(mapper.selectTaskForUpdate(8L, "task-1")).thenReturn(task);
+        org.mockito.Mockito.doThrow(new SecurityException("mission lease fence is stale"))
+                .when(missionLeaseFenceApi).validateCurrentLease(any());
+
+        assertThatThrownBy(() -> service.claim(candidate, "skill-worker-1"))
+                .isInstanceOf(SkillTaskCheckpointService.LeaseLostException.class)
+                .hasMessage("mission lease fence is stale");
+        verify(mapper, never()).insertHistory(any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any());
+    }
+
+    @Test
+    void blocksStepExecutionWhenTakeoverOccursAfterTaskClaim() {
+        Task task = runningTask();
+        task.setApprovalRef(missionApprovalRef());
+        Step step = step("first", 1);
+        when(mapper.selectTaskForUpdate(8L, "task-1")).thenReturn(task);
+        org.mockito.Mockito.doThrow(new SecurityException("mission lease fence is stale"))
+                .when(missionLeaseFenceApi).validateCurrentLease(any());
+
+        assertThatThrownBy(() -> service.prepareStep(task, step, "worker-1", "{}", "a".repeat(64)))
+                .isInstanceOf(SkillTaskCheckpointService.LeaseLostException.class)
+                .hasMessage("mission lease fence is stale");
+        verify(mapper, never()).renewLease(any(), any(), any(), any(), any());
+        verify(mapper, never()).markStepRunning(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void blocksTheActuatorItselfWhenTakeoverWinsAfterStepPreparation() {
+        Task task = runningTask();
+        task.setApprovalRef(missionApprovalRef());
+        AtomicBoolean invoked = new AtomicBoolean();
+        org.mockito.Mockito.doThrow(new SecurityException("mission lease fence is stale"))
+                .when(missionLeaseFenceApi).executeWhileCurrent(any(), any());
+
+        assertThatThrownBy(() -> service.executeWithMissionFence(task, () -> {
+            invoked.set(true);
+            return "executed";
+        })).isInstanceOf(SkillTaskCheckpointService.LeaseLostException.class)
+                .hasMessage("mission lease fence is stale");
+
+        assertThat(invoked).isFalse();
+    }
+
     private static Task runningTask() {
         Task task = new Task();
         task.setTenantId(8L); task.setTaskId("task-1"); task.setStatus("RUNNING");
@@ -107,5 +172,17 @@ class SkillTaskCheckpointServiceTest {
         Step step = new Step();
         step.setTenantId(8L); step.setTaskId("task-1"); step.setStepCode(code); step.setStepOrder(order);
         return step;
+    }
+
+    private static String missionApprovalRef() {
+        SkillTaskApprovalPermitClaims claims = new SkillTaskApprovalPermitClaims(
+                "cma3", "risk-1", "cloudmold.agent-control", "cloudmold.skill-task",
+                "permit-mission-1", "wo-1", "approval-mission-1", "f".repeat(64),
+                "skill.test", "1.0.0", "b".repeat(64), "a".repeat(64), "R3",
+                "2:42", 8L, Instant.parse("2026-07-18T11:59:00Z"),
+                Instant.parse("2026-07-18T11:59:00Z"), Instant.parse("2026-07-18T12:05:00Z"),
+                "run-1", 2L, "worker-1", 3L);
+        return SkillTaskApprovalRefCodec.issueClaims(
+                "0123456789abcdef0123456789abcdef".getBytes(), claims);
     }
 }

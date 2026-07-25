@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.cloudmold.appcommerce.service;
 
+import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.module.cloudmold.commercebehavior.api.CommerceBehaviorCommandApi;
 import cn.iocoder.yudao.module.cloudmold.commercebehavior.api.CommerceBehaviorCommandApi.AttributePaidOrderCommand;
 import cn.iocoder.yudao.module.cloudmold.commercebehavior.api.CommerceBehaviorCommandApi.CommerceBehaviorCommandResult;
@@ -47,7 +48,7 @@ public class AppCommerceBehaviorService {
         String attributionId = UUID.nameUUIDFromBytes(
                 ("app-payment-attribution:" + paymentId).getBytes(StandardCharsets.UTF_8)).toString();
         return commandApi.attributePaidOrder(AttributePaidOrderCommand.builder()
-                .idempotencyKey(idempotencyKey)
+                .idempotencyKey("app-commerce:attribution:" + DigestUtil.sha256Hex(idempotencyKey))
                 .runId(sessionId)
                 .attributionId(attributionId)
                 .sessionId(sessionId)

@@ -19,6 +19,9 @@ public class OrderCommand {
     private String orderId;
     private Long expectedVersion;
     private String buyerId;
+    private String addressRef;
+    private Long addressSnapshotVersion;
+    private String destinationRegionCode;
     private List<OrderLineCommand> items;
     private List<OrderBenefitApplicationCommand> benefitApplications;
     private Long shippingAmountMinor;

@@ -188,6 +188,53 @@ class EngagementCommandServiceImplTest {
     }
 
     @Test
+    void shouldTransitionDraftThroughModerationWithoutPublishingCiphertext() {
+        claimNewOperation();
+        String contentId = "695e8fb1-5389-4d45-bf17-2bcb55090920";
+        CommunityContentDO content = new CommunityContentDO().setContentId(contentId)
+                .setAuthorPrincipalId(PRINCIPAL_ID).setContentType("POST")
+                .setBodyRef("vault://community/content/" + contentId)
+                .setBodyDigestSha256("a".repeat(64)).setStatus("DRAFT").setVersion(1L);
+        when(communityMapper.selectContentForUpdate(7L, contentId)).thenReturn(content);
+        when(communityMapper.updateContentStatus(eq(7L), eq(contentId), eq(1L),
+                eq("PENDING_MODERATION"), any())).thenReturn(1);
+
+        EngagementCommandResult result = service.transitionCommunityContent(
+                TransitionCommunityContentCommand.builder().idempotencyKey("community-submit-0001")
+                        .runId("run-community-1").contentId(contentId).actorPrincipalId(PRINCIPAL_ID)
+                        .desiredStatus("PENDING_MODERATION").expectedVersion(1L).reasonCode("APP_SUBMITTED")
+                        .correlationId(CORRELATION_ID).occurredAt(Instant.parse("2026-07-16T00:00:04Z")).build());
+
+        assertThat(result.getStatus()).isEqualTo("PENDING_MODERATION");
+        verify(outboxAppender).append(argThat(event ->
+                "engagement.community.content_status_changed".equals(event.getEventType())
+                        && "a".repeat(64).equals(event.getPayload().get("body_digest_sha256"))
+                        && !event.getPayload().containsKey("body_ciphertext")));
+    }
+
+    @Test
+    void shouldCreateCurrentLikeStateInsteadOfAppendOnlyToggle() {
+        claimNewOperation();
+        String contentId = "695e8fb1-5389-4d45-bf17-2bcb55090920";
+        when(communityMapper.selectContent(7L, contentId)).thenReturn(new CommunityContentDO()
+                .setContentId(contentId).setStatus("PUBLISHED"));
+        when(communityMapper.insertReaction(any(CommunityReactionStateDO.class))).thenReturn(1);
+
+        EngagementCommandResult result = service.changeCommunityReaction(
+                ChangeCommunityReactionCommand.builder().idempotencyKey("community-reaction-0001")
+                        .runId("run-community-1").reactionId("07e90fe2-b479-45b1-80ed-f3e7759cf2a7")
+                        .actorPrincipalId(PRINCIPAL_ID).reactionType("LIKE").targetType("CONTENT")
+                        .targetId(contentId).desiredStatus("ACTIVE").correlationId(CORRELATION_ID)
+                        .occurredAt(Instant.parse("2026-07-16T00:00:04Z")).build());
+
+        assertThat(result.getStatus()).isEqualTo("ACTIVE");
+        verify(communityMapper).selectReactionForUpdate(7L, PRINCIPAL_ID, "LIKE", "CONTENT", contentId);
+        verify(outboxAppender).append(argThat(event ->
+                "engagement.community.reaction_status_changed".equals(event.getEventType())
+                        && "ACTIVE".equals(event.getPayload().get("current_status"))));
+    }
+
+    @Test
     void shouldHideContentWhenModerationCaseIsActioned() {
         claimNewOperation();
         String caseId = "c04dd424-7682-4fd5-a856-eec247a1e693";

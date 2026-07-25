@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -57,7 +59,48 @@ class HmacSkillTaskApprovalVerifierTest {
         assertThat(evidence.permitId()).isEqualTo("permit-0718");
         assertThat(evidence.rootRequestIdentity()).isEqualTo("f".repeat(64));
         assertThat(evidence.definitionClosureSha256()).isEqualTo("c".repeat(64));
-        assertThat(evidence.verifier()).isEqualTo("cma3:hmac-sha256-claims:local-hmac");
+        assertThat(evidence.verifier()).isEqualTo("cma3:claims:local-hmac");
+    }
+
+    @Test
+    void verifiesPemRsaClaimsAndRejectsScopeMismatches() throws Exception {
+        KeyPair pair = rsaKeyPair();
+        SkillTaskProperties properties = new SkillTaskProperties();
+        properties.getApproval().setAuthorityMode("PEM_RSA");
+        properties.getApproval().setLegacyHmacEnabled(false);
+        properties.getApproval().setIssuer("risk.authority.cloudmold");
+        properties.getApproval().setAudience("cloudmold.skill-task");
+        properties.getApproval().getAsymmetricKeys().put("risk-rsa-1",
+                new SkillTaskProperties.AsymmetricVerificationKey()
+                        .setPublicKeyPem(publicKeyPem(pair))
+                        .setNotBefore(CLOCK.instant().minusSeconds(60))
+                        .setExpiresAt(CLOCK.instant().plusSeconds(600)));
+        HmacSkillTaskApprovalVerifier verifier = new HmacSkillTaskApprovalVerifier(properties, CLOCK);
+        SkillTaskApprovalContext context = new SkillTaskApprovalContext(8L, 42L, 2, "skill.full-chain", "1.0.0",
+                "c".repeat(64), "a".repeat(64), "R3", null);
+        SkillTaskApprovalPermitClaims claims = new SkillTaskApprovalPermitClaims(
+                SkillTaskApprovalRefCodec.CLAIMS_VERSION, "risk-rsa-1", "risk.authority.cloudmold",
+                "cloudmold.skill-task", "permit-rsa-1", "wo-r3-1", "approval-rsa-1", "f".repeat(64),
+                context.skillId(), context.skillVersion(), context.definitionClosureSha256(),
+                context.inputSha256(), context.riskLevel(), "2:42", context.tenantId(),
+                CLOCK.instant(), CLOCK.instant(), CLOCK.instant().plusSeconds(300));
+        String reference = issueRsaClaims(pair, claims);
+
+        SkillTaskApprovalEvidence evidence = verifier.verify(new SkillTaskApprovalContext(8L, 42L, 2,
+                context.skillId(), context.skillVersion(), context.definitionClosureSha256(),
+                context.inputSha256(), context.riskLevel(), reference));
+        assertThat(evidence.approvalId()).isEqualTo("approval-rsa-1");
+        assertThat(evidence.verifier()).isEqualTo("cma3:claims:risk-rsa-1");
+
+        assertThatThrownBy(() -> verifier.verify(new SkillTaskApprovalContext(8L, 99L, 2,
+                context.skillId(), context.skillVersion(), context.definitionClosureSha256(),
+                context.inputSha256(), context.riskLevel(), reference)))
+                .isInstanceOf(SecurityException.class).hasMessageContaining("scope");
+
+        assertThatThrownBy(() -> verifier.verify(new SkillTaskApprovalContext(8L, 42L, 2,
+                context.skillId(), context.skillVersion(), "d".repeat(64),
+                context.inputSha256(), context.riskLevel(), reference)))
+                .isInstanceOf(SecurityException.class).hasMessageContaining("scope");
     }
 
     @Test
@@ -192,6 +235,75 @@ class HmacSkillTaskApprovalVerifierTest {
     }
 
     @Test
+    void rejectsRevokedOrExpiredPemRsaClaims() throws Exception {
+        KeyPair pair = rsaKeyPair();
+        SkillTaskProperties properties = new SkillTaskProperties();
+        properties.getApproval().setAuthorityMode("PEM_RSA");
+        properties.getApproval().setLegacyHmacEnabled(false);
+        properties.getApproval().getAsymmetricKeys().put("risk-rsa-1",
+                new SkillTaskProperties.AsymmetricVerificationKey()
+                        .setPublicKeyPem(publicKeyPem(pair))
+                        .setNotBefore(CLOCK.instant().minusSeconds(60))
+                        .setExpiresAt(CLOCK.instant().plusSeconds(600))
+                        .setRevokedAt(CLOCK.instant()));
+        HmacSkillTaskApprovalVerifier verifier = new HmacSkillTaskApprovalVerifier(properties, CLOCK);
+        SkillTaskApprovalPermitClaims claims = new SkillTaskApprovalPermitClaims(
+                SkillTaskApprovalRefCodec.CLAIMS_VERSION, "risk-rsa-1",
+                SkillTaskApprovalRefCodec.DEFAULT_ISSUER, SkillTaskApprovalRefCodec.DEFAULT_AUDIENCE,
+                "permit-rsa-2", "wo-r3-1", "approval-rsa-2", "e".repeat(64),
+                "skill.full-chain", "1.0.0", "c".repeat(64), "a".repeat(64), "R3", "2:42", 8L,
+                CLOCK.instant(), CLOCK.instant(), CLOCK.instant().plusSeconds(300));
+
+        assertThatThrownBy(() -> verifier.verify(context(issueRsaClaims(pair, claims))))
+                .isInstanceOf(SecurityException.class).hasMessageContaining("revoked");
+    }
+
+    @Test
+    void rejectsWeakRsaAndMixedAuthorityModesAtConfigurationTime() throws Exception {
+        KeyPair weak = rsaKeyPair(2048);
+        SkillTaskProperties weakProperties = rsaProperties(weak, "REMOTE_RSA");
+        assertThatThrownBy(() -> new HmacSkillTaskApprovalVerifier(weakProperties, CLOCK))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("3072");
+
+        KeyPair strong = rsaKeyPair();
+        SkillTaskProperties mixed = rsaProperties(strong, "REMOTE_RSA");
+        mixed.getApproval().setHmacSecret(SECRET);
+        assertThatThrownBy(() -> new HmacSkillTaskApprovalVerifier(mixed, CLOCK))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("must not configure local HMAC");
+
+        SkillTaskProperties mixedKeyId = rsaProperties(strong, "REMOTE_RSA");
+        mixedKeyId.getApproval().getKeys().put("risk-rsa-1", key(SECRET,
+                CLOCK.instant().minusSeconds(60), CLOCK.instant().plusSeconds(600), null));
+        assertThatThrownBy(() -> new HmacSkillTaskApprovalVerifier(mixedKeyId, CLOCK))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("span authority modes");
+
+        SkillTaskProperties wrongMode = rsaProperties(strong, "LOCAL_TEST_HMAC");
+        assertThatThrownBy(() -> new HmacSkillTaskApprovalVerifier(wrongMode, CLOCK))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("must not configure asymmetric");
+    }
+
+    @Test
+    void rejectsRsaClaimsOutsideIssuerAudienceAndExactKeyEpoch() throws Exception {
+        KeyPair pair = rsaKeyPair();
+        SkillTaskProperties properties = rsaProperties(pair, "REMOTE_RSA");
+        properties.getApproval().setIssuer("risk.authority.cloudmold");
+        HmacSkillTaskApprovalVerifier verifier = new HmacSkillTaskApprovalVerifier(properties, CLOCK);
+        SkillTaskApprovalContext context = context(null);
+
+        SkillTaskApprovalPermitClaims beforeEpoch = rsaClaims(context, "risk-rsa-1",
+                "risk.authority.cloudmold", SkillTaskApprovalRefCodec.DEFAULT_AUDIENCE,
+                CLOCK.instant().minusSeconds(61), CLOCK.instant().plusSeconds(300));
+        assertThatThrownBy(() -> verifier.verify(context(issueRsaClaims(pair, beforeEpoch))))
+                .isInstanceOf(SecurityException.class).hasMessageContaining("before its signing key");
+
+        SkillTaskApprovalPermitClaims wrongAudience = rsaClaims(context, "risk-rsa-1",
+                "risk.authority.cloudmold", "wrong-audience",
+                CLOCK.instant(), CLOCK.instant().plusSeconds(300));
+        assertThatThrownBy(() -> verifier.verify(context(issueRsaClaims(pair, wrongAudience))))
+                .isInstanceOf(SecurityException.class).hasMessageContaining("issuer or audience");
+    }
+
+    @Test
     void rejectsLegacyReferenceWhenCompatibilityModeIsDisabled() throws Exception {
         SkillTaskProperties properties = keyedProperties();
         properties.getApproval().setHmacSecret(SECRET);
@@ -238,5 +350,59 @@ class HmacSkillTaskApprovalVerifierTest {
         mac.init(new SecretKeySpec(SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
         return "cma1:" + approvalId + ":" + expires + ":"
                 + HexFormat.of().formatHex(mac.doFinal(message.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static SkillTaskProperties rsaProperties(KeyPair pair, String authorityMode) {
+        SkillTaskProperties properties = new SkillTaskProperties();
+        properties.getApproval().setAuthorityMode(authorityMode);
+        properties.getApproval().setLegacyHmacEnabled(false);
+        properties.getApproval().getAsymmetricKeys().put("risk-rsa-1",
+                new SkillTaskProperties.AsymmetricVerificationKey()
+                        .setPublicKeyPem(publicKeyPem(pair))
+                        .setNotBefore(CLOCK.instant().minusSeconds(60))
+                        .setExpiresAt(CLOCK.instant().plusSeconds(600)));
+        return properties;
+    }
+
+    private static SkillTaskApprovalPermitClaims rsaClaims(SkillTaskApprovalContext context, String keyId,
+                                                           String issuer, String audience,
+                                                           Instant issuedAt, Instant expiresAt) {
+        return new SkillTaskApprovalPermitClaims(
+                SkillTaskApprovalRefCodec.CLAIMS_VERSION, keyId, issuer, audience,
+                "permit-rsa-epoch", "wo-r3-1", "approval-rsa-epoch", "f".repeat(64),
+                context.skillId(), context.skillVersion(), context.definitionClosureSha256(),
+                context.inputSha256(), context.riskLevel(), "2:42", context.tenantId(),
+                issuedAt, issuedAt, expiresAt);
+    }
+
+    private static KeyPair rsaKeyPair() throws Exception {
+        return rsaKeyPair(3072);
+    }
+
+    private static KeyPair rsaKeyPair(int bits) throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(bits);
+        return generator.generateKeyPair();
+    }
+
+    private static String publicKeyPem(KeyPair pair) {
+        return "-----BEGIN PUBLIC KEY-----\n"
+                + java.util.Base64.getMimeEncoder(64, "\n".getBytes()).encodeToString(pair.getPublic().getEncoded())
+                + "\n-----END PUBLIC KEY-----";
+    }
+
+    private static String issueRsaClaims(KeyPair pair, SkillTaskApprovalPermitClaims claims) throws Exception {
+        String payload = String.join("\n",
+                claims.issuer(), claims.audience(), claims.permitId(), claims.workOrderId(), claims.approvalId(),
+                claims.rootRequestIdentity(), claims.skillId(), claims.skillVersion(),
+                claims.definitionClosureSha256(), claims.inputSha256(), claims.riskLevel(), claims.subject(),
+                Long.toString(claims.tenantId()), Long.toString(claims.notBefore().getEpochSecond()),
+                Long.toString(claims.issuedAt().getEpochSecond()), Long.toString(claims.expiresAt().getEpochSecond()));
+        java.security.Signature signature = java.security.Signature.getInstance("SHA256withRSA");
+        signature.initSign(pair.getPrivate());
+        signature.update(SkillTaskApprovalRefCodec.claimsMessage(claims.keyId(), payload).getBytes(StandardCharsets.UTF_8));
+        return String.join(":", SkillTaskApprovalRefCodec.CLAIMS_VERSION, claims.keyId(),
+                java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(payload.getBytes(StandardCharsets.UTF_8)),
+                HexFormat.of().formatHex(signature.sign()));
     }
 }

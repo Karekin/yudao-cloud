@@ -6,6 +6,7 @@ import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.integration.bpm.AgentApprovalWorkflowAttestationGate;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.integration.bpm.AgentApprovalWorkflowRegistrar;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
@@ -32,23 +33,34 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
     private final AgentControlStoreMapper mapper;
     private final Clock clock;
     private final AgentApprovalWorkflowRegistrar approvalWorkflows;
+    private final AgentApprovalWorkflowAttestationGate approvalAttestations;
 
     @Autowired
     public AgentControlServiceImpl(AgentControlStoreMapper mapper,
-                                   ObjectProvider<AgentApprovalWorkflowRegistrar> approvalWorkflows) {
+                                   ObjectProvider<AgentApprovalWorkflowRegistrar> approvalWorkflows,
+                                   ObjectProvider<AgentApprovalWorkflowAttestationGate> approvalAttestations) {
         this(mapper, Clock.systemUTC(),
-                approvalWorkflows.getIfAvailable(() -> AgentApprovalWorkflowRegistrar.DISABLED));
+                approvalWorkflows.getIfAvailable(() -> AgentApprovalWorkflowRegistrar.DISABLED),
+                approvalAttestations.getIfAvailable(() -> AgentApprovalWorkflowAttestationGate.DISABLED));
     }
 
     AgentControlServiceImpl(AgentControlStoreMapper mapper, Clock clock) {
-        this(mapper, clock, AgentApprovalWorkflowRegistrar.DISABLED);
+        this(mapper, clock, AgentApprovalWorkflowRegistrar.DISABLED,
+                AgentApprovalWorkflowAttestationGate.DISABLED);
     }
 
     AgentControlServiceImpl(AgentControlStoreMapper mapper, Clock clock,
                             AgentApprovalWorkflowRegistrar approvalWorkflows) {
+        this(mapper, clock, approvalWorkflows, AgentApprovalWorkflowAttestationGate.DISABLED);
+    }
+
+    AgentControlServiceImpl(AgentControlStoreMapper mapper, Clock clock,
+                            AgentApprovalWorkflowRegistrar approvalWorkflows,
+                            AgentApprovalWorkflowAttestationGate approvalAttestations) {
         this.mapper = mapper;
         this.clock = clock;
         this.approvalWorkflows = approvalWorkflows;
+        this.approvalAttestations = approvalAttestations;
     }
 
     @Override
@@ -325,6 +337,7 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
         require(mapper.selectEffectiveApprovalAuthorityGrant(tenantId, operatorUserId, approval.getApprovalId(),
                 workOrder.getRoleCode(), workOrder.getActionCode(), workOrder.getRiskLevel(), approval.getScopeHash(),
                 now) != null, "authenticated actor has no exact effective approver grant");
+        approvalAttestations.assertDecisionAllowed(tenantId, operatorUserId, approval, input.getDecision());
         String approvalStatus = "APPROVE".equals(input.getDecision()) ? "APPROVED" : "REJECTED";
         String workOrderStatus = "APPROVE".equals(input.getDecision()) ? "READY" : "CANCELLED";
         require(mapper.decideApproval(tenantId, approval.getApprovalId(), approval.getVersion(), approvalStatus,

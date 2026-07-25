@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.cloudmold.integration.yudao.dal.mysql;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.dal.dataobject.LegacyCatalogProjectionDO;
 import org.apache.ibatis.annotations.*;
 
+import java.util.List;
 import java.time.LocalDateTime;
 
 @Mapper
@@ -65,5 +66,20 @@ public interface LegacyCatalogProjectionMapper {
                 @Param("payload") String payload,
                 @Param("payloadHash") String payloadHash,
                 @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT canonical_id
+            FROM cloudmold_catalog_legacy_projection
+            WHERE tenant_id=#{tenantId}
+              AND target_system='WMS'
+              AND target_entity='ITEM_SKU'
+              AND status=0
+              AND (#{skuCode} IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(payload, '$.sku_code')) = #{skuCode})
+              AND (#{barcode} IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(payload, '$.primary_barcode')) = #{barcode})
+            ORDER BY canonical_id
+            """)
+    List<String> selectWmsCanonicalSkuCandidates(@Param("tenantId") Long tenantId,
+                                                 @Param("skuCode") String skuCode,
+                                                 @Param("barcode") String barcode);
 
 }

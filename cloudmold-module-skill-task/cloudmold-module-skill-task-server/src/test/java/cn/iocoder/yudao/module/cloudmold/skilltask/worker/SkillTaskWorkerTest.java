@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.TextNode;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -26,13 +27,16 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -51,6 +55,14 @@ class SkillTaskWorkerTest {
     private final SkillTaskWorker worker = new SkillTaskWorker(mapper, checkpoints,
             new SkillTaskTemplateResolver(objectMapper), json, executor, approvalVerifier, taskService,
             properties, clock);
+
+    @BeforeEach
+    void executeNonStaleOperations() {
+        when(checkpoints.executeWithMissionFence(any(), any())).thenAnswer(invocation -> {
+            Supplier<?> operation = invocation.getArgument(1);
+            return operation.get();
+        });
+    }
 
     @AfterEach
     void clearTenant() {
@@ -148,6 +160,26 @@ class SkillTaskWorkerTest {
                 eq(java.time.Duration.ofSeconds(2)), eq("capabilityId=cap.after-sale.get; terminal=false"),
                 eq("{\"caseStatus\":\"RESOLUTION_PENDING\",\"resolutionSagaStatus\":\"RUNNING\"}"), anyString());
         verifyNoInteractions(taskService);
+    }
+
+    @Test
+    void doesNotInvokeTheActuatorWhenTakeoverWinsBeforeExecution() {
+        Candidate candidate = new Candidate();
+        candidate.setTenantId(8L); candidate.setTaskId("task-1"); candidate.setStatus("RUNNING");
+        candidate.setVersion(3L); candidate.setAttemptCount(1); candidate.setMaxAttempts(3);
+        Task task = task();
+        Step step = step();
+        when(mapper.selectDue(LocalDateTime.of(2026, 7, 18, 12, 0), 20)).thenReturn(List.of(candidate));
+        when(checkpoints.claim(eq(candidate), anyString())).thenReturn(task);
+        when(mapper.selectStep(8L, "task-1", "write")).thenReturn(step);
+        doThrow(new SkillTaskCheckpointService.LeaseLostException("mission lease fence is stale"))
+                .when(checkpoints).executeWithMissionFence(eq(task), any());
+
+        worker.poll();
+
+        verify(checkpoints).prepareStep(eq(task), eq(step), anyString(), anyString(), anyString());
+        verify(executor, never()).execute(anyString(), any(), any(), anyBoolean());
+        verify(checkpoints, never()).checkpointSuccess(any(), any(), anyString(), anyString(), anyString());
     }
 
     private static Task task() {

@@ -9,7 +9,8 @@ import java.time.LocalDateTime;
 @Mapper
 public interface OrderHeaderMapper extends BaseMapperX<OrderHeaderDO> {
     @Select("""
-            SELECT order_id,tenant_id,order_no,run_id,buyer_id,status,total_quantity,product_amount_minor,
+            SELECT order_id,tenant_id,order_no,run_id,buyer_id,address_ref,address_snapshot_version,
+                   destination_region_code,status,total_quantity,product_amount_minor,
                    shipping_amount_minor,discount_amount_minor,payable_amount_minor,currency_code,
                    payment_id,fulfillment_id,shipment_id,refund_id,cancellation_saga_id,
                    pre_cancellation_status,cancellation_responsibility_party,
@@ -21,7 +22,8 @@ public interface OrderHeaderMapper extends BaseMapperX<OrderHeaderDO> {
     OrderHeaderDO selectForUpdate(@Param("tenantId") Long tenantId, @Param("orderId") String orderId);
 
     @Select("""
-            SELECT order_id,tenant_id,order_no,run_id,buyer_id,status,total_quantity,product_amount_minor,
+            SELECT order_id,tenant_id,order_no,run_id,buyer_id,address_ref,address_snapshot_version,
+                   destination_region_code,status,total_quantity,product_amount_minor,
                    shipping_amount_minor,discount_amount_minor,payable_amount_minor,currency_code,
                    payment_id,fulfillment_id,shipment_id,refund_id,cancellation_saga_id,
                    pre_cancellation_status,cancellation_responsibility_party,

@@ -7,7 +7,9 @@ import cn.iocoder.yudao.module.cloudmold.inventory.dal.mysql.InventoryV3BalanceM
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.time.ZoneOffset;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -29,7 +31,7 @@ public class InventoryCheckoutReservationService implements InventoryCheckoutRes
         InventoryV3CommandResult reserved = commandApi.execute(InventoryV3Command.builder()
                 .operation(InventoryV3Operation.RESERVE)
                 .idempotencyKey(command.getIdempotencyKey())
-                .sourceEventId(command.getIdempotencyKey())
+                .sourceEventId(sourceEventId(command.getIdempotencyKey()))
                 .ownerType(balance.getOwnerType()).ownerId(balance.getOwnerId())
                 .canonicalSkuId(balance.getCanonicalSkuId()).warehouseId(balance.getWarehouseId())
                 .locationId(balance.getLocationId()).lotId(balance.getLotId())
@@ -44,6 +46,12 @@ public class InventoryCheckoutReservationService implements InventoryCheckoutRes
                 .ownerId(balance.getOwnerId()).warehouseId(balance.getWarehouseId())
                 .locationId(balance.getLocationId()).lotId(balance.getLotId())
                 .aggregateVersion(reserved.getAggregateVersion()).duplicate(reserved.isDuplicate()).build();
+    }
+
+    static String sourceEventId(String idempotencyKey) {
+        require(idempotencyKey != null && !idempotencyKey.isBlank(), "idempotencyKey is required");
+        return UUID.nameUUIDFromBytes(
+                ("checkout-reservation:" + idempotencyKey).getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private static void require(boolean condition, String message) {

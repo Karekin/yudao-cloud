@@ -12,11 +12,13 @@ public interface AppCheckoutMapper {
             INSERT IGNORE INTO cloudmold_app_checkout
               (checkout_token,tenant_id,buyer_principal_id,idempotency_key,request_hash,
                listing_id,listing_offer_id,canonical_spu_id,canonical_sku_id,quantity,
+               address_ref,address_snapshot_version,destination_region_code,
                unit_price_minor,product_amount_minor,shipping_amount_minor,discount_amount_minor,
                payable_amount_minor,currency_code,status,version,expires_at,created_at,updated_at)
             VALUES
               (#{checkoutToken},#{tenantId},#{buyerPrincipalId},#{idempotencyKey},#{requestHash},
                #{listingId},#{listingOfferId},#{canonicalSpuId},#{canonicalSkuId},#{quantity},
+               #{addressRef},#{addressSnapshotVersion},#{destinationRegionCode},
                #{unitPriceMinor},#{productAmountMinor},#{shippingAmountMinor},#{discountAmountMinor},
                #{payableAmountMinor},#{currencyCode},#{status},#{version},#{expiresAt},#{createdAt},#{updatedAt})
             """)

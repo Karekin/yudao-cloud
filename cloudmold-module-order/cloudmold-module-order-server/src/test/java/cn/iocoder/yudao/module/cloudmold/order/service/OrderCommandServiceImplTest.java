@@ -100,7 +100,11 @@ class OrderCommandServiceImplTest {
         verify(catalogApi).requireActiveSku("sku-2");
         verify(itemMapper, times(2)).insert(any(OrderItemDO.class));
         verify(outboxAppender).append(argThat(event -> event.getEventType().equals("order.status.changed")
+                && event.getSchemaVersion() == 1
                 && event.getAggregateVersion() == 1L
+                && !event.getPayload().containsKey("address_ref")
+                && !event.getPayload().containsKey("address_snapshot_version")
+                && !event.getPayload().containsKey("destination_region_code")
                 && ((List<?>) event.getPayload().get("items")).size() == 2
                 && ((List<Map<String, Object>>) event.getPayload().get("items")).stream()
                         .map(item -> item.get("merchandise_cost_minor"))
@@ -298,6 +302,7 @@ class OrderCommandServiceImplTest {
         claimNewOperation();
         OrderCommand command = placeCommand();
         command.setOperation(OrderOperation.PLACE_FROM_LISTING);
+        addAddressSnapshot(command);
         command.getItems().get(0).setListingId("listing-1");
         command.getItems().get(0).setListingOfferId("offer-1");
         command.getItems().get(1).setListingId("listing-1");
@@ -321,7 +326,13 @@ class OrderCommandServiceImplTest {
             assertThat(item.getChannelCode()).isEqualTo("YSHOPPING_INTERNAL");
         });
         verify(listingApi, times(2)).requirePublishedOffer(any());
-        verify(outboxAppender).append(argThat(event -> event.getSchemaVersion() == 2));
+        verify(outboxAppender).append(argThat(event -> event.getSchemaVersion() == 4
+                && "11111111-1111-4111-8111-111111111111".equals(event.getPayload().get("address_ref"))
+                && Long.valueOf(1L).equals(event.getPayload().get("address_snapshot_version"))
+                && "440305".equals(event.getPayload().get("destination_region_code"))
+                && !event.getPayload().containsKey("receiver_name")
+                && !event.getPayload().containsKey("receiver_mobile")
+                && !event.getPayload().containsKey("detail_address")));
     }
 
     @Test
@@ -329,6 +340,7 @@ class OrderCommandServiceImplTest {
         claimNewOperation();
         OrderCommand command = placeCommand();
         command.setOperation(OrderOperation.PLACE_FROM_LISTING);
+        addAddressSnapshot(command);
         command.getItems().get(0).setListingId("listing-1");
         command.getItems().get(0).setListingOfferId("offer-1");
         command.getItems().get(1).setListingId("listing-1");
@@ -614,11 +626,18 @@ class OrderCommandServiceImplTest {
     private static OrderCommand listingPlaceCommand() {
         OrderCommand command = placeCommand();
         command.setOperation(OrderOperation.PLACE_FROM_LISTING);
+        addAddressSnapshot(command);
         command.getItems().get(0).setListingId("listing-1");
         command.getItems().get(0).setListingOfferId("offer-1");
         command.getItems().get(1).setListingId("listing-1");
         command.getItems().get(1).setListingOfferId("offer-2");
         return command;
+    }
+
+    private static void addAddressSnapshot(OrderCommand command) {
+        command.setAddressRef("11111111-1111-4111-8111-111111111111");
+        command.setAddressSnapshotVersion(1L);
+        command.setDestinationRegionCode("440305");
     }
 
     private static OrderCommand transitionCommand(OrderOperation operation, long version) {

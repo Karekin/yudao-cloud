@@ -93,7 +93,10 @@ public class OrderQueryService implements AppOrderQueryApi {
                 .listingVersion(item.getListingVersion()).channelCode(item.getChannelCode())
                 .shopId(item.getShopId()).build()).toList();
         return AppOrderView.builder().orderId(detail.getOrderId()).orderNo(detail.getOrderNo())
-                .buyerPrincipalId(detail.getBuyerId()).status(detail.getStatus())
+                .runId(detail.getRunId()).buyerPrincipalId(detail.getBuyerId()).status(detail.getStatus())
+                .addressRef(detail.getAddressRef())
+                .addressSnapshotVersion(detail.getAddressSnapshotVersion())
+                .destinationRegionCode(detail.getDestinationRegionCode())
                 .aggregateVersion(detail.getAggregateVersion()).totalQuantity(detail.getTotalQuantity())
                 .productAmountMinor(detail.getProductAmountMinor()).shippingAmountMinor(detail.getShippingAmountMinor())
                 .discountAmountMinor(detail.getDiscountAmountMinor()).payableAmountMinor(detail.getPayableAmountMinor())

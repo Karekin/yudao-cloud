@@ -82,6 +82,9 @@
         <dubbo.version>3.3.6</dubbo.version>
         <mapstruct.version>1.6.3</mapstruct.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Keep upstream BPM runnable by default. The CloudMold monolith
+             packaging script opts into the plain dependency jar explicitly. -->
+        <cloudmold.bpm.repackage.skip>false</cloudmold.bpm.repackage.skip>
     </properties>
 
     <dependencyManagement>

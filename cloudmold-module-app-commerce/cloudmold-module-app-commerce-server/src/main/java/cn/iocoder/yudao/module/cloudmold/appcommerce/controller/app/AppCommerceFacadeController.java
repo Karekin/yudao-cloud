@@ -34,6 +34,7 @@ public class AppCommerceFacadeController {
     @Resource private AppMemberPrincipalResolver principalResolver;
     @Resource private AppProductReadService productReadService;
     @Resource private AppCheckoutService checkoutService;
+    @Resource private AppAddressVaultService addressVaultService;
     @Resource private AppOrderQueryApi orderQueryApi;
     @Resource private AppSupportService supportService;
     @Resource private AppFulfillmentQueryApi fulfillmentQueryApi;
@@ -62,11 +63,27 @@ public class AppCommerceFacadeController {
         return success(productReadService.detail(listingId));
     }
 
+    @PostMapping("/addresses/snapshots")
+    @Operation(summary = "将当前会员地址加密快照化并返回不可逆引用")
+    public CommonResult<AppAddressSnapshotView> createAddressSnapshot(
+            @Valid @RequestBody CreateAddressSnapshotReq request) {
+        return success(addressVaultService.createSnapshot(
+                request.idempotencyKey, request.sourceAddressId));
+    }
+
+    @GetMapping("/addresses/snapshots/{addressRef}")
+    @Operation(summary = "查询当前会员拥有的地址快照摘要")
+    public CommonResult<AppAddressSnapshotView> addressSnapshot(@PathVariable String addressRef) {
+        AppMemberPrincipalView principal = principalResolver.requireCurrent();
+        return success(addressVaultService.requireOwned(addressRef, principal.getPrincipalId()));
+    }
+
     @PostMapping("/checkout/preview")
     @Operation(summary = "服务端复核价格、库存并创建限时结算快照")
     public CommonResult<AppCheckoutView> preview(@Valid @RequestBody CheckoutPreviewReq request) {
         return success(checkoutService.preview(request.idempotencyKey, request.listingId,
-                request.listingOfferId, request.canonicalSkuId, request.quantity));
+                request.listingOfferId, request.canonicalSkuId, request.quantity,
+                request.addressRef));
     }
 
     @PostMapping("/orders")
@@ -111,7 +128,7 @@ public class AppCommerceFacadeController {
         PaymentCommandResult payment = checkoutService.captureInternalTest(request.idempotencyKey,
                 request.orderId, request.expectedOrderVersion);
         CommerceBehaviorCommandResult attribution = commerceBehaviorService.attributePayment(
-                request.idempotencyKey + ":attribution", request.sessionId,
+                request.idempotencyKey, request.sessionId,
                 request.expectedSessionVersion, request.checkoutToken, request.orderId, payment.getPaymentId());
         return success(AppPaymentCaptureView.from(payment, attribution));
     }
@@ -167,6 +184,13 @@ public class AppCommerceFacadeController {
         @NotBlank private String listingOfferId;
         @NotBlank private String canonicalSkuId;
         @Min(1) @Max(99) private int quantity;
+        @NotBlank @Pattern(regexp = "^[0-9a-fA-F-]{36}$") private String addressRef;
+    }
+
+    @Data
+    public static class CreateAddressSnapshotReq {
+        @NotBlank @Size(min = 8, max = 128) private String idempotencyKey;
+        @NotNull @Positive private Long sourceAddressId;
     }
 
     @Data

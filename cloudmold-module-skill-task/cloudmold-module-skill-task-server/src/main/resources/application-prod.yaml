@@ -1,0 +1,12 @@
+cloudmold:
+  skill-task:
+    approval:
+      authority-mode: REMOTE_RSA
+      legacy-hmac-enabled: false
+      hmac-secret: ""
+      issuer: ${CLOUDMOLD_RISK_AUTHORITY_ISSUER:cloudmold.agent-control}
+      audience: ${CLOUDMOLD_RISK_AUTHORITY_AUDIENCE:cloudmold.skill-task}
+
+# Production starts fail-closed until the external configuration authority
+# supplies cloudmold.skill-task.approval.asymmetric-keys with RSA-3072+
+# public keys and explicit not-before/expires-at epochs.

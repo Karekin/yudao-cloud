@@ -18,6 +18,10 @@ public class CommunityInteractionDO {
     private String targetType;
     private String targetId;
     private String payloadRef;
+    private String payloadKeyId;
+    private byte[] payloadIv;
+    private byte[] payloadCiphertext;
+    private String payloadDigestSha256;
     private LocalDateTime occurredAt;
     private LocalDateTime createdAt;
 }

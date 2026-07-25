@@ -1,13 +1,18 @@
 package cn.iocoder.yudao.module.cloudmold.skilltask.approval;
 
 import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
+import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties.AsymmetricVerificationKey;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskPemKeys;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalScope;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.PublicKey;
+import java.security.Signature;
+import java.security.interfaces.RSAPublicKey;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -21,8 +26,12 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
     private final byte[] legacySecret;
     private final boolean legacyEnabled;
     private final Map<String, VerificationKeyMaterial> keys;
+    private final Map<String, AsymmetricVerificationKeyMaterial> asymmetricKeys;
     private final Duration maxValidity;
     private final Duration clockSkew;
+    private final AuthorityMode authorityMode;
+    private final String issuer;
+    private final String audience;
     private final Clock clock;
 
     public HmacSkillTaskApprovalVerifier(SkillTaskProperties properties, Clock clock) {
@@ -34,15 +43,20 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
         this.legacySecret = configured.getBytes(StandardCharsets.UTF_8);
         this.legacyEnabled = approval != null && approval.isLegacyHmacEnabled();
         this.keys = configuredKeys(approval);
+        this.asymmetricKeys = configuredAsymmetricKeys(approval);
         this.maxValidity = positive(approval == null ? null : approval.getMaxValidity(), "maxValidity");
         this.clockSkew = nonNegative(approval == null ? null : approval.getClockSkew(), "clockSkew");
+        this.authorityMode = authorityMode(approval == null ? null : approval.getAuthorityMode());
+        this.issuer = requireConfiguredText(approval == null ? null : approval.getIssuer(), "issuer");
+        this.audience = requireConfiguredText(approval == null ? null : approval.getAudience(), "audience");
+        requireExclusiveAuthorityMode(approval, authorityMode, legacySecret, keys, asymmetricKeys);
         this.clock = clock;
     }
 
     @Override
     public SkillTaskApprovalEvidence verify(SkillTaskApprovalContext context) {
         Objects.requireNonNull(context, "context");
-        if (legacySecret.length == 0 && keys.isEmpty()) {
+        if (legacySecret.length == 0 && keys.isEmpty() && asymmetricKeys.isEmpty()) {
             throw new SecurityException("R2/R3 Skill approvals are disabled because no approval authority is configured");
         }
         try {
@@ -60,14 +74,20 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
     private SkillTaskApprovalEvidence verifyClaims(SkillTaskApprovalContext context, String reference) {
         SkillTaskApprovalRefCodec.ParsedClaimsApprovalRef parsed = SkillTaskApprovalRefCodec.parseClaims(reference);
         SkillTaskApprovalPermitClaims claims = parsed.claims();
-        VerificationKeyMaterial key = claims.keyId().equals(SkillTaskApprovalRefCodec.LOCAL_HMAC_KEY_ID)
+        VerificationKeyMaterial hmacKey = claims.keyId().equals(SkillTaskApprovalRefCodec.LOCAL_HMAC_KEY_ID)
                 ? localKeyMaterial(claims.issuedAt()) : keys.get(claims.keyId());
-        if (key == null) {
+        AsymmetricVerificationKeyMaterial asymmetricKey = asymmetricKeys.get(claims.keyId());
+        if (hmacKey == null && asymmetricKey == null) {
             throw new SecurityException("approvalRef signing key is unknown");
         }
-        byte[] expected = SkillTaskApprovalRefCodec.sign(key.secret(),
-                SkillTaskApprovalRefCodec.claimsMessage(claims.keyId(), parsed.payload()));
-        requireSignature(expected, parsed.signature());
+        String message = SkillTaskApprovalRefCodec.claimsMessage(claims.keyId(), parsed.payload());
+        if (hmacKey != null) {
+            requireLocalTestHmacMode();
+            byte[] expected = SkillTaskApprovalRefCodec.sign(hmacKey.secret(), message);
+            requireSignature(expected, parsed.signature());
+        } else {
+            requireRsaSignature(asymmetricKey.publicKey(), message, parsed.signature());
+        }
         Instant now = clock.instant();
         requireClaimsScope(context, claims);
         if (claims.notBefore().isAfter(claims.issuedAt())) {
@@ -79,13 +99,16 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
         if (claims.notBefore().isAfter(now.plus(clockSkew))) {
             throw new SecurityException("approvalRef is not active yet");
         }
-        if (key.revokedAt() != null && !now.isBefore(key.revokedAt())) {
+        Instant revokedAt = hmacKey != null ? hmacKey.revokedAt() : asymmetricKey.revokedAt();
+        if (revokedAt != null && !now.isBefore(revokedAt)) {
             throw new SecurityException("approvalRef signing key is revoked");
         }
-        if (claims.issuedAt().plus(clockSkew).isBefore(key.notBefore())) {
+        Instant notBefore = hmacKey != null ? hmacKey.notBefore() : asymmetricKey.notBefore();
+        if (claims.issuedAt().isBefore(notBefore) || claims.notBefore().isBefore(notBefore)) {
             throw new SecurityException("approvalRef was issued before its signing key became active");
         }
-        if (key.expiresAt() != null && claims.expiresAt().isAfter(key.expiresAt())) {
+        Instant keyExpiresAt = hmacKey != null ? hmacKey.expiresAt() : asymmetricKey.expiresAt();
+        if (keyExpiresAt != null && claims.expiresAt().isAfter(keyExpiresAt)) {
             throw new SecurityException("approvalRef exceeds its signing key lifetime");
         }
         if (Duration.between(claims.issuedAt(), claims.expiresAt()).compareTo(maxValidity) > 0) {
@@ -97,6 +120,7 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
     }
 
     private SkillTaskApprovalEvidence verifyKeyed(SkillTaskApprovalContext context, String reference) {
+        requireLocalTestHmacMode();
         SkillTaskApprovalRefCodec.ParsedKeyedApprovalRef parsed =
                 SkillTaskApprovalRefCodec.parseKeyed(reference);
         String referenceSha256 = SkillTaskApprovalRefCodec.sha256(reference);
@@ -113,7 +137,7 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
         if (key.revokedAt() != null && !now.isBefore(key.revokedAt())) {
             throw new SecurityException("approvalRef signing key is revoked");
         }
-        if (parsed.issuedAt().plus(clockSkew).isBefore(key.notBefore())) {
+        if (parsed.issuedAt().isBefore(key.notBefore())) {
             throw new SecurityException("approvalRef was issued before its signing key became active");
         }
         if (parsed.issuedAt().isAfter(now.plus(clockSkew))) {
@@ -139,6 +163,7 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
     }
 
     private SkillTaskApprovalEvidence verifyLegacy(SkillTaskApprovalContext context, String reference) {
+        requireLocalTestHmacMode();
         if (!legacyEnabled || legacySecret.length == 0) {
             throw new SecurityException("legacy cma1 approvals are disabled");
         }
@@ -217,6 +242,33 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
         return Map.copyOf(result);
     }
 
+    private static Map<String, AsymmetricVerificationKeyMaterial> configuredAsymmetricKeys(SkillTaskProperties.Approval approval) {
+        Map<String, AsymmetricVerificationKeyMaterial> result = new LinkedHashMap<>();
+        if (approval == null || approval.getAsymmetricKeys() == null) {
+            return Map.of();
+        }
+        approval.getAsymmetricKeys().forEach((keyId, configured) -> {
+            if (keyId == null || !keyId.matches("[A-Za-z0-9._-]{3,64}") || configured == null) {
+                throw new IllegalStateException("Skill Task approval key configuration is invalid");
+            }
+            PublicKey publicKey = SkillTaskPemKeys.rsaPublicKey(configured.getPublicKeyPem());
+            if (!"RS256".equals(configured.getAlgorithm())) {
+                throw new IllegalStateException("Skill Task approval asymmetric key algorithm must be RS256");
+            }
+            requireRsaStrength(publicKey);
+            Instant notBefore = requireInstant(configured.getNotBefore(), "notBefore");
+            Instant expiresAt = requireInstant(configured.getExpiresAt(), "expiresAt");
+            if (!expiresAt.isAfter(notBefore)) {
+                throw new IllegalStateException("Skill Task approval key expiresAt must be after notBefore");
+            }
+            if (result.put(keyId, new AsymmetricVerificationKeyMaterial(publicKey, notBefore, expiresAt,
+                    configured.getRevokedAt())) != null) {
+                throw new IllegalStateException("Skill Task approval keyId is duplicated");
+            }
+        });
+        return Map.copyOf(result);
+    }
+
     private static Instant requireInstant(Instant value, String field) {
         if (value == null) {
             throw new IllegalStateException("Skill Task approval key " + field + " is required");
@@ -231,13 +283,24 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
         return value.trim();
     }
 
+    private static String requireConfiguredText(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException("Skill Task approval " + field + " is required");
+        }
+        return value.trim();
+    }
+
     private static String subject(SkillTaskApprovalContext context) {
         return context.operatorType() + ":" + context.operatorId();
     }
 
-    private static void requireClaimsScope(SkillTaskApprovalContext context, SkillTaskApprovalPermitClaims claims) {
-        if (!claims.issuer().equals(SkillTaskApprovalRefCodec.DEFAULT_ISSUER)
-                || !claims.audience().equals(SkillTaskApprovalRefCodec.DEFAULT_AUDIENCE)) {
+    private void requireClaimsScope(SkillTaskApprovalContext context, SkillTaskApprovalPermitClaims claims) {
+        requireClaimsScope(context, claims, null, null);
+    }
+
+    private void requireClaimsScope(SkillTaskApprovalContext context, SkillTaskApprovalPermitClaims claims,
+                                    String expectedWorkOrderId, String expectedApprovalId) {
+        if (!claims.issuer().equals(issuer) || !claims.audience().equals(audience)) {
             throw new SecurityException("approvalRef issuer or audience is invalid");
         }
         if (claims.tenantId() != context.tenantId()
@@ -246,8 +309,75 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
                 || !context.skillVersion().equals(claims.skillVersion())
                 || !context.definitionClosureSha256().equals(claims.definitionClosureSha256())
                 || !context.inputSha256().equals(claims.inputSha256())
-                || !context.riskLevel().equalsIgnoreCase(claims.riskLevel())) {
+                || !context.riskLevel().equalsIgnoreCase(claims.riskLevel())
+                || (expectedWorkOrderId != null && !expectedWorkOrderId.equals(claims.workOrderId()))
+                || (expectedApprovalId != null && !expectedApprovalId.equals(claims.approvalId()))) {
             throw new SecurityException("approvalRef signature or scope is invalid");
+        }
+    }
+
+    private static void requireRsaSignature(PublicKey publicKey, String message, byte[] actual) {
+        try {
+            Signature verifier = Signature.getInstance("SHA256withRSA");
+            verifier.initVerify(publicKey);
+            verifier.update(message.getBytes(StandardCharsets.UTF_8));
+            if (!verifier.verify(actual)) {
+                throw new SecurityException("approvalRef signature or scope is invalid");
+            }
+        } catch (SecurityException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new SecurityException("approvalRef signature or scope is invalid", ex);
+        }
+    }
+
+    private void requireLocalTestHmacMode() {
+        if (authorityMode != AuthorityMode.LOCAL_TEST_HMAC) {
+            throw new SecurityException("HMAC Skill approvals are restricted to LOCAL_TEST");
+        }
+    }
+
+    private static AuthorityMode authorityMode(String configured) {
+        String value = requireConfiguredText(configured, "authorityMode").toUpperCase(java.util.Locale.ROOT);
+        return switch (value) {
+            case "LOCAL_TEST_HMAC" -> AuthorityMode.LOCAL_TEST_HMAC;
+            case "PEM_RSA" -> AuthorityMode.LOCAL_TEST_RSA;
+            case "REMOTE_RSA" -> AuthorityMode.REMOTE_RSA;
+            default -> throw new IllegalStateException("unsupported Skill Task approval authorityMode");
+        };
+    }
+
+    private static void requireExclusiveAuthorityMode(SkillTaskProperties.Approval approval,
+                                                      AuthorityMode authorityMode,
+                                                      byte[] legacySecret,
+                                                      Map<String, VerificationKeyMaterial> hmacKeys,
+                                                      Map<String, AsymmetricVerificationKeyMaterial> rsaKeys) {
+        for (String keyId : hmacKeys.keySet()) {
+            if (rsaKeys.containsKey(keyId)) {
+                throw new IllegalStateException("Skill Task approval keyId cannot span authority modes");
+            }
+        }
+        if (authorityMode == AuthorityMode.LOCAL_TEST_HMAC) {
+            if (!rsaKeys.isEmpty()) {
+                throw new IllegalStateException(
+                        "LOCAL_TEST_HMAC authorityMode must not configure asymmetric verification keys");
+            }
+            return;
+        }
+        if (legacySecret.length != 0 || (approval != null && approval.isLegacyHmacEnabled())
+                || !hmacKeys.isEmpty()) {
+            throw new IllegalStateException(
+                    "RSA authorityMode must not configure local HMAC verification material");
+        }
+        if (rsaKeys.isEmpty()) {
+            throw new IllegalStateException("RSA authorityMode requires public verification keys");
+        }
+    }
+
+    public static void requireRsaStrength(PublicKey publicKey) {
+        if (!(publicKey instanceof RSAPublicKey)
+                || ((RSAPublicKey) publicKey).getModulus().bitLength() < 3072) {
+            throw new IllegalStateException("Skill Task approval RSA public key must be at least 3072 bits");
         }
     }
 
@@ -266,5 +396,13 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
     }
 
     private record VerificationKeyMaterial(byte[] secret, Instant notBefore, Instant expiresAt, Instant revokedAt) {
+    }
+
+    private record AsymmetricVerificationKeyMaterial(PublicKey publicKey, Instant notBefore, Instant expiresAt,
+                                                     Instant revokedAt) {
+    }
+
+    private enum AuthorityMode {
+        LOCAL_TEST_HMAC, LOCAL_TEST_RSA, REMOTE_RSA
     }
 }

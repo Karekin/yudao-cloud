@@ -27,8 +27,18 @@ FROM cloudmold_order_item i
 JOIN cloudmold_order_header h ON h.tenant_id=i.tenant_id AND h.order_id=i.order_id
 LEFT JOIN cloudmold_inventory_reservation r
   ON r.tenant_id=i.tenant_id AND r.reservation_id=i.reservation_id
+LEFT JOIN cloudmold_inventory_reservation_v3 r3
+  ON r3.tenant_id=i.tenant_id AND BINARY r3.reservation_id=BINARY i.reservation_id
 WHERE h.status NOT IN ('PLACED','CANCELLED')
-  AND (r.reservation_id IS NULL OR r.business_id <> h.order_id OR r.business_item_id <> i.order_item_id)
+  AND NOT (
+    (r.reservation_id IS NOT NULL
+      AND BINARY r.business_id=BINARY h.order_id
+      AND BINARY r.business_item_id=BINARY i.order_item_id)
+    OR
+    (r3.reservation_id IS NOT NULL
+      AND BINARY r3.business_id=BINARY h.order_id
+      AND BINARY r3.business_item_id=BINARY i.order_item_id)
+  )
 UNION ALL
 SELECT 'payment_order_money_currency', COUNT(*)
 FROM cloudmold_payment p

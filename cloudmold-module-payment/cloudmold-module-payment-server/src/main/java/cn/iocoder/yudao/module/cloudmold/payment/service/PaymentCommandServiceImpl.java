@@ -83,7 +83,7 @@ public class PaymentCommandServiceImpl implements PaymentCommandApi {
         String paymentId = UUID.randomUUID().toString();
         String paymentNo = "CMP" + paymentId.replace("-", "").substring(0, 20).toUpperCase(Locale.ROOT);
         PaymentDO payment = new PaymentDO().setPaymentId(paymentId).setTenantId(tenantId).setPaymentNo(paymentNo)
-                .setRunId(command.getRunId()).setOrderId(order.getOrderId()).setStatus("CAPTURED")
+                .setRunId(order.getRunId()).setOrderId(order.getOrderId()).setStatus("CAPTURED")
                 .setPayableAmountMinor(command.getAmountMinor()).setCapturedAmountMinor(command.getAmountMinor())
                 .setRefundedAmountMinor(0L).setCurrencyCode(command.getCurrencyCode())
                 .setProviderCode(command.getProviderCode()).setProviderTransactionId(command.getProviderTransactionId())
@@ -100,7 +100,6 @@ public class PaymentCommandServiceImpl implements PaymentCommandApi {
                                         LocalDateTime now) {
         PaymentDO payment = paymentMapper.selectForUpdate(tenantId, command.getPaymentId());
         require(payment != null, "canonical payment does not exist");
-        require(Objects.equals(payment.getRunId(), command.getRunId()), "payment runId does not match");
         require(Objects.equals(payment.getOrderId(), command.getOrderId()), "payment orderId does not match");
         require("CAPTURED".equals(payment.getStatus()) || "PARTIALLY_REFUNDED".equals(payment.getStatus()),
                 "payment is not refundable");
@@ -141,7 +140,7 @@ public class PaymentCommandServiceImpl implements PaymentCommandApi {
     private void appendEvent(Long tenantId, PaymentDO payment, String previous, String current,
                              Long transactionId, PaymentCommand command, Long version) {
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("run_id", command.getRunId());
+        payload.put("run_id", payment.getRunId());
         payload.put("payment_id", payment.getPaymentId());
         payload.put("payment_no", payment.getPaymentNo());
         payload.put("order_id", payment.getOrderId());

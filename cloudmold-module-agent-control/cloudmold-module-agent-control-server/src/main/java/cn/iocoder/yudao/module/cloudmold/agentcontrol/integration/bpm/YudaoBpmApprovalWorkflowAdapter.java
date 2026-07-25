@@ -17,10 +17,18 @@ import java.util.Map;
         name = "enabled", havingValue = "true")
 public class YudaoBpmApprovalWorkflowAdapter implements AgentApprovalWorkflowAdapter {
 
+    static final String APPROVAL_TASK_KEY = "approval_review";
+
     private final BpmProcessInstanceApi bpmProcessInstances;
 
     @Override
     public String start(ApprovalWorkflowStartCandidate candidate) {
+        if (candidate.getApproverUserId() == null || candidate.getApproverUserId() <= 0) {
+            throw new IllegalStateException("BPM approval approver is missing");
+        }
+        if (candidate.getApproverUserId().equals(candidate.getRequesterUserId())) {
+            throw new IllegalStateException("BPM approval approver must differ from requester");
+        }
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("approval_id", candidate.getApprovalId());
         variables.put("work_order_id", candidate.getWorkOrderId());
@@ -31,7 +39,8 @@ public class YudaoBpmApprovalWorkflowAdapter implements AgentApprovalWorkflowAda
         BpmProcessInstanceCreateReqDTO request = new BpmProcessInstanceCreateReqDTO()
                 .setProcessDefinitionKey(candidate.getProcessDefinitionKey())
                 .setBusinessKey(candidate.getBusinessKey())
-                .setVariables(variables);
+                .setVariables(variables)
+                .setStartUserSelectAssignees(Map.of(APPROVAL_TASK_KEY, java.util.List.of(candidate.getApproverUserId())));
         String processInstanceId = bpmProcessInstances.createProcessInstance(
                 candidate.getRequesterUserId(), request).getCheckedData();
         if (StrUtil.isBlank(processInstanceId)) {

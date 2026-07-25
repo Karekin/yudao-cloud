@@ -6,7 +6,11 @@ server:
 cloudmold:
   # 仅供本地端到端验收使用。生产配置不得覆盖为 true/LOCAL。
   app-commerce:
+    channel-code: YSHOPPING_INTERNAL
     internal-test-payment-enabled: true
+    # 本地测试专用 Address Vault；生产环境必须使用独立 KMS/HSM 适配器且本实现会拒绝启动。
+    address-vault-mode: ${CLOUDMOLD_ADDRESS_VAULT_MODE:SANDBOX}
+    address-vault-sandbox-key-base64: ${CLOUDMOLD_ADDRESS_VAULT_SANDBOX_KEY_BASE64:Y2xvdWRtb2xkLWxvY2FsLWFkZHJlc3Mta2V5LXYxISE=}
   payment:
     internal-test:
       enabled: true

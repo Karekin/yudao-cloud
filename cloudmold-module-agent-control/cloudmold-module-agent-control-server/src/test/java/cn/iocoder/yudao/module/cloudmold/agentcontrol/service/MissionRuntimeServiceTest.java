@@ -246,4 +246,54 @@ class MissionRuntimeServiceTest {
         verify(mapper, times(1)).finishAgentRun(17L, "run-recover", "EXPIRED",
                 LocalDateTime.of(2026, 7, 19, 4, 0));
     }
+
+    @Test
+    void shortContinuousRunTakeoversMonotonicallyIncreaseFencingTokens() {
+        WorkOrder firstReady = new WorkOrder().setWorkOrderId("wo-loop").setMissionId("mission-1").setRoleCode("buyer")
+                .setActionCode("buyer.prepare-replenishment").setStatus("READY").setAssigneeUserId(102L).setVersion(3L);
+        WorkOrder secondTakeover = new WorkOrder().setWorkOrderId("wo-loop").setMissionId("mission-1").setRoleCode("buyer")
+                .setActionCode("buyer.prepare-replenishment").setStatus("IN_PROGRESS").setAssigneeUserId(102L)
+                .setActiveRunId("run-1").setVersion(4L);
+        WorkOrder thirdTakeover = new WorkOrder().setWorkOrderId("wo-loop").setMissionId("mission-1").setRoleCode("buyer")
+                .setActionCode("buyer.prepare-replenishment").setStatus("IN_PROGRESS").setAssigneeUserId(102L)
+                .setActiveRunId("run-2").setVersion(5L);
+        AgentRunLease lease1 = new AgentRunLease().setWorkOrderId("wo-loop").setRunId("run-1").setStatus("ACTIVE")
+                .setLeaseOwner("worker-1").setLeaseToken("lease-1")
+                .setLeaseUntil(LocalDateTime.of(2026, 7, 19, 3, 59)).setFencingToken(1L).setVersion(1L);
+        AgentRunLease lease2 = new AgentRunLease().setWorkOrderId("wo-loop").setRunId("run-2").setStatus("ACTIVE")
+                .setLeaseOwner("worker-2").setLeaseToken("lease-2")
+                .setLeaseUntil(LocalDateTime.of(2026, 7, 19, 3, 59)).setFencingToken(2L).setVersion(2L);
+        when(mapper.selectWorkOrderForUpdate(17L, "wo-loop")).thenReturn(firstReady, secondTakeover, thirdTakeover);
+        when(mapper.selectEffectiveActorRoleGrant(eq(17L), eq(102L), eq("buyer"), any())).thenReturn(new ActorRoleGrant());
+        when(mapper.selectMissionForUpdate(17L, "mission-1")).thenReturn(new Mission().setStatus("ACTIVE"));
+        when(mapper.selectRunLeaseForUpdate(17L, "wo-loop")).thenReturn(null, lease1, lease2);
+        when(mapper.upsertRunLease(any())).thenReturn(1);
+        when(mapper.insertAgentRun(any())).thenReturn(1);
+        when(mapper.transitionMissionWorkOrder(eq(17L), eq("wo-loop"), eq(3L), eq("READY"), eq("IN_PROGRESS"),
+                isNull(), anyString(), any())).thenReturn(1);
+        when(mapper.transitionMissionWorkOrder(eq(17L), eq("wo-loop"), eq(4L), eq("IN_PROGRESS"), eq("IN_PROGRESS"),
+                isNull(), anyString(), any())).thenReturn(1);
+        when(mapper.transitionMissionWorkOrder(eq(17L), eq("wo-loop"), eq(5L), eq("IN_PROGRESS"), eq("IN_PROGRESS"),
+                isNull(), anyString(), any())).thenReturn(1);
+        when(mapper.expireRunLease(17L, "wo-loop", "run-1", 1L,
+                LocalDateTime.of(2026, 7, 19, 4, 0))).thenReturn(1);
+        when(mapper.expireRunLease(17L, "wo-loop", "run-2", 2L,
+                LocalDateTime.of(2026, 7, 19, 4, 0))).thenReturn(1);
+        when(mapper.finishAgentRun(17L, "run-1", "EXPIRED",
+                LocalDateTime.of(2026, 7, 19, 4, 0))).thenReturn(1);
+        when(mapper.finishAgentRun(17L, "run-2", "EXPIRED",
+                LocalDateTime.of(2026, 7, 19, 4, 0))).thenReturn(1);
+        when(mapper.insertAgentOutbox(any(), anyLong(), any(), any(), any(), any(), any())).thenReturn(1);
+
+        AgentRunLeaseView first = service.claim(AgentRunClaimCommand.builder().workOrderId("wo-loop")
+                .workOrderExpectedVersion(3L).leaseOwner("worker-1").build(), 102L);
+        AgentRunLeaseView second = service.claim(AgentRunClaimCommand.builder().workOrderId("wo-loop")
+                .workOrderExpectedVersion(4L).leaseOwner("worker-2").build(), 102L);
+        AgentRunLeaseView third = service.claim(AgentRunClaimCommand.builder().workOrderId("wo-loop")
+                .workOrderExpectedVersion(5L).leaseOwner("worker-3").build(), 102L);
+
+        assertThat(first.getFencingToken()).isEqualTo(1L);
+        assertThat(second.getFencingToken()).isEqualTo(2L);
+        assertThat(third.getFencingToken()).isEqualTo(3L);
+    }
 }

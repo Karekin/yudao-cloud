@@ -1,0 +1,18 @@
+cloudmold:
+  skill-task:
+    approval:
+      authority-mode: REMOTE_RSA
+      issue-version: cma3
+      legacy-hmac-enabled: false
+      hmac-secret: ""
+      active-key-id: ""
+      remote:
+        endpoint: ${CLOUDMOLD_RISK_AUTHORITY_SIGN_ENDPOINT:}
+        bearer-token: ${CLOUDMOLD_RISK_AUTHORITY_BEARER_TOKEN:}
+        expected-key-id: ${CLOUDMOLD_RISK_AUTHORITY_EXPECTED_KEY_ID:}
+        algorithm: RS256
+        connect-timeout: ${CLOUDMOLD_RISK_AUTHORITY_CONNECT_TIMEOUT:2s}
+        request-timeout: ${CLOUDMOLD_RISK_AUTHORITY_REQUEST_TIMEOUT:3s}
+
+# Production starts fail-closed until the external configuration authority
+# supplies cloudmold.skill-task.approval.remote.verification-keys.

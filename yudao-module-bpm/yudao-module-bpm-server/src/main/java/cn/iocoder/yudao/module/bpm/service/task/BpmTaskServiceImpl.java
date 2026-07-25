@@ -653,6 +653,13 @@ public class BpmTaskServiceImpl implements BpmTaskService {
 
         // 7. 调用 BPM complete 去完成任务
         Map<String,Object> taskVariables = MapUtil.emptyIfNull(reqVO.getVariables()); // task local variables. 一般用于任务内嵌流程表单
+        runtimeService.setVariable(task.getProcessInstanceId(),
+                BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_TERMINAL_OPERATOR_USER_ID, userId);
+        runtimeService.setVariable(task.getProcessInstanceId(),
+                BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_TERMINAL_TASK_ID, task.getId());
+        runtimeService.setVariable(task.getProcessInstanceId(),
+                BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_TERMINAL_TASK_DEFINITION_KEY,
+                task.getTaskDefinitionKey());
         taskService.complete(task.getId(), taskVariables, true);
 
         // 【加签专属】处理加签任务
@@ -879,6 +886,13 @@ public class BpmTaskServiceImpl implements BpmTaskService {
         }
 
         // 3.2 情况二： 标记流程为不通过并结束流程
+        runtimeService.setVariable(task.getProcessInstanceId(),
+                BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_TERMINAL_OPERATOR_USER_ID, userId);
+        runtimeService.setVariable(task.getProcessInstanceId(),
+                BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_TERMINAL_TASK_ID, task.getId());
+        runtimeService.setVariable(task.getProcessInstanceId(),
+                BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_TERMINAL_TASK_DEFINITION_KEY,
+                task.getTaskDefinitionKey());
         processInstanceService.updateProcessInstanceReject(instance, reqVO.getReason()); // 标记不通过
         moveTaskToEnd(task.getProcessInstanceId(), BpmCommentTypeEnum.REJECT.formatComment(reqVO.getReason())); // 结束流程
     }

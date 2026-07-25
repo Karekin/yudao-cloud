@@ -35,6 +35,7 @@ class AgentApprovalWorkflowServiceTest {
         verify(mapper).insertApprovalWorkflowBinding(argThat(binding ->
                 binding.getTenantId().equals(17L)
                         && binding.getApprovalId().equals("approval-1")
+                        && binding.getApproverUserId() == null
                         && binding.getScopeHash().equals("a".repeat(64))
                         && binding.getProcessDefinitionKey().equals("cloudmold-agent-approval-v1")
                         && binding.getBusinessKey().equals("cloudmold-agent-approval:17:approval-1")
@@ -70,7 +71,7 @@ class AgentApprovalWorkflowServiceTest {
     @Test
     void claimsExactlyOnceBeforeStartingBpm() {
         ApprovalWorkflowStartCandidate candidate = candidate();
-        when(mapper.claimApprovalWorkflowStart(eq(17L), eq("approval-1"), eq(1L), anyString(), any()))
+        when(mapper.claimApprovalWorkflowStart(eq(17L), eq("approval-1"), eq(1L), eq(200L), anyString(), any()))
                 .thenReturn(1);
         when(adapter.start(candidate)).thenReturn("process-1");
         when(mapper.markApprovalWorkflowRunning(eq(17L), eq("approval-1"), anyString(),
@@ -85,7 +86,7 @@ class AgentApprovalWorkflowServiceTest {
 
     @Test
     void concurrentLoserDoesNotCallBpm() {
-        when(mapper.claimApprovalWorkflowStart(eq(17L), eq("approval-1"), eq(1L), anyString(), any()))
+        when(mapper.claimApprovalWorkflowStart(eq(17L), eq("approval-1"), eq(1L), eq(200L), anyString(), any()))
                 .thenReturn(0);
 
         assertThat(service.start(candidate())).isFalse();
@@ -96,7 +97,7 @@ class AgentApprovalWorkflowServiceTest {
     @Test
     void ambiguousStartFailureStopsAutomaticRetry() {
         ApprovalWorkflowStartCandidate candidate = candidate();
-        when(mapper.claimApprovalWorkflowStart(eq(17L), eq("approval-1"), eq(1L), anyString(), any()))
+        when(mapper.claimApprovalWorkflowStart(eq(17L), eq("approval-1"), eq(1L), eq(200L), anyString(), any()))
                 .thenReturn(1);
         when(adapter.start(candidate)).thenThrow(new IllegalStateException("timeout after send"));
         when(mapper.markApprovalWorkflowStartUncertain(eq(17L), eq("approval-1"), anyString(),
@@ -118,13 +119,15 @@ class AgentApprovalWorkflowServiceTest {
         when(mapper.insertApprovalWorkflowEvent(any())).thenReturn(1);
         when(mapper.markApprovalWorkflowTerminal(eq(17L), eq("approval-1"), eq("process-1"),
                 eq(BpmProcessInstanceStatusEnum.APPROVE.getStatus()),
-                eq("BPM_APPROVED_PENDING_ATTESTATION"), anyString(), any())).thenReturn(1);
+                eq("BPM_APPROVED_PENDING_ATTESTATION"), anyString(), eq(200L),
+                eq("task-1"), eq("approval_review"), any())).thenReturn(1);
 
         service.observe(event(BpmProcessInstanceStatusEnum.APPROVE.getStatus()));
 
         verify(mapper).markApprovalWorkflowTerminal(eq(17L), eq("approval-1"), eq("process-1"),
                 eq(BpmProcessInstanceStatusEnum.APPROVE.getStatus()),
-                eq("BPM_APPROVED_PENDING_ATTESTATION"), anyString(), any());
+                eq("BPM_APPROVED_PENDING_ATTESTATION"), anyString(), eq(200L),
+                eq("task-1"), eq("approval_review"), any());
         verify(mapper, never()).decideApproval(anyLong(), anyString(), anyLong(), anyString(),
                 anyLong(), anyString(), any());
     }
@@ -139,7 +142,7 @@ class AgentApprovalWorkflowServiceTest {
         service.observe(event(BpmProcessInstanceStatusEnum.REJECT.getStatus()));
 
         verify(mapper, never()).markApprovalWorkflowTerminal(anyLong(), anyString(), anyString(),
-                anyInt(), anyString(), anyString(), any());
+                anyInt(), anyString(), anyString(), anyLong(), anyString(), anyString(), any());
     }
 
     @Test
@@ -162,13 +165,13 @@ class AgentApprovalWorkflowServiceTest {
         when(mapper.insertApprovalWorkflowEvent(any())).thenReturn(1);
         when(mapper.markApprovalWorkflowTerminal(eq(17L), eq("approval-1"), eq("process-1"),
                 eq(BpmProcessInstanceStatusEnum.REJECT.getStatus()), eq("BPM_REJECTED"),
-                anyString(), any())).thenReturn(1);
+                anyString(), eq(200L), eq("task-1"), eq("approval_review"), any())).thenReturn(1);
 
         service.observe(event(BpmProcessInstanceStatusEnum.REJECT.getStatus()));
 
         verify(mapper).markApprovalWorkflowTerminal(eq(17L), eq("approval-1"), eq("process-1"),
                 eq(BpmProcessInstanceStatusEnum.REJECT.getStatus()), eq("BPM_REJECTED"),
-                anyString(), any());
+                anyString(), eq(200L), eq("task-1"), eq("approval_review"), any());
     }
 
     @Test
@@ -188,6 +191,7 @@ class AgentApprovalWorkflowServiceTest {
     private static Approval approval() {
         return new Approval().setApprovalId("approval-1").setTenantId(17L).setWorkOrderId("work-1")
                 .setActionCode("purchase.commit").setRequesterUserId(100L)
+                .setApproverUserId(200L)
                 .setScopeHash("a".repeat(64)).setStatus("PENDING").setVersion(1L);
     }
 
@@ -200,7 +204,7 @@ class AgentApprovalWorkflowServiceTest {
     private static ApprovalWorkflowStartCandidate candidate() {
         return new ApprovalWorkflowStartCandidate().setTenantId(17L).setApprovalId("approval-1")
                 .setWorkOrderId("work-1").setActionCode("purchase.commit").setRoleCode("buyer")
-                .setRiskLevel("R3").setRequesterUserId(100L).setScopeHash("a".repeat(64))
+                .setRiskLevel("R3").setRequesterUserId(100L).setApproverUserId(200L).setScopeHash("a".repeat(64))
                 .setProcessDefinitionKey("cloudmold-agent-approval-v1")
                 .setBusinessKey("cloudmold-agent-approval:17:approval-1")
                 .setStatus("START_REQUESTED").setVersion(1L);
@@ -217,7 +221,9 @@ class AgentApprovalWorkflowServiceTest {
         return new BpmProcessInstanceStatusEvent("test").setId("process-1")
                 .setProcessDefinitionKey("cloudmold-agent-approval-v1")
                 .setBusinessKey("cloudmold-agent-approval:17:approval-1")
-                .setStatus(status).setReason("restricted human comment");
+                .setStatus(status).setReason("restricted human comment")
+                .setTerminalOperatorUserId(200L).setTerminalTaskId("task-1")
+                .setTerminalTaskDefinitionKey("approval_review");
     }
 
 }

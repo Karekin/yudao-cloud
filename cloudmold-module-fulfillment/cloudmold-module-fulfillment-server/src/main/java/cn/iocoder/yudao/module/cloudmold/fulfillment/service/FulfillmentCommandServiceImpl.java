@@ -8,6 +8,7 @@ import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
 import cn.iocoder.yudao.module.cloudmold.fulfillment.api.*;
 import cn.iocoder.yudao.module.cloudmold.fulfillment.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.fulfillment.dal.mysql.*;
+import cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryReservationQueryApi;
 import cn.iocoder.yudao.module.cloudmold.order.api.OrderFulfillmentView;
 import cn.iocoder.yudao.module.cloudmold.order.api.OrderLineView;
 import cn.iocoder.yudao.module.cloudmold.order.api.OrderQueryApi;
@@ -35,6 +36,7 @@ public class FulfillmentCommandServiceImpl implements FulfillmentCommandApi {
     private final TrackingEventMapper trackingEventMapper;
     private final FulfillmentStatusHistoryMapper historyMapper;
     private final OrderQueryApi orderQueryApi;
+    private final InventoryReservationQueryApi inventoryReservationQueryApi;
     private final OutboxAppender outboxAppender;
 
     @Override
@@ -147,6 +149,8 @@ public class FulfillmentCommandServiceImpl implements FulfillmentCommandApi {
 
         if (command.getOperation() == FulfillmentOperation.SHIP) {
             require(shipment == null, "canonical fulfillment already has a shipment");
+            items.forEach(item -> inventoryReservationQueryApi.requireCommitted(item.getReservationId(),
+                    fulfillment.getOrderId(), item.getOrderItemId()));
             requireText(command.getCarrierCode(), "carrierCode", 32);
             requireText(command.getWaybillNo(), "waybillNo", 64);
             shipment = new ShipmentDO().setShipmentId(UUID.randomUUID().toString()).setTenantId(tenantId)

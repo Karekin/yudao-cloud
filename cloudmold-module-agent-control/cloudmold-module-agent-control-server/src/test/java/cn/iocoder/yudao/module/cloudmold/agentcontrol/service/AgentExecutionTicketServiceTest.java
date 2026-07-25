@@ -8,6 +8,7 @@ import cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningPr
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentExecutionTicketCommand;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentExecutionTicketResult;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.ActorRoleGrant;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.AgentRunLease;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.Approval;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.ApprovalAuthorityGrant;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.AuditEvent;
@@ -25,6 +26,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.HexFormat;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -45,7 +49,7 @@ class AgentExecutionTicketServiceTest {
     private final SkillTaskApprovalSigningProperties properties = new SkillTaskApprovalSigningProperties();
     private final HmacAgentExecutionPermitSigner signer = new HmacAgentExecutionPermitSigner(properties);
     private final AgentExecutionTicketService service = new AgentExecutionTicketService(
-            mapper, signer, Clock.fixed(NOW, ZoneOffset.UTC));
+            mapper, properties, signer, Clock.fixed(NOW, ZoneOffset.UTC));
 
     @AfterEach
     void tearDown() {
@@ -168,6 +172,104 @@ class AgentExecutionTicketServiceTest {
                 SkillTaskApprovalRefCodec.claimsMessage("local-hmac",
                         new String(Base64.getUrlDecoder().decode(result.getApprovalRef().split(":", -1)[2])))))
                 .isEqualTo(parsed.signature());
+    }
+
+    @Test
+    void issuesMissionPermitOnlyAfterLeaseClaimAndBindsTheCompleteFence() {
+        TenantContextHolder.setTenantId(17L);
+        properties.setIssueVersion("cma3");
+        properties.setHmacSecret(SECRET);
+        WorkOrder workOrder = stubSuccessfulMissionIssuance();
+
+        AgentExecutionTicketResult result = service.issue(missionCommand("run-2", "worker-2", "lease-token-2", 3L),
+                101L);
+
+        SkillTaskApprovalPermitClaims claims = SkillTaskApprovalRefCodec.parseClaims(result.getApprovalRef()).claims();
+        assertThat(claims.missionRunId()).isEqualTo("run-2");
+        assertThat(claims.fencingToken()).isEqualTo(3L);
+        assertThat(claims.leaseOwner()).isEqualTo("worker-2");
+        assertThat(claims.leaseEpoch()).isEqualTo(4L);
+        assertThat(claims.rootRequestIdentity()).isEqualTo(DigestUtil.sha256Hex(String.join("\n",
+                "17", "wo-r3-1", "approval-r3-1", workOrder.getSkillId(), workOrder.getSkillVersion(),
+                workOrder.getSkillDefinitionClosureSha256(), workOrder.getExecutionInputSha256(),
+                workOrder.getRiskLevel(), "2:101", "run-2", "3", "worker-2", "4")));
+        verify(mapper).insertAuditEvent(argThat(event -> event.getDetailJson().contains("\"missionRunId\":\"run-2\"")
+                && event.getDetailJson().contains("\"fencingToken\":3")
+                && event.getDetailJson().contains("\"leaseOwner\":\"worker-2\"")
+                && event.getDetailJson().contains("\"leaseEpoch\":4")));
+    }
+
+    @Test
+    void rejectsOldLeaseIdentityAfterSameOperatorTakeover() {
+        TenantContextHolder.setTenantId(17L);
+        properties.setIssueVersion("cma3");
+        properties.setHmacSecret(SECRET);
+        stubSuccessfulMissionIssuance();
+
+        assertThatThrownBy(() -> service.issue(
+                missionCommand("run-1", "worker-1", "lease-token-1", 2L), 101L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("mission execution ticket lease identity is stale");
+        verify(mapper, never()).insertAuditEvent(argThat(event ->
+                event.getEventType().equals("agent_control.execution_ticket.issued")));
+    }
+
+    @Test
+    void rejectsMissionTicketBeforeAWorkerAcquiresTheLease() {
+        TenantContextHolder.setTenantId(17L);
+        properties.setIssueVersion("cma3");
+        properties.setHmacSecret(SECRET);
+        WorkOrder workOrder = approvedExecutableReadyWorkOrder().setMissionId("mission-1");
+        when(mapper.selectWorkOrderForUpdate(17L, "wo-r3-1")).thenReturn(workOrder);
+
+        assertThatThrownBy(() -> service.issue(
+                missionCommand("run-1", "worker-1", "lease-token-1", 1L), 101L))
+                .hasMessage("mission execution ticket requires an acquired IN_PROGRESS lease");
+    }
+
+    @Test
+    void issuesPemRsaCma3TicketFromExternalKeyMaterial() throws Exception {
+        TenantContextHolder.setTenantId(17L);
+        KeyPair pair = rsaKeyPair();
+        properties.setAuthorityMode("PEM_RSA");
+        properties.setIssueVersion("cma3");
+        properties.setActiveKeyId("risk-rsa-1");
+        properties.setIssuer("risk.authority.cloudmold");
+        properties.setAudience("cloudmold.skill-task");
+        properties.getAsymmetricKeys().put("risk-rsa-1",
+                new SkillTaskApprovalSigningProperties.AsymmetricSigningKey()
+                        .setPrivateKeyPem(privateKeyPem(pair))
+                        .setPublicKeyPem(publicKeyPem(pair))
+                        .setNotBefore(NOW.minusSeconds(60))
+                        .setExpiresAt(NOW.plusSeconds(600)));
+        WorkOrder workOrder = stubSuccessfulIssuance();
+
+        AgentExecutionTicketResult result = service.issue(command(), 101L);
+
+        SkillTaskApprovalRefCodec.ParsedClaimsApprovalRef parsed =
+                SkillTaskApprovalRefCodec.parseClaims(result.getApprovalRef());
+        assertThat(parsed.claims().keyId()).isEqualTo("risk-rsa-1");
+        assertThat(parsed.claims().issuer()).isEqualTo("risk.authority.cloudmold");
+        assertThat(parsed.claims().audience()).isEqualTo("cloudmold.skill-task");
+        java.security.Signature verifier = java.security.Signature.getInstance("SHA256withRSA");
+        verifier.initVerify(pair.getPublic());
+        verifier.update(SkillTaskApprovalRefCodec.claimsMessage("risk-rsa-1", parsed.payload()).getBytes());
+        assertThat(verifier.verify(parsed.signature())).isTrue();
+        assertThat(HexFormat.of().formatHex(parsed.signature())).doesNotContain(SECRET);
+        assertThat(result.getApprovalRef()).startsWith("cma3:risk-rsa-1:");
+        assertThat(parsed.claims().definitionClosureSha256()).isEqualTo(workOrder.getSkillDefinitionClosureSha256());
+    }
+
+    @Test
+    void rejectsHmacIssuanceOutsideLocalTestAuthorityMode() {
+        TenantContextHolder.setTenantId(17L);
+        properties.setAuthorityMode("PEM_RSA");
+        properties.setIssueVersion("cma2");
+        properties.setHmacSecret(SECRET);
+        stubSuccessfulIssuance();
+
+        assertThatThrownBy(() -> service.issue(command(), 101L))
+                .hasMessageContaining("LOCAL_TEST");
     }
 
     @Test
@@ -361,6 +463,41 @@ class AgentExecutionTicketServiceTest {
         return workOrder;
     }
 
+    private WorkOrder stubSuccessfulMissionIssuance() {
+        WorkOrder workOrder = approvedExecutableReadyWorkOrder().setMissionId("mission-1")
+                .setStatus("IN_PROGRESS").setActiveRunId("run-2");
+        Approval approval = approvedApproval(workOrder);
+        when(mapper.selectWorkOrderForUpdate(17L, "wo-r3-1")).thenReturn(workOrder);
+        when(mapper.selectRunLeaseForUpdate(17L, "wo-r3-1")).thenReturn(currentMissionLease());
+        when(mapper.selectApprovalForUpdate(17L, "approval-r3-1")).thenReturn(approval);
+        when(mapper.selectActionPolicy(17L, "buyer", "buyer.execute-replenishment"))
+                .thenReturn(executionPolicy(workOrder));
+        when(mapper.selectEffectiveActorRoleGrant(eq(17L), eq(101L), eq("buyer"), any()))
+                .thenReturn(activeRoleGrant(101L, 600));
+        when(mapper.selectEffectiveApprovalAuthorityGrant(eq(17L), eq(200L), eq("approval-r3-1"),
+                eq("buyer"), eq("buyer.execute-replenishment"), eq("R3"), eq(approval.getScopeHash()), any()))
+                .thenReturn(activeApprovalGrant(workOrder, approval, 600));
+        when(mapper.insertAuditEvent(any())).thenReturn(1);
+        return workOrder;
+    }
+
+    private static AgentExecutionTicketCommand missionCommand(String runId, String leaseOwner,
+                                                              String leaseToken, long fencingToken) {
+        return AgentExecutionTicketCommand.builder()
+                .workOrderId("wo-r3-1").approvalId("approval-r3-1")
+                .workOrderExpectedVersion(3L).validForSeconds(300L)
+                .missionRunId(runId).leaseOwner(leaseOwner)
+                .leaseToken(leaseToken).fencingToken(fencingToken).build();
+    }
+
+    private static AgentRunLease currentMissionLease() {
+        return new AgentRunLease().setTenantId(17L).setWorkOrderId("wo-r3-1").setMissionId("mission-1")
+                .setRunId("run-2").setActorUserId(101L).setRoleCode("buyer")
+                .setLeaseOwner("worker-2").setLeaseToken("lease-token-2").setFencingToken(3L)
+                .setLeaseUntil(java.time.LocalDateTime.ofInstant(NOW.plusSeconds(60), ZoneOffset.UTC))
+                .setStatus("ACTIVE").setVersion(4L);
+    }
+
     private static WorkOrder approvedExecutableReadyWorkOrder() {
         String inputSha = "a".repeat(64);
         return new WorkOrder().setWorkOrderId("wo-r3-1").setTenantId(17L).setRoleCode("buyer")
@@ -413,5 +550,25 @@ class AgentExecutionTicketServiceTest {
                 String.valueOf(workOrder.getActionPolicyVersion()), workOrder.getSkillId(),
                 workOrder.getSkillVersion(), workOrder.getSkillDefinitionClosureSha256(),
                 workOrder.getExecutionInputSha256(), workOrder.getRiskLevel()));
+    }
+
+    private static KeyPair rsaKeyPair() throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        return generator.generateKeyPair();
+    }
+
+    private static String privateKeyPem(KeyPair pair) {
+        return pem("PRIVATE KEY", pair.getPrivate().getEncoded());
+    }
+
+    private static String publicKeyPem(KeyPair pair) {
+        return pem("PUBLIC KEY", pair.getPublic().getEncoded());
+    }
+
+    private static String pem(String type, byte[] encoded) {
+        return "-----BEGIN " + type + "-----\n"
+                + java.util.Base64.getMimeEncoder(64, "\n".getBytes()).encodeToString(encoded)
+                + "\n-----END " + type + "-----";
     }
 }

@@ -2,10 +2,15 @@ package cn.iocoder.yudao.module.cloudmold.skilltask.service;
 
 import cn.iocoder.yudao.framework.tenant.core.util.TenantUtils;
 import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskMissionLeaseFencePort;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskMissionLeaseFencePort.MissionLeaseFence;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskMapper;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Candidate;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Step;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Task;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,6 +18,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 @Service
 public class SkillTaskCheckpointService {
@@ -20,14 +29,24 @@ public class SkillTaskCheckpointService {
     private final SkillTaskMapper mapper;
     private final SkillTaskProperties properties;
     private final SkillTaskJson json;
+    private final SkillTaskMissionLeaseFencePort missionLeaseFenceApi;
     private final Clock clock;
 
+    @Autowired
     public SkillTaskCheckpointService(SkillTaskMapper mapper, SkillTaskProperties properties,
-                                      SkillTaskJson json, Clock clock) {
+                                      SkillTaskJson json,
+                                      Optional<SkillTaskMissionLeaseFencePort> missionLeaseFenceApi,
+                                      Clock clock) {
         this.mapper = mapper;
         this.properties = properties;
         this.json = json;
+        this.missionLeaseFenceApi = missionLeaseFenceApi.orElse(null);
         this.clock = clock;
+    }
+
+    public SkillTaskCheckpointService(SkillTaskMapper mapper, SkillTaskProperties properties,
+                                      SkillTaskJson json, Clock clock) {
+        this(mapper, properties, json, Optional.empty(), clock);
     }
 
     @Transactional
@@ -38,13 +57,16 @@ public class SkillTaskCheckpointService {
         if (updated != 1) {
             return null;
         }
-        return TenantUtils.execute(candidate.getTenantId(), () -> {
+        AtomicReference<Task> claimedTask = new AtomicReference<>();
+        TenantUtils.execute(candidate.getTenantId(), () -> {
             Task task = requireTask(candidate.getTenantId(), candidate.getTaskId());
+            validateMissionFence(task);
             mapper.insertHistory(task.getTenantId(), task.getTaskId(), task.getVersion(), candidate.getStatus(), "RUNNING",
                     task.getCurrentStepCode(), "TASK_CLAIMED", leaseOwner,
                     task.getOperatorId(), task.getOperatorType(), now);
-            return task;
+            claimedTask.set(task);
         });
+        return claimedTask.get();
     }
 
     @Transactional
@@ -61,6 +83,19 @@ public class SkillTaskCheckpointService {
         if (mapper.markStepRunning(task.getTenantId(), task.getTaskId(), step.getStepCode(),
                 requestJson, requestSha256, now) != 1) {
             throw new LeaseLostException("Task step could not enter RUNNING");
+        }
+    }
+
+    public <T> T executeWithMissionFence(Task task, Supplier<T> operation) {
+        Objects.requireNonNull(operation, "operation");
+        MissionLeaseFence fence = missionFence(task);
+        if (fence == null) {
+            return operation.get();
+        }
+        try {
+            return missionLeaseFenceApi.executeWhileCurrent(fence, operation);
+        } catch (SecurityException ex) {
+            throw new LeaseLostException(ex.getMessage());
         }
     }
 
@@ -185,7 +220,38 @@ public class SkillTaskCheckpointService {
         if (!"RUNNING".equals(task.getStatus()) || !leaseOwner.equals(task.getLeaseOwner())) {
             throw new LeaseLostException("Task lease is no longer owned by this worker");
         }
+        validateMissionFence(task);
         return task;
+    }
+
+    private void validateMissionFence(Task task) {
+        MissionLeaseFence fence = missionFence(task);
+        if (fence == null) {
+            return;
+        }
+        try {
+            missionLeaseFenceApi.validateCurrentLease(fence);
+        } catch (SecurityException ex) {
+            throw new LeaseLostException(ex.getMessage());
+        }
+    }
+
+    private MissionLeaseFence missionFence(Task task) {
+        String approvalRef = task.getApprovalRef();
+        if (approvalRef == null || !approvalRef.startsWith(SkillTaskApprovalRefCodec.CLAIMS_VERSION + ":")) {
+            return null;
+        }
+        if (missionLeaseFenceApi == null) {
+            throw new LeaseLostException("cma3 mission lease validation is unavailable");
+        }
+        SkillTaskApprovalPermitClaims claims = SkillTaskApprovalRefCodec.parseClaims(approvalRef).claims();
+        if (claims.missionBound() && !Objects.equals(task.getRunId(), claims.missionRunId())) {
+            throw new LeaseLostException("Skill Task runId no longer matches its mission lease fence");
+        }
+        return new MissionLeaseFence(
+                claims.tenantId(), claims.workOrderId(), claims.missionRunId(), claims.leaseOwner(),
+                claims.leaseEpoch() == null ? 0L : claims.leaseEpoch(),
+                claims.fencingToken() == null ? 0L : claims.fencingToken());
     }
 
     private Task requireTask(long tenantId, String taskId) {

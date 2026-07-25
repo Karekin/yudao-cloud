@@ -37,6 +37,12 @@ public class YudaoCommandOperationService {
         return execute(operationType, idempotencyKey, command, Boolean.class, action);
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public <T> T executeTyped(String operationType, String idempotencyKey, Object command,
+                              Class<T> resultType, Supplier<T> action) {
+        return execute(operationType, idempotencyKey, command, resultType, action);
+    }
+
     private <T> T execute(String operationType, String idempotencyKey, Object command, Class<T> resultType,
                           Supplier<T> action) {
         requireText(operationType, "operationType", 64);

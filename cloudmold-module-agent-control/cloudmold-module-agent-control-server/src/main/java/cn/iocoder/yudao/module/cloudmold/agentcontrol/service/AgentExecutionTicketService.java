@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentExecutionTicketRe
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.ActorRoleGrant;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.Approval;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.ApprovalAuthorityGrant;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.AgentRunLease;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.AuditEvent;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.RoleActionPolicy;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.WorkOrder;
@@ -25,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Locale;
 import java.util.Objects;
@@ -35,17 +37,29 @@ import java.util.UUID;
 public class AgentExecutionTicketService implements AgentExecutionTicketApi {
 
     private final AgentControlStoreMapper mapper;
+    private final cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties properties;
     private final AgentExecutionPermitSigner permitSigner;
     private final java.time.Clock clock;
 
     @Autowired
-    public AgentExecutionTicketService(AgentControlStoreMapper mapper, AgentExecutionPermitSigner permitSigner) {
-        this(mapper, permitSigner, java.time.Clock.systemUTC());
+    public AgentExecutionTicketService(AgentControlStoreMapper mapper,
+                                       cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties properties,
+                                       AgentExecutionPermitSigner permitSigner) {
+        this(mapper, properties, permitSigner, java.time.Clock.systemUTC());
     }
 
     AgentExecutionTicketService(AgentControlStoreMapper mapper, AgentExecutionPermitSigner permitSigner,
                                 java.time.Clock clock) {
+        this(mapper, new cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties(),
+                permitSigner, clock);
+    }
+
+    AgentExecutionTicketService(AgentControlStoreMapper mapper,
+                                cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties properties,
+                                AgentExecutionPermitSigner permitSigner,
+                                java.time.Clock clock) {
         this.mapper = mapper;
+        this.properties = properties;
         this.permitSigner = permitSigner;
         this.clock = clock;
     }
@@ -61,11 +75,17 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
                 requireRef(command.getWorkOrderId(), "workOrderId")), "work order not found");
         require(Boolean.TRUE.equals(workOrder.getExecutionRequired()),
                 "execution ticket requires an execution-bound work order");
-        require("READY".equals(workOrder.getStatus()), "execution ticket requires READY work order");
+        boolean missionManaged = workOrder.getMissionId() != null;
+        require(missionManaged ? "IN_PROGRESS".equals(workOrder.getStatus()) : "READY".equals(workOrder.getStatus()),
+                missionManaged
+                        ? "mission execution ticket requires an acquired IN_PROGRESS lease"
+                        : "execution ticket requires READY work order");
         require(Objects.equals(command.getWorkOrderExpectedVersion(), workOrder.getVersion()),
                 "workOrderExpectedVersion is stale");
         require(operatorUserId.equals(workOrder.getAssigneeUserId()),
                 "only the authenticated assignee can issue the execution ticket");
+        AgentRunLease missionLease = missionManaged
+                ? requireCurrentMissionLease(tenantId, workOrder, command, operatorUserId, now) : null;
         ActorRoleGrant actorGrant = requireExactRoleGrant(tenantId, operatorUserId, workOrder.getRoleCode(), now);
         requireRef(workOrder.getApprovalId(), "workOrder.approvalId");
         require(Objects.equals(workOrder.getApprovalId(), command.getApprovalId()),
@@ -123,12 +143,21 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
         String subject = permitSubject(UserTypeEnum.ADMIN.getValue(), operatorUserId);
         SignedAgentExecutionPermit signed = permitSigner.sign(new SkillTaskApprovalPermitClaims(
                 SkillTaskApprovalRefCodec.CLAIMS_VERSION, SkillTaskApprovalRefCodec.LOCAL_HMAC_KEY_ID,
-                SkillTaskApprovalRefCodec.DEFAULT_ISSUER, SkillTaskApprovalRefCodec.DEFAULT_AUDIENCE,
+                requireNonBlank(properties.getIssuer(), "issuer"),
+                requireNonBlank(properties.getAudience(), "audience"),
                 UUID.randomUUID().toString().replace("-", ""), workOrder.getWorkOrderId(), approval.getApprovalId(),
-                rootRequestIdentity(workOrder, subject), workOrder.getSkillId(), workOrder.getSkillVersion(),
+                rootRequestIdentity(workOrder, subject, missionLease), workOrder.getSkillId(), workOrder.getSkillVersion(),
                 workOrder.getSkillDefinitionClosureSha256(), workOrder.getExecutionInputSha256(),
-                workOrder.getRiskLevel(), subject, tenantId, issuedAt, issuedAt, expiresAt));
-        appendAudit(tenantId, operatorUserId, workOrder, approval, signed, now);
+                workOrder.getRiskLevel(), subject, tenantId, issuedAt, issuedAt, expiresAt,
+                missionLease == null ? null : missionLease.getRunId(),
+                missionLease == null ? null : missionLease.getFencingToken(),
+                missionLease == null ? null : missionLease.getLeaseOwner(),
+                missionLease == null ? null : missionLease.getVersion()));
+        if (missionLease != null) {
+            require(SkillTaskApprovalRefCodec.CLAIMS_VERSION.equals(signed.permitVersion()),
+                    "mission execution tickets require cma3 lease-bound claims");
+        }
+        appendAudit(tenantId, operatorUserId, workOrder, approval, missionLease, signed, now);
         return AgentExecutionTicketResult.builder().workOrderId(workOrder.getWorkOrderId())
                 .approvalId(approval.getApprovalId()).approvalRef(signed.approvalRef())
                 .approvalRefSha256(signed.approvalRefSha256())
@@ -140,6 +169,30 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
         require(grant != null,
                 "authenticated actor has no effective grant for role " + roleCode);
         return grant;
+    }
+
+    private AgentRunLease requireCurrentMissionLease(Long tenantId, WorkOrder workOrder,
+                                                    AgentExecutionTicketCommand command,
+                                                    Long operatorUserId, LocalDateTime now) {
+        AgentRunLease lease = requireNonNull(mapper.selectRunLeaseForUpdate(tenantId, workOrder.getWorkOrderId()),
+                "mission execution ticket requires an acquired run lease");
+        require("ACTIVE".equals(lease.getStatus()) && lease.getLeaseUntil() != null
+                        && lease.getLeaseUntil().isAfter(now),
+                "mission execution ticket requires an active run lease");
+        require(Objects.equals(workOrder.getMissionId(), lease.getMissionId())
+                        && Objects.equals(workOrder.getActiveRunId(), lease.getRunId())
+                        && Objects.equals(operatorUserId, lease.getActorUserId())
+                        && Objects.equals(workOrder.getRoleCode(), lease.getRoleCode()),
+                "mission execution lease drifted from the active work order");
+        require(Objects.equals(requireRef(command.getMissionRunId(), "missionRunId"), lease.getRunId())
+                        && Objects.equals(requireRef(command.getLeaseOwner(), "leaseOwner"), lease.getLeaseOwner())
+                        && Objects.equals(requireRef(command.getLeaseToken(), "leaseToken"), lease.getLeaseToken())
+                        && Objects.equals(command.getFencingToken(), lease.getFencingToken()),
+                "mission execution ticket lease identity is stale");
+        require(lease.getVersion() != null && lease.getVersion() > 0
+                        && lease.getFencingToken() != null && lease.getFencingToken() > 0,
+                "mission execution lease is missing its fencing epoch");
+        return lease;
     }
 
     private Duration requireRequestedValidity(Long validForSeconds) {
@@ -169,19 +222,26 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
     }
 
     private void appendAudit(Long tenantId, Long operatorUserId, WorkOrder workOrder, Approval approval,
-                             SignedAgentExecutionPermit signed, LocalDateTime now) {
-        String detailJson = JsonUtils.toJsonString(Map.ofEntries(
-                Map.entry("approvalId", approval.getApprovalId()),
-                Map.entry("workOrderId", workOrder.getWorkOrderId()),
-                Map.entry("approvalRefSha256", signed.approvalRefSha256()),
-                Map.entry("approvalRefVersion", signed.permitVersion()),
-                Map.entry("signingKeyId", signed.keyId()),
-                Map.entry("expiresAt", signed.expiresAt().toString()),
-                Map.entry("skillId", workOrder.getSkillId()),
-                Map.entry("skillVersion", workOrder.getSkillVersion()),
-                Map.entry("inputSha256", workOrder.getExecutionInputSha256()),
-                Map.entry("definitionClosureSha256", workOrder.getSkillDefinitionClosureSha256()),
-                Map.entry("riskLevel", workOrder.getRiskLevel())));
+                             AgentRunLease missionLease, SignedAgentExecutionPermit signed, LocalDateTime now) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("approvalId", approval.getApprovalId());
+        detail.put("workOrderId", workOrder.getWorkOrderId());
+        detail.put("approvalRefSha256", signed.approvalRefSha256());
+        detail.put("approvalRefVersion", signed.permitVersion());
+        detail.put("signingKeyId", signed.keyId());
+        detail.put("expiresAt", signed.expiresAt().toString());
+        detail.put("skillId", workOrder.getSkillId());
+        detail.put("skillVersion", workOrder.getSkillVersion());
+        detail.put("inputSha256", workOrder.getExecutionInputSha256());
+        detail.put("definitionClosureSha256", workOrder.getSkillDefinitionClosureSha256());
+        detail.put("riskLevel", workOrder.getRiskLevel());
+        if (missionLease != null) {
+            detail.put("missionRunId", missionLease.getRunId());
+            detail.put("fencingToken", missionLease.getFencingToken());
+            detail.put("leaseOwner", missionLease.getLeaseOwner());
+            detail.put("leaseEpoch", missionLease.getVersion());
+        }
+        String detailJson = JsonUtils.toJsonString(detail);
         AuditEvent event = new AuditEvent().setAuditEventId(UUID.randomUUID().toString()).setTenantId(tenantId)
                 .setAggregateType("role_approval").setAggregateId(approval.getApprovalId())
                 .setAggregateVersion(approval.getVersion()).setEventType("agent_control.execution_ticket.issued")
@@ -189,12 +249,18 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
         require(mapper.insertAuditEvent(event) == 1, "failed to append execution-ticket audit event");
     }
 
-    private String rootRequestIdentity(WorkOrder workOrder, String subject) {
-        return SkillTaskApprovalRefCodec.sha256(String.join("\n",
+    private String rootRequestIdentity(WorkOrder workOrder, String subject, AgentRunLease missionLease) {
+        String base = String.join("\n",
                 String.valueOf(workOrder.getTenantId()), workOrder.getWorkOrderId(), workOrder.getApprovalId(),
                 workOrder.getSkillId(), workOrder.getSkillVersion(),
                 workOrder.getSkillDefinitionClosureSha256(), workOrder.getExecutionInputSha256(),
-                workOrder.getRiskLevel(), subject));
+                workOrder.getRiskLevel(), subject);
+        if (missionLease == null) {
+            return SkillTaskApprovalRefCodec.sha256(base);
+        }
+        return SkillTaskApprovalRefCodec.sha256(String.join("\n", base, missionLease.getRunId(),
+                String.valueOf(missionLease.getFencingToken()), missionLease.getLeaseOwner(),
+                String.valueOf(missionLease.getVersion())));
     }
 
     private static String permitSubject(int operatorType, Long operatorUserId) {

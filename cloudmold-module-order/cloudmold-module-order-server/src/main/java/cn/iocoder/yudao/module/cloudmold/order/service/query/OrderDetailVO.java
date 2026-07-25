@@ -21,6 +21,12 @@ public class OrderDetailVO {
     private String runId;
     @Schema(description = "规范买家 ID")
     private String buyerId;
+    @Schema(description = "令牌化地址快照引用")
+    private String addressRef;
+    @Schema(description = "地址快照版本")
+    private Long addressSnapshotVersion;
+    @Schema(description = "非敏感目的地区域编码")
+    private String destinationRegionCode;
     @Schema(description = "订单状态")
     private String status;
 

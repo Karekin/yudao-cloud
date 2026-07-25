@@ -8,6 +8,8 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskSubmitCommand;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskMissionLeaseFencePort;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskMissionLeaseFencePort.MissionLeaseFence;
 import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalEvidence;
 import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalVerifier;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskMapper;
@@ -26,6 +28,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -44,9 +47,10 @@ class SkillTaskApiServiceTest {
     private final SkillTaskDefinitionRegistry definitions = mock(SkillTaskDefinitionRegistry.class);
     private final SkillTaskJson json = new SkillTaskJson(new ObjectMapper(), new SkillTaskProperties());
     private final SkillTaskApprovalVerifier approvalVerifier = mock(SkillTaskApprovalVerifier.class);
+    private final SkillTaskMissionLeaseFencePort missionLeaseFenceApi = mock(SkillTaskMissionLeaseFencePort.class);
     private final Clock clock = Clock.fixed(Instant.parse("2026-07-18T12:00:00Z"), ZoneOffset.UTC);
     private final SkillTaskApiService service = new SkillTaskApiService(mapper, definitions, json,
-            approvalVerifier, clock);
+            approvalVerifier, Optional.of(missionLeaseFenceApi), clock);
 
     @AfterEach
     void clearContext() {
@@ -163,11 +167,6 @@ class SkillTaskApiServiceTest {
         replay.setApprovalRef(approvalRef);
         when(approvalVerifier.verify(any())).thenReturn(evidence);
         AtomicReference<Task> stored = new AtomicReference<>();
-        PermitConsumption consumed = new PermitConsumption();
-        consumed.setTenantId(8L);
-        consumed.setPermitId("permit-1");
-        consumed.setRootRequestIdentity(evidence.rootRequestIdentity());
-        consumed.setClientRequestKey("request-1");
         when(mapper.selectByRequestKey(8L, "skill.read", "request-1")).thenReturn(null);
         when(mapper.insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(), any(), anyLong(), any(), any(), any(), any())).thenAnswer(invocation -> {
@@ -181,7 +180,9 @@ class SkillTaskApiServiceTest {
                 });
         when(mapper.selectByRequestKeyForUpdate(eq(8L), eq("skill.read"), any())).thenAnswer(invocation -> stored.get());
         when(mapper.selectTask(eq(8L), any())).thenAnswer(invocation -> stored.get());
-        when(mapper.selectPermitConsumption(8L, "permit-1")).thenReturn(consumed);
+        when(mapper.selectPermitConsumption(8L, "permit-1")).thenAnswer(invocation ->
+                consumption(evidence, stored.get().getTaskId(), "request-1",
+                        definition.getDefinitionClosureSha256(), json.sha256("{}"), "R3"));
 
         service.submit(first);
 
@@ -189,6 +190,77 @@ class SkillTaskApiServiceTest {
         assertThatThrownBy(() -> service.submit(replay))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("different clientRequestKey");
+    }
+
+    @Test
+    void rejectsOldMissionPermitWhenTakeoverWinsBeforeSubmit() throws Exception {
+        authenticate();
+        SkillTaskDefinition definition = readDefinition();
+        definition.setRiskLevel("R3");
+        when(definitions.require("skill.read", "1.0.0")).thenReturn(definition);
+        SkillTaskApprovalEvidence evidence = missionApprovalEvidence(
+                definition.getDefinitionClosureSha256(), "run-1", "worker-1", 2L, 3L);
+        SkillTaskSubmitCommand command = command("request-takeover", "{}");
+        command.setRiskLevel("R3");
+        command.setRunId("run-1");
+        command.setApprovalRef(validClaimsReference(evidence.claims()));
+        when(approvalVerifier.verify(any())).thenReturn(evidence);
+        org.mockito.Mockito.doThrow(new SecurityException("mission lease fence is stale"))
+                .when(missionLeaseFenceApi).validateCurrentLease(any());
+
+        assertThatThrownBy(() -> service.submit(command))
+                .isInstanceOf(SecurityException.class)
+                .hasMessage("mission lease fence is stale");
+        verify(missionLeaseFenceApi).validateCurrentLease(new MissionLeaseFence(
+                8L, "wo-r3-1", "run-1", "worker-1", 3L, 2L));
+        verify(mapper, never()).insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), anyLong(), any(), any(), any(), any());
+    }
+
+    @Test
+    void revalidatesThePersistedMissionFenceBeforeReturningAnIdempotentReplay() throws Exception {
+        authenticate();
+        SkillTaskDefinition definition = readDefinition();
+        definition.setRiskLevel("R3");
+        when(definitions.require("skill.read", "1.0.0")).thenReturn(definition);
+        SkillTaskApprovalEvidence evidence = missionApprovalEvidence(
+                definition.getDefinitionClosureSha256(), "run-1", "worker-1", 2L, 3L);
+        String approvalRef = validClaimsReference(evidence.claims());
+        Task existing = task("task-existing", "request-1", "{}", json.sha256("{}"));
+        existing.setRunId("run-1");
+        existing.setRiskLevel("R3");
+        existing.setApprovalRef(approvalRef);
+        when(mapper.selectByRequestKey(8L, "skill.read", "request-1")).thenReturn(existing);
+        org.mockito.Mockito.doThrow(new SecurityException("mission lease fence is stale"))
+                .when(missionLeaseFenceApi).validateCurrentLease(any());
+        SkillTaskSubmitCommand replay = command("request-1", "{}");
+        replay.setRiskLevel("R3");
+        replay.setRunId("run-1");
+        replay.setApprovalRef(approvalRef);
+
+        assertThatThrownBy(() -> service.submit(replay))
+                .isInstanceOf(SecurityException.class)
+                .hasMessage("mission lease fence is stale");
+        verify(approvalVerifier, never()).verify(any());
+    }
+
+    @Test
+    void comparesTheCompleteApprovalReferenceOnRequestKeyReplay() throws Exception {
+        authenticate();
+        SkillTaskDefinition definition = readDefinition();
+        definition.setRiskLevel("R3");
+        when(definitions.require("skill.read", "1.0.0")).thenReturn(definition);
+        Task existing = task("task-existing", "request-1", "{}", json.sha256("{}"));
+        existing.setRiskLevel("R3");
+        existing.setApprovalRef("cma3:key-1:old:signature");
+        when(mapper.selectByRequestKey(8L, "skill.read", "request-1")).thenReturn(existing);
+        SkillTaskSubmitCommand replay = command("request-1", "{}");
+        replay.setRiskLevel("R3");
+        replay.setApprovalRef("cma3:key-1:new:signature");
+
+        assertThatThrownBy(() -> service.submit(replay))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("different approvalRef");
     }
 
     @Test
@@ -275,6 +347,36 @@ class SkillTaskApiServiceTest {
                 "2:42", 8L, Instant.parse("2026-07-18T12:00:00Z"), Instant.parse("2026-07-18T12:00:00Z"),
                 Instant.parse("2026-07-18T12:05:00Z"));
         return new SkillTaskApprovalEvidence(claims, "e".repeat(64), "cma3:hmac");
+    }
+
+    private SkillTaskApprovalEvidence missionApprovalEvidence(String definitionClosureSha256,
+                                                              String runId, String leaseOwner,
+                                                              long fencingToken, long leaseEpoch) {
+        SkillTaskApprovalPermitClaims claims = new SkillTaskApprovalPermitClaims("cma3", "risk-1",
+                "cloudmold.agent-control", "cloudmold.skill-task", "permit-mission-1", "wo-r3-1",
+                "approval-r3-1", "f".repeat(64), "skill.read", "1.0.0",
+                definitionClosureSha256, json.sha256("{}"), "R3", "2:42", 8L,
+                Instant.parse("2026-07-18T12:00:00Z"), Instant.parse("2026-07-18T12:00:00Z"),
+                Instant.parse("2026-07-18T12:05:00Z"), runId, fencingToken, leaseOwner, leaseEpoch);
+        return new SkillTaskApprovalEvidence(claims, "e".repeat(64), "cma3:hmac");
+    }
+
+    private static PermitConsumption consumption(SkillTaskApprovalEvidence evidence, String taskId,
+                                                 String requestKey, String definitionClosureSha256,
+                                                 String inputSha256, String riskLevel) {
+        PermitConsumption consumed = new PermitConsumption();
+        consumed.setTenantId(8L);
+        consumed.setPermitId(evidence.permitId());
+        consumed.setApprovalId(evidence.approvalId());
+        consumed.setWorkOrderId(evidence.workOrderId());
+        consumed.setRootRequestIdentity(evidence.rootRequestIdentity());
+        consumed.setClientRequestKey(requestKey);
+        consumed.setTaskId(taskId);
+        consumed.setApprovalRefSha256(evidence.referenceSha256());
+        consumed.setDefinitionClosureSha256(definitionClosureSha256);
+        consumed.setInputSha256(inputSha256);
+        consumed.setRiskLevel(riskLevel);
+        return consumed;
     }
 
     private static String validClaimsReference(SkillTaskApprovalPermitClaims claims) {

@@ -34,6 +34,10 @@ class YudaoBpmApprovalWorkflowAdapterTest {
                 org.assertj.core.api.Assertions.entry("role_code", "buyer"),
                 org.assertj.core.api.Assertions.entry("risk_level", "R3"),
                 org.assertj.core.api.Assertions.entry("scope_hash", "a".repeat(64)));
+        assertThat(request.getValue().getStartUserSelectAssignees())
+                .containsOnlyKeys(YudaoBpmApprovalWorkflowAdapter.APPROVAL_TASK_KEY);
+        assertThat(request.getValue().getStartUserSelectAssignees()
+                .get(YudaoBpmApprovalWorkflowAdapter.APPROVAL_TASK_KEY)).containsExactly(200L);
     }
 
     @Test
@@ -45,10 +49,21 @@ class YudaoBpmApprovalWorkflowAdapterTest {
                 .hasMessage("BPM returned an empty process instance id");
     }
 
+    @Test
+    void rejectsMissingOrSelfApproverBeforeCallingBpm() {
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> adapter.start(candidate().setApproverUserId(null))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("approver is missing");
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> adapter.start(candidate().setApproverUserId(100L))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("must differ from requester");
+        verifyNoInteractions(bpm);
+    }
+
     private static ApprovalWorkflowStartCandidate candidate() {
         return new ApprovalWorkflowStartCandidate().setTenantId(17L).setApprovalId("approval-1")
                 .setWorkOrderId("work-1").setActionCode("purchase.commit").setRoleCode("buyer")
-                .setRiskLevel("R3").setRequesterUserId(100L).setScopeHash("a".repeat(64))
+                .setRiskLevel("R3").setRequesterUserId(100L).setApproverUserId(200L).setScopeHash("a".repeat(64))
                 .setProcessDefinitionKey("cloudmold-agent-approval-v1")
                 .setBusinessKey("cloudmold-agent-approval:17:approval-1")
                 .setStatus("START_REQUESTED").setVersion(1L);

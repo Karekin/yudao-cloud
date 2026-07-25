@@ -16,6 +16,14 @@ public class CommunityContentDO {
     private String authorPrincipalId;
     private String contentType;
     private String bodyRef;
+    private String bodyKeyId;
+    private byte[] bodyIv;
+    private byte[] bodyCiphertext;
+    private String bodyDigestSha256;
+    private String canonicalSpuId;
+    private String canonicalSkuId;
+    private String listingId;
+    private String listingOfferId;
     private String status;
     private Long version;
     private String sourceSystem;

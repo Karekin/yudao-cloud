@@ -239,6 +239,7 @@ public final class AgentControlRecords {
         private String roleCode;
         private String riskLevel;
         private Long requesterUserId;
+        private Long approverUserId;
         private String scopeHash;
         private String processDefinitionKey;
         private String processInstanceId;
@@ -246,6 +247,9 @@ public final class AgentControlRecords {
         private String status;
         private Integer lastBpmStatus;
         private String lastReasonSha256;
+        private Long terminalOperatorUserId;
+        private String terminalTaskId;
+        private String terminalTaskDefinitionKey;
         private String startAttemptToken;
         private Integer startAttemptCount;
         private Long version;
@@ -266,6 +270,7 @@ public final class AgentControlRecords {
         private String roleCode;
         private String riskLevel;
         private Long requesterUserId;
+        private Long approverUserId;
         private String scopeHash;
         private String processDefinitionKey;
         private String businessKey;
@@ -282,6 +287,9 @@ public final class AgentControlRecords {
         private Integer bpmStatus;
         private String observedStatus;
         private String reasonSha256;
+        private Long terminalOperatorUserId;
+        private String terminalTaskId;
+        private String terminalTaskDefinitionKey;
         private LocalDateTime observedAt;
     }
 

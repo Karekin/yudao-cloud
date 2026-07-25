@@ -17,6 +17,9 @@ public class OrderHeaderDO {
     private String orderNo;
     private String runId;
     private String buyerId;
+    private String addressRef;
+    private Long addressSnapshotVersion;
+    private String destinationRegionCode;
     private String status;
     private BigDecimal totalQuantity;
     private Long productAmountMinor;

@@ -42,7 +42,8 @@ class PaymentCommandServiceImplTest {
         });
         when(outboxAppender.append(any())).thenReturn(new AppendDomainEventResult("event-1", "a".repeat(64), false));
         when(orderQueryApi.requirePayableOrder("order-1", 530L, "CNY")).thenReturn(
-                OrderPaymentView.builder().orderId("order-1").orderNo("CMO1").buyerId("buyer-1")
+                OrderPaymentView.builder().orderId("order-1").orderNo("CMO1").runId("canonical-order-run-1")
+                        .buyerId("buyer-1")
                         .status("INVENTORY_RESERVED").payableAmountMinor(530L).currencyCode("CNY")
                         .aggregateVersion(2L).build());
     }
@@ -62,24 +63,32 @@ class PaymentCommandServiceImplTest {
         assertThat(result.getCapturedAmountMinor()).isEqualTo(530L);
         assertThat(result.getRefundedAmountMinor()).isZero();
         assertThat(result.getTestMode()).isTrue();
+        verify(paymentMapper).insert(argThat((PaymentDO payment) ->
+                "canonical-order-run-1".equals(payment.getRunId())));
         verify(orderQueryApi).requirePayableOrder("order-1", 530L, "CNY");
         verify(outboxAppender).append(argThat(event -> event.getEventType().equals("payment.status.changed")
-                && event.getAggregateVersion() == 1L && event.getPayload().get("test_mode").equals(true)));
+                && event.getAggregateVersion() == 1L
+                && "canonical-order-run-1".equals(event.getPayload().get("run_id"))
+                && event.getPayload().get("test_mode").equals(true)));
     }
 
     @Test
-    void shouldFullRefundCapturedPayment() {
+    void shouldFullRefundCapturedPaymentFromIndependentAfterSaleRun() {
         claimNewOperation();
         PaymentDO payment = payment("CAPTURED", 1L);
         when(paymentMapper.selectForUpdate(1L, "payment-1")).thenReturn(payment);
         when(paymentMapper.refund(eq(1L), eq("payment-1"), eq(1L), eq(530L),
                 eq("REFUNDED"), any())).thenReturn(1);
+        PaymentCommand refund = refundCommand();
+        refund.setRunId("after-sale-run-1");
 
-        PaymentCommandResult result = service.execute(refundCommand());
+        PaymentCommandResult result = service.execute(refund);
 
         assertThat(result.getCurrentStatus()).isEqualTo("REFUNDED");
         assertThat(result.getAggregateVersion()).isEqualTo(2L);
         assertThat(result.getRefundedAmountMinor()).isEqualTo(530L);
+        verify(outboxAppender).append(argThat(event ->
+                "pay-run-1".equals(event.getPayload().get("run_id"))));
     }
 
     @Test

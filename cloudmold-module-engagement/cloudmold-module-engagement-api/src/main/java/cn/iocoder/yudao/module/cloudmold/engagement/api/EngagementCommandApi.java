@@ -21,7 +21,11 @@ public interface EngagementCommandApi {
 
     EngagementCommandResult createCommunityContent(CreateCommunityContentCommand command);
 
+    EngagementCommandResult transitionCommunityContent(TransitionCommunityContentCommand command);
+
     EngagementCommandResult recordCommunityInteraction(RecordCommunityInteractionCommand command);
+
+    EngagementCommandResult changeCommunityReaction(ChangeCommunityReactionCommand command);
 
     EngagementCommandResult openModerationCase(OpenModerationCaseCommand command);
 
@@ -115,10 +119,32 @@ public interface EngagementCommandApi {
         private String authorPrincipalId;
         private String contentType;
         private String bodyRef;
+        private String bodyKeyId;
+        private byte[] bodyIv;
+        private byte[] bodyCiphertext;
+        private String bodyDigestSha256;
+        private String canonicalSpuId;
+        private String canonicalSkuId;
+        private String listingId;
+        private String listingOfferId;
         private String desiredStatus;
         private String sourceSystem;
         private String sourceType;
         private String sourceId;
+        private String correlationId;
+        private String causationId;
+        private Instant occurredAt;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    class TransitionCommunityContentCommand {
+        private String idempotencyKey;
+        private String runId;
+        private String contentId;
+        private String actorPrincipalId;
+        private String desiredStatus;
+        private Long expectedVersion;
+        private String reasonCode;
         private String correlationId;
         private String causationId;
         private Instant occurredAt;
@@ -134,6 +160,26 @@ public interface EngagementCommandApi {
         private String targetType;
         private String targetId;
         private String payloadRef;
+        private String payloadKeyId;
+        private byte[] payloadIv;
+        private byte[] payloadCiphertext;
+        private String payloadDigestSha256;
+        private String correlationId;
+        private String causationId;
+        private Instant occurredAt;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    class ChangeCommunityReactionCommand {
+        private String idempotencyKey;
+        private String runId;
+        private String reactionId;
+        private String actorPrincipalId;
+        private String reactionType;
+        private String targetType;
+        private String targetId;
+        private String desiredStatus;
+        private Long expectedVersion;
         private String correlationId;
         private String causationId;
         private Instant occurredAt;

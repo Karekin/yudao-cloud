@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.cloudmold.agentcontrol.service;
 
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties.AsymmetricSigningKey;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties.SigningKey;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
@@ -8,10 +9,14 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprova
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.security.KeyFactory;
+import java.security.PrivateKey;
+import java.security.Signature;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 
 @Component
@@ -36,47 +41,65 @@ public class HmacAgentExecutionPermitSigner implements AgentExecutionPermitSigne
             throw new IllegalStateException("execution ticket validity exceeds the active signing key lifetime");
         }
         String approvalRef = switch (mode) {
-            case CMA1 -> SkillTaskApprovalRefCodec.issue(material.secret(),
+            case CMA1 -> SkillTaskApprovalRefCodec.issue(material.hmacSecret(),
                     new SkillTaskApprovalScope(normalized.tenantId(), subjectUserId(normalized.subject()),
                             subjectUserType(normalized.subject()), normalized.skillId(), normalized.skillVersion(),
                             normalized.inputSha256(), normalized.riskLevel()),
                     normalized.approvalId(), normalized.expiresAt());
-            case CMA2 -> SkillTaskApprovalRefCodec.issueKeyed(material.secret(), material.keyId(),
+            case CMA2 -> SkillTaskApprovalRefCodec.issueKeyed(material.hmacSecret(), material.keyId(),
                     new SkillTaskApprovalScope(normalized.tenantId(), subjectUserId(normalized.subject()),
                             subjectUserType(normalized.subject()), normalized.skillId(), normalized.skillVersion(),
                             normalized.inputSha256(), normalized.riskLevel()),
                     normalized.approvalId(), normalized.issuedAt(), normalized.expiresAt());
-            case CMA3 -> SkillTaskApprovalRefCodec.issueClaims(material.secret(),
-                    new SkillTaskApprovalPermitClaims(SkillTaskApprovalRefCodec.CLAIMS_VERSION, material.keyId(),
-                            normalized.issuer(), normalized.audience(), normalized.permitId(),
-                            normalized.workOrderId(), normalized.approvalId(), normalized.rootRequestIdentity(),
-                            normalized.skillId(), normalized.skillVersion(),
-                            normalized.definitionClosureSha256(), normalized.inputSha256(),
-                            normalized.riskLevel(), normalized.subject(), normalized.tenantId(),
-                            normalized.notBefore(), normalized.issuedAt(), normalized.expiresAt()));
+            case CMA3, CMA3_RSA -> issueClaims(material, normalized.withKeyId(material.keyId()));
         };
         return new SignedAgentExecutionPermit(approvalRef, SkillTaskApprovalRefCodec.sha256(approvalRef),
                 switch (mode) {
                     case CMA1 -> SkillTaskApprovalRefCodec.LEGACY_VERSION;
                     case CMA2 -> SkillTaskApprovalRefCodec.VERSION;
-                    case CMA3 -> SkillTaskApprovalRefCodec.CLAIMS_VERSION;
+                    case CMA3, CMA3_RSA -> SkillTaskApprovalRefCodec.CLAIMS_VERSION;
                 }, material.keyId(), normalized.expiresAt());
     }
 
     private SigningMode signingMode() {
+        AuthorityMode authorityMode = authorityMode();
         String configured = Objects.toString(properties.getIssueVersion(), "auto").trim().toLowerCase(Locale.ROOT);
         return switch (configured) {
-            case "", "auto" -> properties.getActiveKeyId() == null || properties.getActiveKeyId().isBlank()
+            case "", "auto" -> authorityMode == AuthorityMode.PEM_RSA
+                    ? SigningMode.CMA3_RSA
+                    : properties.getActiveKeyId() == null || properties.getActiveKeyId().isBlank()
                     ? SigningMode.CMA1 : SigningMode.CMA2;
             case "cma1" -> SigningMode.CMA1;
             case "cma2" -> SigningMode.CMA2;
-            case "cma3" -> SigningMode.CMA3;
+            case "cma3" -> authorityMode == AuthorityMode.PEM_RSA ? SigningMode.CMA3_RSA : SigningMode.CMA3;
             default -> throw new IllegalStateException("unsupported Skill Task approval issueVersion");
         };
     }
 
     private SigningMaterial signingMaterial(Instant now, SigningMode mode) {
+        AuthorityMode authorityMode = authorityMode();
         String activeKeyId = Objects.toString(properties.getActiveKeyId(), "").trim();
+        if ((mode == SigningMode.CMA2 || mode == SigningMode.CMA3) && authorityMode != AuthorityMode.LOCAL_TEST_HMAC) {
+            throw new IllegalStateException("HMAC Skill Task approval signing is restricted to LOCAL_TEST");
+        }
+        if (mode == SigningMode.CMA3_RSA) {
+            if (activeKeyId.isEmpty()) {
+                throw new IllegalStateException("active Skill Task approval signing key is not configured");
+            }
+            AsymmetricSigningKey key = properties.getAsymmetricKeys().get(activeKeyId);
+            if (key == null) {
+                throw new IllegalStateException("active Skill Task approval signing key is not configured");
+            }
+            PrivateKey privateKey = rsaPrivateKey(key.getPrivateKeyPem());
+            Instant notBefore = requireNonNull(key.getNotBefore(), "active signing key notBefore is missing");
+            Instant expiresAt = requireNonNull(key.getExpiresAt(), "active signing key expiresAt is missing");
+            require(!now.isBefore(notBefore), "active Skill Task approval signing key is not active yet");
+            require(expiresAt.isAfter(now), "active Skill Task approval signing key has expired");
+            if (key.getRevokedAt() != null && !now.isBefore(key.getRevokedAt())) {
+                throw new IllegalStateException("active Skill Task approval signing key is revoked");
+            }
+            return SigningMaterial.rsa(activeKeyId, privateKey, expiresAt);
+        }
         if ((mode == SigningMode.CMA2 || mode == SigningMode.CMA3) && !activeKeyId.isEmpty()) {
             SigningKey key = properties.getKeys().get(activeKeyId);
             if (key == null) {
@@ -90,37 +113,69 @@ public class HmacAgentExecutionPermitSigner implements AgentExecutionPermitSigne
             if (key.getRevokedAt() != null && !now.isBefore(key.getRevokedAt())) {
                 throw new IllegalStateException("active Skill Task approval signing key is revoked");
             }
-            return new SigningMaterial(activeKeyId, secret, expiresAt);
+            return SigningMaterial.hmac(activeKeyId, secret, expiresAt);
+        }
+        if (authorityMode != AuthorityMode.LOCAL_TEST_HMAC) {
+            throw new IllegalStateException("HMAC Skill Task approval signing is restricted to LOCAL_TEST");
         }
         if (mode == SigningMode.CMA1 && !properties.isLegacyHmacEnabled()) {
             throw new IllegalStateException(
                     "Skill Task approval signing is disabled because no active keyed signer is configured");
         }
-        return new SigningMaterial(SkillTaskApprovalRefCodec.LOCAL_HMAC_KEY_ID,
+        return SigningMaterial.hmac(SkillTaskApprovalRefCodec.LOCAL_HMAC_KEY_ID,
                 requireSecret(properties.getHmacSecret()), null);
+    }
+
+    private String issueClaims(SigningMaterial material, SkillTaskApprovalPermitClaims claims) {
+        if (material.privateKey() == null) {
+            return SkillTaskApprovalRefCodec.issueClaims(material.hmacSecret(), claims);
+        }
+        String payload = SkillTaskApprovalRefCodec.claimsPayload(claims);
+        byte[] signature = rsaSign(material.privateKey(), SkillTaskApprovalRefCodec.claimsMessage(material.keyId(), payload));
+        return SkillTaskApprovalRefCodec.issueClaimsWithSignature(claims, signature);
+    }
+
+    private static byte[] rsaSign(PrivateKey privateKey, String message) {
+        try {
+            Signature signature = Signature.getInstance("SHA256withRSA");
+            signature.initSign(privateKey);
+            signature.update(message.getBytes(StandardCharsets.UTF_8));
+            return signature.sign();
+        } catch (Exception ex) {
+            throw new IllegalStateException("Skill Task approval RSA signing failed", ex);
+        }
+    }
+
+    private static PrivateKey rsaPrivateKey(String pem) {
+        String value = Objects.toString(pem, "").trim()
+                .replace("-----BEGIN PRIVATE KEY-----", "")
+                .replace("-----END PRIVATE KEY-----", "")
+                .replaceAll("\\s+", "");
+        if (value.isEmpty()) {
+            throw new IllegalStateException("Skill Task approval privateKeyPem is required");
+        }
+        try {
+            return KeyFactory.getInstance("RSA")
+                    .generatePrivate(new PKCS8EncodedKeySpec(Base64.getDecoder().decode(value)));
+        } catch (Exception ex) {
+            throw new IllegalStateException("Skill Task approval privateKeyPem is invalid", ex);
+        }
+    }
+
+    private AuthorityMode authorityMode() {
+        String configured = Objects.toString(properties.getAuthorityMode(), "LOCAL_TEST_HMAC")
+                .trim().toUpperCase(Locale.ROOT);
+        return switch (configured) {
+            case "LOCAL_TEST_HMAC" -> AuthorityMode.LOCAL_TEST_HMAC;
+            case "PEM_RSA" -> AuthorityMode.PEM_RSA;
+            default -> throw new IllegalStateException("unsupported Skill Task approval authorityMode");
+        };
     }
 
     private static SkillTaskApprovalPermitClaims requireClaims(SkillTaskApprovalPermitClaims claims) {
         SkillTaskApprovalPermitClaims value = Objects.requireNonNull(claims, "claims");
-        return new SkillTaskApprovalPermitClaims(
-                Objects.requireNonNull(value.version(), "version"),
-                Objects.requireNonNull(value.keyId(), "keyId"),
-                Objects.requireNonNull(value.issuer(), "issuer"),
-                Objects.requireNonNull(value.audience(), "audience"),
-                Objects.requireNonNull(value.permitId(), "permitId"),
-                Objects.requireNonNull(value.workOrderId(), "workOrderId"),
-                Objects.requireNonNull(value.approvalId(), "approvalId"),
-                Objects.requireNonNull(value.rootRequestIdentity(), "rootRequestIdentity"),
-                Objects.requireNonNull(value.skillId(), "skillId"),
-                Objects.requireNonNull(value.skillVersion(), "skillVersion"),
-                Objects.requireNonNull(value.definitionClosureSha256(), "definitionClosureSha256"),
-                Objects.requireNonNull(value.inputSha256(), "inputSha256"),
-                Objects.requireNonNull(value.riskLevel(), "riskLevel"),
-                Objects.requireNonNull(value.subject(), "subject"),
-                value.tenantId(),
-                Objects.requireNonNull(value.notBefore(), "notBefore"),
-                Objects.requireNonNull(value.issuedAt(), "issuedAt"),
-                Objects.requireNonNull(value.expiresAt(), "expiresAt"));
+        SkillTaskApprovalRefCodec.claimsPayload(value);
+        return value;
     }
 
     private static int subjectUserType(String subject) {
@@ -161,9 +216,20 @@ public class HmacAgentExecutionPermitSigner implements AgentExecutionPermitSigne
     }
 
     private enum SigningMode {
-        CMA1, CMA2, CMA3
+        CMA1, CMA2, CMA3, CMA3_RSA
     }
 
-    private record SigningMaterial(String keyId, byte[] secret, Instant expiresAt) {
+    private enum AuthorityMode {
+        LOCAL_TEST_HMAC, PEM_RSA
+    }
+
+    private record SigningMaterial(String keyId, byte[] hmacSecret, PrivateKey privateKey, Instant expiresAt) {
+        private static SigningMaterial hmac(String keyId, byte[] secret, Instant expiresAt) {
+            return new SigningMaterial(keyId, secret, null, expiresAt);
+        }
+
+        private static SigningMaterial rsa(String keyId, PrivateKey privateKey, Instant expiresAt) {
+            return new SigningMaterial(keyId, null, privateKey, expiresAt);
+        }
     }
 }
