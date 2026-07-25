@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.cloudmold.skilltask.approval;
 
 import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
+import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties.VerificationKey;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalScope;
 import org.junit.jupiter.api.Test;
@@ -82,11 +83,93 @@ class HmacSkillTaskApprovalVerifierTest {
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("32 bytes");
     }
 
+    @Test
+    void verifiesCurrentAndPreviousKeyDuringRotation() {
+        SkillTaskProperties properties = keyedProperties();
+        properties.getApproval().getKeys().put("risk-previous", key(SECRET, CLOCK.instant().minusSeconds(3600),
+                CLOCK.instant().plusSeconds(3600), null));
+        properties.getApproval().getKeys().put("risk-current", key("abcdef0123456789abcdef0123456789",
+                CLOCK.instant().minusSeconds(60), CLOCK.instant().plusSeconds(7200), null));
+        HmacSkillTaskApprovalVerifier verifier = new HmacSkillTaskApprovalVerifier(properties, CLOCK);
+        SkillTaskApprovalContext context = context(null);
+
+        String previous = SkillTaskApprovalRefCodec.issueKeyed(SECRET.getBytes(StandardCharsets.UTF_8),
+                "risk-previous", scope(context), "approval-old-key", CLOCK.instant().minusSeconds(30),
+                CLOCK.instant().plusSeconds(300));
+        String current = SkillTaskApprovalRefCodec.issueKeyed(
+                "abcdef0123456789abcdef0123456789".getBytes(StandardCharsets.UTF_8),
+                "risk-current", scope(context), "approval-new-key", CLOCK.instant(),
+                CLOCK.instant().plusSeconds(600));
+
+        assertThat(verifier.verify(context(previous)).verifier())
+                .isEqualTo("cma2:hmac-sha256-keyed:risk-previous");
+        assertThat(verifier.verify(context(current)).verifier())
+                .isEqualTo("cma2:hmac-sha256-keyed:risk-current");
+    }
+
+    @Test
+    void rejectsUnknownRevokedAndLifetimeViolatingKeyedReferences() {
+        SkillTaskProperties properties = keyedProperties();
+        properties.getApproval().getKeys().put("risk-revoked", key(SECRET,
+                CLOCK.instant().minusSeconds(3600), CLOCK.instant().plusSeconds(3600), CLOCK.instant()));
+        properties.getApproval().getKeys().put("risk-short", key(SECRET,
+                CLOCK.instant().minusSeconds(60), CLOCK.instant().plusSeconds(120), null));
+        HmacSkillTaskApprovalVerifier verifier = new HmacSkillTaskApprovalVerifier(properties, CLOCK);
+        SkillTaskApprovalContext context = context(null);
+
+        String unknown = SkillTaskApprovalRefCodec.issueKeyed(SECRET.getBytes(StandardCharsets.UTF_8),
+                "risk-unknown", scope(context), "approval-unknown", CLOCK.instant(),
+                CLOCK.instant().plusSeconds(60));
+        assertThatThrownBy(() -> verifier.verify(context(unknown)))
+                .isInstanceOf(SecurityException.class).hasMessageContaining("unknown");
+
+        String revoked = SkillTaskApprovalRefCodec.issueKeyed(SECRET.getBytes(StandardCharsets.UTF_8),
+                "risk-revoked", scope(context), "approval-revoked", CLOCK.instant().minusSeconds(10),
+                CLOCK.instant().plusSeconds(60));
+        assertThatThrownBy(() -> verifier.verify(context(revoked)))
+                .isInstanceOf(SecurityException.class).hasMessageContaining("revoked");
+
+        String tooLongForKey = SkillTaskApprovalRefCodec.issueKeyed(SECRET.getBytes(StandardCharsets.UTF_8),
+                "risk-short", scope(context), "approval-key-life", CLOCK.instant(),
+                CLOCK.instant().plusSeconds(300));
+        assertThatThrownBy(() -> verifier.verify(context(tooLongForKey)))
+                .isInstanceOf(SecurityException.class).hasMessageContaining("key lifetime");
+    }
+
+    @Test
+    void rejectsLegacyReferenceWhenCompatibilityModeIsDisabled() throws Exception {
+        SkillTaskProperties properties = keyedProperties();
+        properties.getApproval().setHmacSecret(SECRET);
+        HmacSkillTaskApprovalVerifier verifier = new HmacSkillTaskApprovalVerifier(properties, CLOCK);
+        SkillTaskApprovalContext context = context(null);
+
+        assertThatThrownBy(() -> verifier.verify(context(reference(context, "approval-legacy",
+                CLOCK.instant().plusSeconds(60).getEpochSecond()))))
+                .isInstanceOf(SecurityException.class).hasMessageContaining("legacy cma1 approvals are disabled");
+    }
+
     private static HmacSkillTaskApprovalVerifier verifier(String secret, Duration maxValidity) {
         SkillTaskProperties properties = new SkillTaskProperties();
         properties.getApproval().setHmacSecret(secret);
         properties.getApproval().setMaxValidity(maxValidity);
         return new HmacSkillTaskApprovalVerifier(properties, CLOCK);
+    }
+
+    private static SkillTaskProperties keyedProperties() {
+        SkillTaskProperties properties = new SkillTaskProperties();
+        properties.getApproval().setLegacyHmacEnabled(false);
+        properties.getApproval().setMaxValidity(Duration.ofHours(4));
+        return properties;
+    }
+
+    private static VerificationKey key(String secret, Instant notBefore, Instant expiresAt, Instant revokedAt) {
+        return new VerificationKey().setSecret(secret).setNotBefore(notBefore)
+                .setExpiresAt(expiresAt).setRevokedAt(revokedAt);
+    }
+
+    private static SkillTaskApprovalScope scope(SkillTaskApprovalContext context) {
+        return new SkillTaskApprovalScope(context.tenantId(), context.operatorId(), context.operatorType(),
+                context.skillId(), context.skillVersion(), context.inputSha256(), context.riskLevel());
     }
 
     private static SkillTaskApprovalContext context(String reference) {

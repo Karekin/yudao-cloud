@@ -5,6 +5,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Data
 @ConfigurationProperties(prefix = "cloudmold.skill-task")
@@ -26,11 +29,24 @@ public class SkillTaskProperties {
     public static class Approval {
 
         /**
-         * Secret owned by the external approval authority. It is never exposed through MCP.
-         * An empty value deliberately keeps every R2/R3 submission fail-closed.
+         * Compatibility-only cma1 secret. Production should use keys and disable legacy HMAC.
          */
         private String hmacSecret = "";
+        private boolean legacyHmacEnabled = true;
+        private Map<String, VerificationKey> keys = new LinkedHashMap<>();
         private Duration maxValidity = Duration.ofHours(4);
         private Duration clockSkew = Duration.ofSeconds(30);
+    }
+
+    @Data
+    public static class VerificationKey {
+
+        /**
+         * Secret owned by the external approval authority. It is never exposed through MCP.
+         */
+        private String secret = "";
+        private Instant notBefore;
+        private Instant expiresAt;
+        private Instant revokedAt;
     }
 }

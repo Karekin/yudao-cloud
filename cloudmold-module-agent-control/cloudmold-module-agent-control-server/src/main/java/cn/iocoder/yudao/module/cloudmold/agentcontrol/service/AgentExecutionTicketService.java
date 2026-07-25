@@ -5,6 +5,7 @@ import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.common.enums.UserTypeEnum;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties.SigningKey;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentExecutionTicketApi;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentExecutionTicketCommand;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentExecutionTicketResult;
@@ -58,7 +59,7 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
     public AgentExecutionTicketResult issue(AgentExecutionTicketCommand command, Long operatorUserId) {
         require(command != null, "command is required");
         requireActor(operatorUserId);
-        byte[] secret = configuredSecret();
+        SigningMaterial signing = configuredSigningMaterial(clock.instant());
         Duration maxValidity = requirePositive(properties.getMaxValidity(), "maxValidity");
         Duration requestedValidity = requireRequestedValidity(command.getValidForSeconds(), maxValidity);
         Long tenantId = TenantContextHolder.getRequiredTenantId();
@@ -125,21 +126,52 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
 
         Instant requestedExpiry = clock.instant().plus(requestedValidity);
         Instant expiresAt = effectiveExpiry(now, requestedExpiry, actorGrant, grant);
-        String approvalRef = SkillTaskApprovalRefCodec.issue(secret,
-                new SkillTaskApprovalScope(tenantId, operatorUserId, UserTypeEnum.ADMIN.getValue(),
-                        workOrder.getSkillId(), workOrder.getSkillVersion(),
-                        workOrder.getExecutionInputSha256(), workOrder.getRiskLevel()),
-                approval.getApprovalId(), expiresAt);
+        Instant issuedAt = clock.instant();
+        if (signing.keyed()) {
+            require(!expiresAt.isAfter(signing.expiresAt()),
+                    "execution ticket validity exceeds the active signing key lifetime");
+        }
+        SkillTaskApprovalScope approvalScope = new SkillTaskApprovalScope(tenantId, operatorUserId,
+                UserTypeEnum.ADMIN.getValue(), workOrder.getSkillId(), workOrder.getSkillVersion(),
+                workOrder.getExecutionInputSha256(), workOrder.getRiskLevel());
+        String approvalRef = signing.keyed()
+                ? SkillTaskApprovalRefCodec.issueKeyed(signing.secret(), signing.keyId(), approvalScope,
+                approval.getApprovalId(), issuedAt, expiresAt)
+                : SkillTaskApprovalRefCodec.issue(signing.secret(), approvalScope, approval.getApprovalId(), expiresAt);
         String approvalRefSha256 = SkillTaskApprovalRefCodec.sha256(approvalRef);
-        appendAudit(tenantId, operatorUserId, workOrder, approval, expiresAt, approvalRefSha256, now);
+        appendAudit(tenantId, operatorUserId, workOrder, approval, expiresAt, approvalRefSha256, signing, now);
         return AgentExecutionTicketResult.builder().workOrderId(workOrder.getWorkOrderId())
                 .approvalId(approval.getApprovalId()).approvalRef(approvalRef)
                 .approvalRefSha256(approvalRefSha256)
                 .expiresAt(expiresAt).build();
     }
 
-    private byte[] configuredSecret() {
-        String value = Objects.toString(properties.getHmacSecret(), "").trim();
+    private SigningMaterial configuredSigningMaterial(Instant now) {
+        String activeKeyId = Objects.toString(properties.getActiveKeyId(), "").trim();
+        if (!activeKeyId.isEmpty()) {
+            SigningKey key = properties.getKeys().get(activeKeyId);
+            if (key == null) {
+                throw new IllegalStateException("active Skill Task approval signing key is not configured");
+            }
+            byte[] secret = requireSecret(key.getSecret());
+            Instant notBefore = requireNonNull(key.getNotBefore(), "active signing key notBefore is missing");
+            Instant expiresAt = requireNonNull(key.getExpiresAt(), "active signing key expiresAt is missing");
+            require(!now.isBefore(notBefore), "active Skill Task approval signing key is not active yet");
+            require(expiresAt.isAfter(now), "active Skill Task approval signing key has expired");
+            if (key.getRevokedAt() != null && !now.isBefore(key.getRevokedAt())) {
+                throw new IllegalStateException("active Skill Task approval signing key is revoked");
+            }
+            return new SigningMaterial(activeKeyId, secret, true, expiresAt);
+        }
+        if (!properties.isLegacyHmacEnabled()) {
+            throw new IllegalStateException(
+                    "Skill Task approval signing is disabled because no active keyed signer is configured");
+        }
+        return new SigningMaterial("legacy", requireSecret(properties.getHmacSecret()), false, null);
+    }
+
+    private byte[] requireSecret(String configured) {
+        String value = Objects.toString(configured, "").trim();
         if (value.isEmpty()) {
             throw new IllegalStateException(
                     "Skill Task approval signing is disabled because no signing secret is configured");
@@ -189,22 +221,28 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
     }
 
     private void appendAudit(Long tenantId, Long operatorUserId, WorkOrder workOrder, Approval approval, Instant expiresAt,
-                             String approvalRefSha256, LocalDateTime now) {
-        String detailJson = JsonUtils.toJsonString(Map.of(
-                "approvalId", approval.getApprovalId(),
-                "workOrderId", workOrder.getWorkOrderId(),
-                "approvalRefSha256", approvalRefSha256,
-                "expiresAt", expiresAt.toString(),
-                "skillId", workOrder.getSkillId(),
-                "skillVersion", workOrder.getSkillVersion(),
-                "inputSha256", workOrder.getExecutionInputSha256(),
-                "definitionClosureSha256", workOrder.getSkillDefinitionClosureSha256(),
-                "riskLevel", workOrder.getRiskLevel()));
+                             String approvalRefSha256, SigningMaterial signing, LocalDateTime now) {
+        String detailJson = JsonUtils.toJsonString(Map.ofEntries(
+                Map.entry("approvalId", approval.getApprovalId()),
+                Map.entry("workOrderId", workOrder.getWorkOrderId()),
+                Map.entry("approvalRefSha256", approvalRefSha256),
+                Map.entry("approvalRefVersion", signing.keyed()
+                        ? SkillTaskApprovalRefCodec.VERSION : SkillTaskApprovalRefCodec.LEGACY_VERSION),
+                Map.entry("signingKeyId", signing.keyId()),
+                Map.entry("expiresAt", expiresAt.toString()),
+                Map.entry("skillId", workOrder.getSkillId()),
+                Map.entry("skillVersion", workOrder.getSkillVersion()),
+                Map.entry("inputSha256", workOrder.getExecutionInputSha256()),
+                Map.entry("definitionClosureSha256", workOrder.getSkillDefinitionClosureSha256()),
+                Map.entry("riskLevel", workOrder.getRiskLevel())));
         AuditEvent event = new AuditEvent().setAuditEventId(UUID.randomUUID().toString()).setTenantId(tenantId)
                 .setAggregateType("role_approval").setAggregateId(approval.getApprovalId())
                 .setAggregateVersion(approval.getVersion()).setEventType("agent_control.execution_ticket.issued")
                 .setActorUserId(operatorUserId).setDetailJson(detailJson).setOccurredAt(now).setCreatedAt(now);
         require(mapper.insertAuditEvent(event) == 1, "failed to append execution-ticket audit event");
+    }
+
+    private record SigningMaterial(String keyId, byte[] secret, boolean keyed, Instant expiresAt) {
     }
 
     private String approvalScopeHash(WorkOrder workOrder) {

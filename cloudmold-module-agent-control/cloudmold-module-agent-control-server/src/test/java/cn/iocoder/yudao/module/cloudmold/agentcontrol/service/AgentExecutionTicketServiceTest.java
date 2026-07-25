@@ -4,6 +4,7 @@ import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.framework.common.enums.UserTypeEnum;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties.SigningKey;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentExecutionTicketCommand;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentExecutionTicketResult;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.ActorRoleGrant;
@@ -98,6 +99,55 @@ class AgentExecutionTicketServiceTest {
         }));
         verify(mapper).selectEffectiveApprovalAuthorityGrant(eq(17L), eq(200L), eq("approval-r3-1"),
                 eq("buyer"), eq("buyer.execute-replenishment"), eq("R3"), eq(approval.getScopeHash()), any());
+    }
+
+    @Test
+    void issuesKeyedCma2TicketAndAuditsTheKeyIdentity() {
+        TenantContextHolder.setTenantId(17L);
+        properties.setLegacyHmacEnabled(false);
+        properties.setActiveKeyId("risk-2026-07");
+        properties.getKeys().put("risk-2026-07", new SigningKey().setSecret(SECRET)
+                .setNotBefore(NOW.minusSeconds(60)).setExpiresAt(NOW.plusSeconds(600)));
+        WorkOrder workOrder = stubSuccessfulIssuance();
+
+        AgentExecutionTicketResult result = service.issue(command(), 101L);
+
+        assertThat(result.getApprovalRef()).startsWith("cma2:risk-2026-07:approval-r3-1:");
+        SkillTaskApprovalRefCodec.ParsedKeyedApprovalRef parsed =
+                SkillTaskApprovalRefCodec.parseKeyed(result.getApprovalRef());
+        assertThat(parsed.keyId()).isEqualTo("risk-2026-07");
+        assertThat(parsed.issuedAt()).isEqualTo(NOW);
+        assertThat(parsed.expiresAt()).isEqualTo(NOW.plusSeconds(300));
+        assertThat(SkillTaskApprovalRefCodec.sign(SECRET.getBytes(), SkillTaskApprovalRefCodec.keyedMessage(
+                new SkillTaskApprovalScope(17L, 101L, UserTypeEnum.ADMIN.getValue(),
+                        workOrder.getSkillId(), workOrder.getSkillVersion(),
+                        workOrder.getExecutionInputSha256(), workOrder.getRiskLevel()),
+                parsed.keyId(), parsed.approvalId(), parsed.issuedAt().getEpochSecond(),
+                parsed.expiresAt().getEpochSecond()))).isEqualTo(parsed.signature());
+        verify(mapper).insertAuditEvent(argThat(event -> event.getDetailJson().contains(
+                        "\"approvalRefVersion\":\"cma2\"")
+                && event.getDetailJson().contains("\"signingKeyId\":\"risk-2026-07\"")
+                && !event.getDetailJson().contains(result.getApprovalRef())
+                && !event.getDetailJson().contains(SECRET)));
+    }
+
+    @Test
+    void rejectsRevokedOrInsufficientLifetimeActiveSigningKey() {
+        TenantContextHolder.setTenantId(17L);
+        properties.setLegacyHmacEnabled(false);
+        properties.setActiveKeyId("risk-revoked");
+        properties.getKeys().put("risk-revoked", new SigningKey().setSecret(SECRET)
+                .setNotBefore(NOW.minusSeconds(60)).setExpiresAt(NOW.plusSeconds(600)).setRevokedAt(NOW));
+        stubSuccessfulIssuance();
+
+        assertThatThrownBy(() -> service.issue(command(), 101L))
+                .hasMessage("active Skill Task approval signing key is revoked");
+
+        properties.setActiveKeyId("risk-expiring");
+        properties.getKeys().put("risk-expiring", new SigningKey().setSecret(SECRET)
+                .setNotBefore(NOW.minusSeconds(60)).setExpiresAt(NOW.plusSeconds(120)));
+        assertThatThrownBy(() -> service.issue(command(), 101L))
+                .hasMessage("execution ticket validity exceeds the active signing key lifetime");
     }
 
     @Test
@@ -254,6 +304,22 @@ class AgentExecutionTicketServiceTest {
     private static AgentExecutionTicketCommand command() {
         return AgentExecutionTicketCommand.builder().workOrderId("wo-r3-1").approvalId("approval-r3-1")
                 .workOrderExpectedVersion(3L).validForSeconds(300L).build();
+    }
+
+    private WorkOrder stubSuccessfulIssuance() {
+        WorkOrder workOrder = approvedExecutableReadyWorkOrder();
+        Approval approval = approvedApproval(workOrder);
+        when(mapper.selectWorkOrderForUpdate(17L, "wo-r3-1")).thenReturn(workOrder);
+        when(mapper.selectApprovalForUpdate(17L, "approval-r3-1")).thenReturn(approval);
+        when(mapper.selectActionPolicy(17L, "buyer", "buyer.execute-replenishment"))
+                .thenReturn(executionPolicy(workOrder));
+        when(mapper.selectEffectiveActorRoleGrant(eq(17L), eq(101L), eq("buyer"), any()))
+                .thenReturn(activeRoleGrant(101L, 600));
+        when(mapper.selectEffectiveApprovalAuthorityGrant(eq(17L), eq(200L), eq("approval-r3-1"),
+                eq("buyer"), eq("buyer.execute-replenishment"), eq("R3"), eq(approval.getScopeHash()), any()))
+                .thenReturn(activeApprovalGrant(workOrder, approval, 600));
+        when(mapper.insertAuditEvent(any())).thenReturn(1);
+        return workOrder;
     }
 
     private static WorkOrder approvedExecutableReadyWorkOrder() {

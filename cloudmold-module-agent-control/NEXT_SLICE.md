@@ -22,6 +22,8 @@
 ## P0 激活前仍必须完成
 
 - [ ] 真实 secured endpoint smoke：无授权主体、伪造 terminal proof、scope 漂移全部从 HTTP/Dubbo 入口拒绝。
+- [x] keyed `cma2` 兼容升级：key ID、issuedAt、key ring 轮换、硬撤销、key/permit 到期与旧 `cma1`
+  显式关闭均有自动化负向测试；审计只记录版本、key ID 与票据摘要。
 - [ ] Agent Control 签发、SkillTask 公钥验签的非共享密钥 execution permit；当前 HMAC approval 不能作为最终跨服务信任模型。
 - [ ] 至少一次真实进程重启 E2E：提交后写回前、SkillTask 成功后工作单完成前、事件匹配后唤醒前。
 - [ ] 为授权自动过期追加逐条 lifecycle audit，并补非空 DQC。

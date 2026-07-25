@@ -52,6 +52,7 @@ cloudmold:
     max-payload-bytes: ${CLOUDMOLD_SKILL_MAX_PAYLOAD_BYTES:1048576}
     approval:
       hmac-secret: ${CLOUDMOLD_SKILL_TASK_APPROVAL_HMAC_SECRET:}
+      legacy-hmac-enabled: ${CLOUDMOLD_SKILL_TASK_APPROVAL_LEGACY_HMAC_ENABLED:true}
       max-validity: ${CLOUDMOLD_SKILL_TASK_APPROVAL_MAX_VALIDITY:4h}
       clock-skew: ${CLOUDMOLD_SKILL_TASK_APPROVAL_CLOCK_SKEW:30s}
   rpc:

@@ -39,11 +39,23 @@
   `BPM_APPROVED_PENDING_ATTESTATION`；它不会直接决定 Agent Control Approval，更不能签发生产 execution permit。
 - BPM 启动使用确定性 business key 和单次 CAS claim。远端结果不确定时进入 `START_UNCERTAIN` 并停止自动重试，
   防止重复流程；迟到的终态事件可以解除该不确定状态。
+- execution permit 已支持 keyed `cma2`：票据冻结 key ID、签发时间、到期时间和原有精确执行 scope。
+  Agent Control 只用当前 active key 签发；SkillTask 可在轮换窗口同时信任新旧 key，并按 `notBefore`、
+  `expiresAt`、`revokedAt` 和最大票据寿命 fail-closed。旧 `cma1` 仅为显式兼容通道，生产应关闭。
 
 运行开关：
 
 ```yaml
 cloudmold:
+  skill-task:
+    approval:
+      legacy-hmac-enabled: false
+      active-key-id: risk-2026-07
+      keys:
+        risk-2026-07:
+          secret: ${CLOUDMOLD_RISK_2026_07_SECRET}
+          not-before: 2026-07-25T00:00:00Z
+          expires-at: 2026-08-25T00:00:00Z
   agent-control:
     enabled: false
     approval-workflow:
@@ -59,15 +71,21 @@ cloudmold:
 `-Pcloudmold-agent-approval-bpm`。默认 Maven 构建不包含 `yudao-module-bpm-server`；仅设置运行开关但未启用
 profile 会启动失败，从而避免误以为空壳 Adapter 已有流程引擎。
 
+Signer 与 SkillTask verifier 必须由受管配置中心注入相同 key ring；轮换时先把新 key 加到 verifier，再切换
+`active-key-id`，旧票据耗尽后删除或设置 `revoked-at`。密钥值不得写入仓库、审计、BPM 变量或 MCP 响应。
+
 当前限制：
 
-- 当前仍是可验证的默认休眠实现，不是已上线自治平台；DeerFlow 工具调用闭环尚未完成。
+- 当前仍是可验证的默认休眠实现，不是已上线自治平台；DeerFlow 固定工具调用已在 LOCAL_TEST 闭环，
+  但没有生产 Risk 部署、生产身份/密钥托管或连续运行证据。
 - 仓库尚未提供 `cloudmold-agent-approval-v1` 的已部署、已发布流程定义，也尚未完成真实审批人任务 E2E。
 - yudao BPM 的状态事件没有审批任务操作人身份；因此终态只能作为候选证据，仍需由 Agent Control 的实名审批命令
   重新校验 exact grant、scope hash、策略快照和职责分离。
 - 缺断码模板、租约、事件和依赖恢复已通过单测与隔离 MySQL 演练，但尚未完成真实服务重启 E2E。
 - `buyer.execute-replenishment` 只能在本地测试中绑定 Legacy ERP Skill；规范 Procurement SoR 和预算账本未完成前，真实采购保持 R3 人工审批并关闭无人生产写入。
 - 自动授权过期尚未逐条产生 lifecycle audit；当前过期授权会失效，但上线前仍需补审计投影。
+- `cma2` 当前仍是共享 HMAC key ring，只关闭 key ID、轮换、撤销和有效期治理缺口；最终跨服务信任仍需由
+  独立生产 Risk Authority 签发非共享密钥 permit（优先公钥验签），并完成真实轮换/撤销演练。
 - 中央 Demo 迁移序号 83–90 当前存在并行未提交改动；本切片先提交模块内
   `V20260725_06__cloudmold_agent_approval_workflow.sql`，待序号基线收口后再生成中央镜像、回滚和 checksum，
   不抢占或重排并行迁移。
