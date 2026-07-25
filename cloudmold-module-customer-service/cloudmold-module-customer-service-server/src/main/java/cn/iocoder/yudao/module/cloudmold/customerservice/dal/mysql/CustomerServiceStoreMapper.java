@@ -72,6 +72,27 @@ public interface CustomerServiceStoreMapper {
             """)
     CustomerServiceTicketDO selectTicket(@Param("tenantId") Long tenantId, @Param("ticketId") String ticketId);
 
+    @Select("""
+            SELECT COUNT(*) FROM cloudmold_customer_service_ticket
+            WHERE tenant_id=#{tenantId} AND customer_principal_id=#{customerPrincipalId}
+            """)
+    long countTicketsByCustomer(@Param("tenantId") Long tenantId,
+                                @Param("customerPrincipalId") String customerPrincipalId);
+
+    @Select("""
+            SELECT ticket_id,tenant_id,ticket_no,run_id,customer_principal_id,channel_code,priority,category_code,
+                   sla_policy_code,sla_policy_version,resolution_deadline_at,fcr_window_hours,
+                   assigned_agent_principal_id,status,version,created_at,updated_at
+            FROM cloudmold_customer_service_ticket
+            WHERE tenant_id=#{tenantId} AND customer_principal_id=#{customerPrincipalId}
+            ORDER BY updated_at DESC,ticket_id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            """)
+    List<CustomerServiceTicketDO> selectTicketsByCustomer(@Param("tenantId") Long tenantId,
+                                                           @Param("customerPrincipalId") String customerPrincipalId,
+                                                           @Param("offset") long offset,
+                                                           @Param("limit") int limit);
+
     @Update("""
             UPDATE cloudmold_customer_service_ticket
             SET status=#{after},version=version+1,updated_at=#{now}

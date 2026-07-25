@@ -14,6 +14,7 @@ import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentContro
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.RoleActionPolicy;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.WorkOrder;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalScope;
 import org.junit.jupiter.api.AfterEach;
@@ -23,6 +24,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,12 +43,19 @@ class AgentExecutionTicketServiceTest {
 
     private final AgentControlStoreMapper mapper = mock(AgentControlStoreMapper.class);
     private final SkillTaskApprovalSigningProperties properties = new SkillTaskApprovalSigningProperties();
+    private final HmacAgentExecutionPermitSigner signer = new HmacAgentExecutionPermitSigner(properties);
     private final AgentExecutionTicketService service = new AgentExecutionTicketService(
-            mapper, properties, Clock.fixed(NOW, ZoneOffset.UTC));
+            mapper, signer, Clock.fixed(NOW, ZoneOffset.UTC));
 
     @AfterEach
     void tearDown() {
         TenantContextHolder.clear();
+        properties.setHmacSecret("");
+        properties.setLegacyHmacEnabled(true);
+        properties.setActiveKeyId("");
+        properties.setIssueVersion("auto");
+        properties.setMaxValidity(Duration.ofHours(4));
+        properties.getKeys().clear();
     }
 
     @Test
@@ -129,6 +138,36 @@ class AgentExecutionTicketServiceTest {
                 && event.getDetailJson().contains("\"signingKeyId\":\"risk-2026-07\"")
                 && !event.getDetailJson().contains(result.getApprovalRef())
                 && !event.getDetailJson().contains(SECRET)));
+    }
+
+    @Test
+    void issuesClaimsBoundCma3TicketAndBindsTheFrozenRootRequestIdentity() {
+        TenantContextHolder.setTenantId(17L);
+        properties.setIssueVersion("cma3");
+        properties.setHmacSecret(SECRET);
+        WorkOrder workOrder = stubSuccessfulIssuance();
+
+        AgentExecutionTicketResult result = service.issue(command(), 101L);
+
+        assertThat(result.getApprovalRef()).startsWith("cma3:local-hmac:");
+        SkillTaskApprovalRefCodec.ParsedClaimsApprovalRef parsed =
+                SkillTaskApprovalRefCodec.parseClaims(result.getApprovalRef());
+        SkillTaskApprovalPermitClaims claims = parsed.claims();
+        assertThat(claims.workOrderId()).isEqualTo("wo-r3-1");
+        assertThat(claims.approvalId()).isEqualTo("approval-r3-1");
+        assertThat(claims.skillId()).isEqualTo(workOrder.getSkillId());
+        assertThat(claims.skillVersion()).isEqualTo(workOrder.getSkillVersion());
+        assertThat(claims.definitionClosureSha256()).isEqualTo(workOrder.getSkillDefinitionClosureSha256());
+        assertThat(claims.inputSha256()).isEqualTo(workOrder.getExecutionInputSha256());
+        assertThat(claims.subject()).isEqualTo("2:101");
+        assertThat(claims.rootRequestIdentity()).isEqualTo(DigestUtil.sha256Hex(String.join("\n",
+                "17", "wo-r3-1", "approval-r3-1", workOrder.getSkillId(), workOrder.getSkillVersion(),
+                workOrder.getSkillDefinitionClosureSha256(), workOrder.getExecutionInputSha256(),
+                workOrder.getRiskLevel(), "2:101")));
+        assertThat(SkillTaskApprovalRefCodec.sign(SECRET.getBytes(),
+                SkillTaskApprovalRefCodec.claimsMessage("local-hmac",
+                        new String(Base64.getUrlDecoder().decode(result.getApprovalRef().split(":", -1)[2])))))
+                .isEqualTo(parsed.signature());
     }
 
     @Test
@@ -261,7 +300,7 @@ class AgentExecutionTicketServiceTest {
     void failsClosedWhenNoSigningSecretIsConfigured() {
         TenantContextHolder.setTenantId(17L);
         properties.setHmacSecret("");
-        when(mapper.selectWorkOrderForUpdate(17L, "wo-r3-1")).thenReturn(approvedExecutableReadyWorkOrder());
+        stubSuccessfulIssuance();
 
         assertThatThrownBy(() -> service.issue(command(), 101L))
                 .hasMessageContaining("disabled because no signing secret is configured");
@@ -272,7 +311,7 @@ class AgentExecutionTicketServiceTest {
         TenantContextHolder.setTenantId(17L);
         properties.setHmacSecret(SECRET);
         properties.setMaxValidity(Duration.ofMinutes(5));
-        when(mapper.selectWorkOrderForUpdate(17L, "wo-r3-1")).thenReturn(approvedExecutableReadyWorkOrder());
+        stubSuccessfulIssuance();
 
         assertThatThrownBy(() -> service.issue(AgentExecutionTicketCommand.builder()
                 .workOrderId("wo-r3-1").approvalId("approval-r3-1").workOrderExpectedVersion(3L)

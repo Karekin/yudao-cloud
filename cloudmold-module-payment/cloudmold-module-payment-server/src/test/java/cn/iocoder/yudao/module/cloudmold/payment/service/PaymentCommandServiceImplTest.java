@@ -24,12 +24,16 @@ class PaymentCommandServiceImplTest {
     private final PaymentTransactionMapper transactionMapper = mock(PaymentTransactionMapper.class);
     private final OrderQueryApi orderQueryApi = mock(OrderQueryApi.class);
     private final OutboxAppender outboxAppender = mock(OutboxAppender.class);
+    private final PaymentInternalTestProperties properties = new PaymentInternalTestProperties();
+    private final PaymentInternalTestEnvironmentGuard guard = new PaymentInternalTestEnvironmentGuard(properties);
     private final PaymentCommandServiceImpl service = new PaymentCommandServiceImpl(operationMapper, paymentMapper,
-            transactionMapper, orderQueryApi, outboxAppender);
+            transactionMapper, orderQueryApi, outboxAppender, guard);
 
     @BeforeEach
     void setUp() {
         TenantContextHolder.setTenantId(1L);
+        properties.setEnvironment("LOCAL_TEST");
+        properties.setEnabled(true);
         when(operationMapper.selectLastInsertId()).thenReturn(21L);
         when(operationMapper.markSucceeded(anyLong(), anyLong(), anyString(), anyString(), any())).thenReturn(1);
         when(paymentMapper.insert(any(PaymentDO.class))).thenReturn(1);
@@ -148,6 +152,27 @@ class PaymentCommandServiceImplTest {
         assertThat(replay.getDuplicate()).isTrue();
         verify(paymentMapper, never()).insert(any(PaymentDO.class));
         verify(orderQueryApi, never()).requirePayableOrder(anyString(), anyLong(), anyString());
+    }
+
+    @Test
+    void shouldRejectInternalTestProviderWhenFeatureDisabled() {
+        properties.setEnabled(false);
+
+        assertThatThrownBy(() -> service.execute(captureCommand()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("INTERNAL_TEST payment provider is disabled in current environment");
+        verifyNoInteractions(operationMapper, paymentMapper, transactionMapper, orderQueryApi, outboxAppender);
+    }
+
+    @Test
+    void shouldRejectInternalTestProviderInProductionEvenWhenEnabled() {
+        properties.setEnvironment("PRODUCTION");
+        properties.setEnabled(true);
+
+        assertThatThrownBy(() -> service.execute(captureCommand()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("INTERNAL_TEST payment provider is forbidden in PRODUCTION");
+        verifyNoInteractions(operationMapper, paymentMapper, transactionMapper, orderQueryApi, outboxAppender);
     }
 
     private void claimNewOperation() {

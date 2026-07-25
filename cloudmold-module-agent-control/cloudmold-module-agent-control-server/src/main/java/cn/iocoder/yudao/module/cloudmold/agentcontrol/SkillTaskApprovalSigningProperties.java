@@ -20,6 +20,11 @@ public class SkillTaskApprovalSigningProperties {
     private String hmacSecret = "";
     private boolean legacyHmacEnabled = true;
     private String activeKeyId = "";
+    /**
+     * auto preserves the legacy issuance path: keyed cma2 when activeKeyId is configured, cma1 otherwise.
+     * cma3 opts into the claims-bound permit while keeping the signer behind the local HMAC port.
+     */
+    private String issueVersion = "auto";
     private Map<String, SigningKey> keys = new LinkedHashMap<>();
     private Duration maxValidity = Duration.ofHours(4);
 

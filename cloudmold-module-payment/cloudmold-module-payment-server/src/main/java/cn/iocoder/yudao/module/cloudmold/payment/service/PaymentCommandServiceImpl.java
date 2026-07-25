@@ -31,11 +31,13 @@ public class PaymentCommandServiceImpl implements PaymentCommandApi {
     private final PaymentTransactionMapper transactionMapper;
     private final OrderQueryApi orderQueryApi;
     private final OutboxAppender outboxAppender;
+    private final PaymentInternalTestEnvironmentGuard internalTestEnvironmentGuard;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public PaymentCommandResult execute(PaymentCommand command) {
         validate(command);
+        internalTestEnvironmentGuard.requireInternalTestAllowed(command.getProviderCode());
         Long tenantId = TenantContextHolder.getRequiredTenantId();
         if (command.getOperation() == PaymentOperation.CAPTURE) {
             require(command.getPaymentId() == null, "CAPTURE does not accept paymentId");

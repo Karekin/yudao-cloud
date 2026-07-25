@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.cloudmold.customerservice.service;
 
+import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.cloudmold.customerservice.api.*;
 import cn.iocoder.yudao.module.cloudmold.customerservice.dal.dataobject.*;
@@ -85,19 +86,25 @@ class CustomerServiceEventServiceTest {
             assertThat(event.getIdempotencyKey()).endsWith(":" + event.getAggregateVersion());
             String json = JsonUtils.toJsonString(event.getPayload());
             assertThat(json).doesNotContain("message_body", "file_url", "13800138000",
-                    "https://bucket.example/customer/id-card.png");
+                    "https://bucket.example/customer/id-card.png",
+                    "restricted:objecttoken12345678", "sha256:" + "a".repeat(64), "sha256:" + "c".repeat(64));
         });
         AppendDomainEventCommand messageEvent = captor.getAllValues().get(1);
-        assertThat(messageEvent.getPayload()).containsEntry("content_token", "sha256:" + "a".repeat(64));
+        assertThat(messageEvent.getPayload()).containsEntry("has_content", true)
+                .containsEntry("content_digest_sha256", "a".repeat(64));
         assertThat(messageEvent.getPayload()).doesNotContainKeys("body", "content", "customer_phone", "customer_name");
         AppendDomainEventCommand attachmentEvent = captor.getAllValues().get(2);
-        assertThat(attachmentEvent.getPayload()).containsEntry("object_token", "restricted:objecttoken12345678")
+        assertThat(attachmentEvent.getPayload()).containsEntry("has_object_locator", true)
+                .containsEntry("object_locator_digest_sha256",
+                        DigestUtil.sha256Hex("restricted:objecttoken12345678"))
                 .doesNotContainKeys("file_name", "object_url", "bucket", "customer_address");
         AppendDomainEventCommand feedbackEvent = captor.getAllValues().get(3);
         assertThat(feedbackEvent.getPayload()).containsEntry("touchpoint_code", "TICKET_RESOLUTION")
                 .containsEntry("sentiment_code", "SATISFIED")
                 .containsEntry("score_basis_points", 10000)
-                .doesNotContainKeys("reviewer_principal_id", "message_body", "customer_phone");
+                .containsEntry("has_comment", true)
+                .containsEntry("comment_digest_sha256", "c".repeat(64))
+                .doesNotContainKeys("comment_token", "reviewer_principal_id", "message_body", "customer_phone");
         verify(mapper, times(2)).insertHistory(any(CustomerServiceStatusHistoryDO.class));
     }
 }

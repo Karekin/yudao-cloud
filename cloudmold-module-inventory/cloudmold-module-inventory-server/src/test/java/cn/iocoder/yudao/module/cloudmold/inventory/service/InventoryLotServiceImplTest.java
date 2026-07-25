@@ -7,6 +7,7 @@ import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
 import cn.iocoder.yudao.module.cloudmold.inventory.api.*;
 import cn.iocoder.yudao.module.cloudmold.inventory.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.inventory.dal.mysql.InventoryLotStoreMapper;
+import cn.iocoder.yudao.module.cloudmold.inventory.dal.mysql.InventoryV3BalanceMapper;
 import cn.iocoder.yudao.module.cloudmold.merchant.api.MerchantOwnerValidationApi;
 import org.junit.jupiter.api.*;
 
@@ -158,11 +159,12 @@ class InventoryLotServiceImplTest {
 
     private static final class Harness {
         final InventoryLotStoreMapper mapper = mock(InventoryLotStoreMapper.class);
+        final InventoryV3BalanceMapper balanceMapper = mock(InventoryV3BalanceMapper.class);
         final MerchantOwnerValidationApi merchantOwnerValidationApi = mock(MerchantOwnerValidationApi.class);
         final CatalogSkuValidationApi catalogSkuValidationApi = mock(CatalogSkuValidationApi.class);
         final OutboxAppender outboxAppender = mock(OutboxAppender.class);
-        final InventoryLotServiceImpl service = new InventoryLotServiceImpl(mapper, merchantOwnerValidationApi,
-                catalogSkuValidationApi, outboxAppender);
+        final InventoryLotServiceImpl service = new InventoryLotServiceImpl(mapper, balanceMapper,
+                merchantOwnerValidationApi, catalogSkuValidationApi, outboxAppender);
         final AtomicLong sequence = new AtomicLong();
         final ThreadLocal<Long> lastOperation = new ThreadLocal<>();
         final Map<String, Long> operationByKey = new HashMap<>();

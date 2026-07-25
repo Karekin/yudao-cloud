@@ -95,6 +95,31 @@ public class CustomerServiceCommandServiceImpl implements CustomerServiceCommand
     }
 
     @Override
+    public CustomerServiceView requireOwnedTicket(String ticketId, String customerPrincipalId) {
+        requireId(ticketId, "ticketId");
+        requireId(customerPrincipalId, "customerPrincipalId");
+        CustomerServiceTicketDO ticket = mapper.selectTicket(TenantContextHolder.getRequiredTenantId(), ticketId);
+        require(ticket != null && customerPrincipalId.equals(ticket.getCustomerPrincipalId()),
+                "customer-service ticket does not exist");
+        return ticketView(null, ticket, false);
+    }
+
+    @Override
+    public AppCustomerServicePageView listOwnedTickets(String customerPrincipalId, int pageNo, int pageSize) {
+        requireId(customerPrincipalId, "customerPrincipalId");
+        require(pageNo >= 1, "pageNo must be at least 1");
+        require(pageSize >= 1 && pageSize <= 50, "pageSize must be between 1 and 50");
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        long total = mapper.countTicketsByCustomer(tenantId, customerPrincipalId);
+        List<CustomerServiceView> list = total == 0 ? List.of()
+                : mapper.selectTicketsByCustomer(tenantId, customerPrincipalId,
+                        (long) (pageNo - 1) * pageSize, pageSize)
+                .stream().map(ticket -> ticketView(null, ticket, false)).toList();
+        return AppCustomerServicePageView.builder().list(list).total(total)
+                .pageNo(pageNo).pageSize(pageSize).build();
+    }
+
+    @Override
     public CustomerServiceView getClaim(String claimId) {
         requireId(claimId, "claimId");
         CustomerServiceClaimDO claim = mapper.selectClaim(TenantContextHolder.getRequiredTenantId(), claimId);

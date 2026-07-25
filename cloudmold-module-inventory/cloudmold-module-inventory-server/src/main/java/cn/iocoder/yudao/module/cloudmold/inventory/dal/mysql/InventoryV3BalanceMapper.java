@@ -57,4 +57,47 @@ public interface InventoryV3BalanceMapper extends BaseMapperX<InventoryV3Balance
                          @Param("expectedVersion") Long expectedVersion,
                          @Param("onHand") BigDecimal onHand, @Param("reserved") BigDecimal reserved,
                          @Param("inTransit") BigDecimal inTransit, @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT #{skuId} AS canonical_sku_id,
+                   COALESCE(SUM(GREATEST(b.on_hand_quantity-b.reserved_quantity,0)),0) AS allocatable_quantity,
+                   MAX(b.base_uom_code) AS base_uom_code,
+                   COALESCE(MAX(b.version),0) AS inventory_version,
+                   COUNT(*) AS balance_count,
+                   COUNT(DISTINCT b.base_uom_code) AS uom_count
+            FROM cloudmold_inventory_balance_v3 b
+            LEFT JOIN cloudmold_inventory_lot l
+              ON l.tenant_id=b.tenant_id AND l.lot_id=b.lot_id
+            WHERE b.tenant_id=#{tenantId} AND b.canonical_sku_id=#{skuId}
+              AND b.stock_status='SELLABLE' AND b.quality_status='QUALIFIED'
+              AND (b.lot_id IS NULL OR (
+                    l.status='ACTIVE'
+                    AND (l.expires_on IS NULL OR l.expires_on >= #{eligibilityDate})
+              ))
+            """)
+    cn.iocoder.yudao.module.cloudmold.inventory.api.InventorySkuAvailabilityView selectSkuAvailability(
+            @Param("tenantId") Long tenantId,
+            @Param("skuId") String skuId,
+            @Param("eligibilityDate") java.time.LocalDate eligibilityDate);
+
+    @Select("""
+            SELECT b.*
+            FROM cloudmold_inventory_balance_v3 b
+            LEFT JOIN cloudmold_inventory_lot l
+              ON l.tenant_id=b.tenant_id AND l.lot_id=b.lot_id
+            WHERE b.tenant_id=#{tenantId} AND b.canonical_sku_id=#{skuId}
+              AND b.stock_status='SELLABLE' AND b.quality_status='QUALIFIED'
+              AND b.on_hand_quantity-b.reserved_quantity >= #{quantity}
+              AND (b.lot_id IS NULL OR (
+                    l.status='ACTIVE'
+                    AND (l.expires_on IS NULL OR l.expires_on >= #{eligibilityDate})
+              ))
+            ORDER BY CASE WHEN l.expires_on IS NULL THEN 1 ELSE 0 END,
+                     l.expires_on ASC,b.updated_at ASC,b.balance_id ASC
+            LIMIT 1
+            """)
+    InventoryV3BalanceDO selectReservationCandidate(@Param("tenantId") Long tenantId,
+                                                     @Param("skuId") String skuId,
+                                                     @Param("quantity") BigDecimal quantity,
+                                                     @Param("eligibilityDate") java.time.LocalDate eligibilityDate);
 }

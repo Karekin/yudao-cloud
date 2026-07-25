@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.cloudmold.integration.yudao.service;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoErpCommandApi;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoLegacyOperationsQueryApi;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoWmsCommandApi;
+import cn.iocoder.yudao.module.cloudmold.integration.yudao.bridge.YudaoLegacyOperationsAdapter;
 import cn.iocoder.yudao.module.erp.controller.admin.purchase.vo.order.ErpPurchaseOrderSaveReqVO;
 import cn.iocoder.yudao.module.erp.controller.admin.purchase.vo.in.ErpPurchaseInSaveReqVO;
 import cn.iocoder.yudao.module.erp.controller.admin.sale.vo.customer.ErpCustomerSaveReqVO;

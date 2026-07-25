@@ -44,6 +44,28 @@ public class CatalogSkuDetailVO {
     private String sizeName;
     @Schema(description = "尺码组编码")
     private String sizeGroupCode;
+    @Schema(description = "尺码组 ID")
+    private String sizeGroupId;
+    @Schema(description = "款式生命周期状态")
+    private Integer styleStatus;
+    @Schema(description = "款式聚合版本")
+    private Long styleVersion;
+    @Schema(description = "SPU 生命周期状态")
+    private Integer spuStatus;
+    @Schema(description = "SPU 聚合版本")
+    private Long spuVersion;
+    @Schema(description = "颜色生命周期状态")
+    private Integer colorStatus;
+    @Schema(description = "颜色聚合版本")
+    private Long colorVersion;
+    @Schema(description = "尺码组生命周期状态")
+    private Integer sizeGroupStatus;
+    @Schema(description = "尺码组聚合版本")
+    private Long sizeGroupVersion;
+    @Schema(description = "尺码生命周期状态")
+    private Integer sizeStatus;
+    @Schema(description = "尺码聚合版本")
+    private Long sizeVersion;
     @Schema(description = "主条码（当前生效且标记为主用的条码）")
     private String primaryBarcode;
     @Schema(description = "基础计量单位编码")

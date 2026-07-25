@@ -32,6 +32,13 @@ public class MissionRuntimeReconciler {
 
     @Scheduled(fixedDelayString = "${cloudmold.agent-control.runtime.reconcile-delay-ms:2000}")
     public void reconcile() {
+        for (WorkOrder workOrder : mapper.selectExpiredRunLeaseWorkOrders(LocalDateTime.now(clock), 100)) {
+            TenantUtils.execute(workOrder.getTenantId(), () -> {
+                try { runtime.recoverExpiredRun(workOrder.getWorkOrderId()); }
+                catch (RuntimeException exception) { log.warn("Mission run recovery deferred tenant={} work={}",
+                        workOrder.getTenantId(), workOrder.getWorkOrderId(), exception); }
+            });
+        }
         for (MissionTimer timer : mapper.selectDueMissionTimers(LocalDateTime.now(clock), 100)) {
             TenantUtils.execute(timer.getTenantId(), () -> {
                 try { runtime.fireTimer(timer.getTimerId()); }

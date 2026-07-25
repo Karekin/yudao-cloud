@@ -135,15 +135,23 @@ public class MissionRuntimeService implements MissionRuntimeApi {
                 requireRef(command.getWorkOrderId(), "workOrderId")), "work order not found");
         require(workOrder.getMissionId() != null, "work order is not mission-managed");
         require(Objects.equals(command.getWorkOrderExpectedVersion(), workOrder.getVersion()), "work order version is stale");
-        require("READY".equals(workOrder.getStatus()), "only READY work can be claimed");
         require(actorUserId.equals(workOrder.getAssigneeUserId()), "actor is not the mission work assignee");
         require(mapper.selectEffectiveActorRoleGrant(tenantId, actorUserId, workOrder.getRoleCode(), now) != null,
                 "actor has no effective role grant");
         Mission mission = requireNonNull(mapper.selectMissionForUpdate(tenantId, workOrder.getMissionId()), "mission not found");
         require("ACTIVE".equals(mission.getStatus()), "mission is not ACTIVE");
         AgentRunLease previous = mapper.selectRunLeaseForUpdate(tenantId, workOrder.getWorkOrderId());
+        boolean directClaim = "READY".equals(workOrder.getStatus());
+        boolean takeoverClaim = "IN_PROGRESS".equals(workOrder.getStatus());
+        require(directClaim || takeoverClaim, "only READY or recoverable IN_PROGRESS work can be claimed");
         require(previous == null || !"ACTIVE".equals(previous.getStatus()) || !previous.getLeaseUntil().isAfter(now),
                 "work order already has an active run lease");
+        if (takeoverClaim) {
+            require(previous != null, "recoverable work order is missing its run lease");
+            require(Objects.equals(workOrder.getActiveRunId(), previous.getRunId()),
+                    "recoverable work order active run does not match the persisted lease");
+            expireRunIfNeeded(tenantId, workOrder, previous, now);
+        }
         int leaseSeconds = command.getLeaseSeconds() == null ? 60 : command.getLeaseSeconds();
         require(leaseSeconds >= 10 && leaseSeconds <= 300, "leaseSeconds must be between 10 and 300");
         String runId = UUID.randomUUID().toString();
@@ -163,7 +171,8 @@ public class MissionRuntimeService implements MissionRuntimeApi {
                 .setRoleCode(workOrder.getRoleCode()).setFencingToken(fencingToken).setStatus("ACTIVE")
                 .setStartedAt(now).setUpdatedAt(now)) == 1, "failed to persist immutable Agent run");
         require(mapper.transitionMissionWorkOrder(tenantId, workOrder.getWorkOrderId(), workOrder.getVersion(),
-                "READY", "IN_PROGRESS", null, runId, now) == 1, "work claim conflict");
+                directClaim ? "READY" : "IN_PROGRESS", "IN_PROGRESS", null, runId, now) == 1,
+                "work claim conflict");
         outbox(tenantId, "role_work_order", workOrder.getWorkOrderId(), "agent_control.run.claimed",
                 Map.of("runId", runId, "fencingToken", fencingToken), now);
         return AgentRunLeaseView.builder().missionId(workOrder.getMissionId()).workOrderId(workOrder.getWorkOrderId())
@@ -370,6 +379,26 @@ public class MissionRuntimeService implements MissionRuntimeApi {
         return result("role_work_order", completed.getWorkOrderId(), completed.getVersion(), status);
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public AgentControlResult recoverExpiredRun(String workOrderId) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        LocalDateTime now = now();
+        WorkOrder workOrder = requireNonNull(mapper.selectWorkOrderForUpdate(tenantId, requireRef(workOrderId, "workOrderId")),
+                "work order not found");
+        require("IN_PROGRESS".equals(workOrder.getStatus()), "only IN_PROGRESS work can recover an expired run");
+        AgentRunLease lease = requireNonNull(mapper.selectRunLeaseForUpdate(tenantId, workOrder.getWorkOrderId()),
+                "run lease not found");
+        require(Objects.equals(workOrder.getActiveRunId(), lease.getRunId()),
+                "active run does not match persisted lease");
+        if (!"ACTIVE".equals(lease.getStatus()) || lease.getLeaseUntil().isAfter(now)) {
+            return result("role_work_order", workOrder.getWorkOrderId(), workOrder.getVersion(), "NO_ACTION");
+        }
+        expireRunIfNeeded(tenantId, workOrder, lease, now);
+        outbox(tenantId, "role_work_order", workOrder.getWorkOrderId(), "agent_control.run.expired",
+                Map.of("runId", lease.getRunId(), "fencingToken", lease.getFencingToken()), now);
+        return result("role_work_order", workOrder.getWorkOrderId(), workOrder.getVersion(), "RUN_EXPIRED");
+    }
+
     private String derivedSuccessorContext(Mission mission, WorkOrder completed, BusinessResult result,
                                            MissionCheckpoint checkpoint) {
         Map<String, Object> predecessor = new LinkedHashMap<>();
@@ -416,6 +445,16 @@ public class MissionRuntimeService implements MissionRuntimeApi {
                 Objects.toString(workOrder.getSkillDefinitionClosureSha256(), "-"),
                 Objects.toString(workOrder.getExecutionInputSha256(), "-"),
                 Objects.toString(workOrder.getRiskLevel(), "-")));
+    }
+
+    private void expireRunIfNeeded(Long tenantId, WorkOrder workOrder, AgentRunLease lease, LocalDateTime now) {
+        if (!"ACTIVE".equals(lease.getStatus()) || lease.getLeaseUntil().isAfter(now)) return;
+        require(Objects.equals(workOrder.getActiveRunId(), lease.getRunId()),
+                "expired lease does not match the work order active run");
+        require(mapper.expireRunLease(tenantId, workOrder.getWorkOrderId(), lease.getRunId(),
+                lease.getFencingToken(), now) == 1, "failed to expire stale run lease");
+        require(mapper.finishAgentRun(tenantId, lease.getRunId(), "EXPIRED", now) == 1,
+                "failed to expire stale Agent run");
     }
 
     private void verifyLease(String runId, String leaseOwner, String leaseToken, Long fencingToken,

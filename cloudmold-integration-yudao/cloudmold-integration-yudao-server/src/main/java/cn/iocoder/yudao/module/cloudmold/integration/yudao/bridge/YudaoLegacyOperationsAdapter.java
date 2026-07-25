@@ -1,10 +1,11 @@
-package cn.iocoder.yudao.module.cloudmold.integration.yudao.service;
+package cn.iocoder.yudao.module.cloudmold.integration.yudao.bridge;
 
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoErpCommandApi;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoLegacyOperationsQueryApi;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoLegacyMasterDataQueryApi;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoMesCommandApi;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoWmsCommandApi;
+import cn.iocoder.yudao.module.cloudmold.integration.yudao.service.YudaoCommandOperationService;
 import cn.iocoder.yudao.module.erp.controller.admin.finance.vo.payment.ErpFinancePaymentSaveReqVO;
 import cn.iocoder.yudao.module.erp.controller.admin.finance.vo.receipt.ErpFinanceReceiptSaveReqVO;
 import cn.iocoder.yudao.module.erp.controller.admin.purchase.vo.order.ErpPurchaseOrderSaveReqVO;

@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.cloudmold.skilltask.approval;
 
 import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalScope;
 import org.springframework.stereotype.Component;
@@ -46,6 +47,9 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
         }
         try {
             String reference = requireText(context.approvalRef(), "approvalRef");
+            if (reference.startsWith(SkillTaskApprovalRefCodec.CLAIMS_VERSION + ":")) {
+                return verifyClaims(context, reference);
+            }
             return reference.startsWith(SkillTaskApprovalRefCodec.VERSION + ":")
                     ? verifyKeyed(context, reference) : verifyLegacy(context, reference);
         } catch (IllegalArgumentException ex) {
@@ -53,10 +57,51 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
         }
     }
 
+    private SkillTaskApprovalEvidence verifyClaims(SkillTaskApprovalContext context, String reference) {
+        SkillTaskApprovalRefCodec.ParsedClaimsApprovalRef parsed = SkillTaskApprovalRefCodec.parseClaims(reference);
+        SkillTaskApprovalPermitClaims claims = parsed.claims();
+        VerificationKeyMaterial key = claims.keyId().equals(SkillTaskApprovalRefCodec.LOCAL_HMAC_KEY_ID)
+                ? localKeyMaterial(claims.issuedAt()) : keys.get(claims.keyId());
+        if (key == null) {
+            throw new SecurityException("approvalRef signing key is unknown");
+        }
+        byte[] expected = SkillTaskApprovalRefCodec.sign(key.secret(),
+                SkillTaskApprovalRefCodec.claimsMessage(claims.keyId(), parsed.payload()));
+        requireSignature(expected, parsed.signature());
+        Instant now = clock.instant();
+        requireClaimsScope(context, claims);
+        if (claims.notBefore().isAfter(claims.issuedAt())) {
+            throw new SecurityException("approvalRef lifetime is invalid");
+        }
+        if (claims.issuedAt().isAfter(now.plus(clockSkew))) {
+            throw new SecurityException("approvalRef issued-at is in the future");
+        }
+        if (claims.notBefore().isAfter(now.plus(clockSkew))) {
+            throw new SecurityException("approvalRef is not active yet");
+        }
+        if (key.revokedAt() != null && !now.isBefore(key.revokedAt())) {
+            throw new SecurityException("approvalRef signing key is revoked");
+        }
+        if (claims.issuedAt().plus(clockSkew).isBefore(key.notBefore())) {
+            throw new SecurityException("approvalRef was issued before its signing key became active");
+        }
+        if (key.expiresAt() != null && claims.expiresAt().isAfter(key.expiresAt())) {
+            throw new SecurityException("approvalRef exceeds its signing key lifetime");
+        }
+        if (Duration.between(claims.issuedAt(), claims.expiresAt()).compareTo(maxValidity) > 0) {
+            throw new SecurityException("approvalRef validity exceeds the configured maximum");
+        }
+        requireNotExpired(claims.expiresAt(), now);
+        return new SkillTaskApprovalEvidence(claims, SkillTaskApprovalRefCodec.sha256(reference),
+                SkillTaskApprovalRefCodec.CLAIMS_VERIFIER + ":" + claims.keyId());
+    }
+
     private SkillTaskApprovalEvidence verifyKeyed(SkillTaskApprovalContext context, String reference) {
         SkillTaskApprovalRefCodec.ParsedKeyedApprovalRef parsed =
                 SkillTaskApprovalRefCodec.parseKeyed(reference);
-        VerificationKeyMaterial key = keys.get(parsed.keyId());
+        String referenceSha256 = SkillTaskApprovalRefCodec.sha256(reference);
+        VerificationKeyMaterial key = parsed.keyId().equals(SkillTaskApprovalRefCodec.LOCAL_HMAC_KEY_ID)
+                ? localKeyMaterial(parsed.issuedAt()) : keys.get(parsed.keyId());
         if (key == null) {
             throw new SecurityException("approvalRef signing key is unknown");
         }
@@ -77,15 +122,20 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
         if (!parsed.expiresAt().isAfter(parsed.issuedAt())) {
             throw new SecurityException("approvalRef lifetime is invalid");
         }
-        if (parsed.expiresAt().isAfter(key.expiresAt())) {
+        if (key.expiresAt() != null && parsed.expiresAt().isAfter(key.expiresAt())) {
             throw new SecurityException("approvalRef exceeds its signing key lifetime");
         }
         if (Duration.between(parsed.issuedAt(), parsed.expiresAt()).compareTo(maxValidity) > 0) {
             throw new SecurityException("approvalRef validity exceeds the configured maximum");
         }
         requireNotExpired(parsed.expiresAt(), now);
-        return new SkillTaskApprovalEvidence(parsed.approvalId(), SkillTaskApprovalRefCodec.sha256(reference),
-                parsed.expiresAt(), SkillTaskApprovalRefCodec.VERIFIER + ":" + parsed.keyId());
+        SkillTaskApprovalPermitClaims claims = new SkillTaskApprovalPermitClaims(SkillTaskApprovalRefCodec.VERSION,
+                parsed.keyId(), SkillTaskApprovalRefCodec.DEFAULT_ISSUER, SkillTaskApprovalRefCodec.DEFAULT_AUDIENCE,
+                referenceSha256, "-", parsed.approvalId(), referenceSha256, context.skillId(), context.skillVersion(),
+                context.definitionClosureSha256(), context.inputSha256(), context.riskLevel(),
+                subject(context), context.tenantId(), parsed.issuedAt(), parsed.issuedAt(), parsed.expiresAt());
+        return new SkillTaskApprovalEvidence(claims, referenceSha256,
+                SkillTaskApprovalRefCodec.VERIFIER + ":" + parsed.keyId());
     }
 
     private SkillTaskApprovalEvidence verifyLegacy(SkillTaskApprovalContext context, String reference) {
@@ -101,8 +151,16 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
         if (parsed.expiresAt().isAfter(now.plus(maxValidity).plus(clockSkew))) {
             throw new SecurityException("approvalRef validity exceeds the configured maximum");
         }
-        return new SkillTaskApprovalEvidence(parsed.approvalId(), SkillTaskApprovalRefCodec.sha256(reference),
-                parsed.expiresAt(), SkillTaskApprovalRefCodec.LEGACY_VERIFIER);
+        String referenceSha256 = SkillTaskApprovalRefCodec.sha256(reference);
+        SkillTaskApprovalPermitClaims claims = new SkillTaskApprovalPermitClaims(SkillTaskApprovalRefCodec.LEGACY_VERSION,
+                SkillTaskApprovalRefCodec.LOCAL_HMAC_KEY_ID, SkillTaskApprovalRefCodec.DEFAULT_ISSUER,
+                SkillTaskApprovalRefCodec.DEFAULT_AUDIENCE, referenceSha256, "-", parsed.approvalId(),
+                referenceSha256,
+                context.skillId(), context.skillVersion(), context.definitionClosureSha256(), context.inputSha256(),
+                context.riskLevel(), subject(context), context.tenantId(), now.minus(clockSkew), now,
+                parsed.expiresAt());
+        return new SkillTaskApprovalEvidence(claims, referenceSha256,
+                SkillTaskApprovalRefCodec.LEGACY_VERIFIER);
     }
 
     private void requireNotExpired(Instant expiresAt, Instant now) {
@@ -124,6 +182,13 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
 
     static String message(SkillTaskApprovalContext context, String approvalId, long expiresEpoch) {
         return SkillTaskApprovalRefCodec.message(scope(context), approvalId, expiresEpoch);
+    }
+
+    private VerificationKeyMaterial localKeyMaterial(Instant issuedAt) {
+        if (legacySecret.length == 0) {
+            return null;
+        }
+        return new VerificationKeyMaterial(legacySecret, issuedAt.minus(clockSkew), null, null);
     }
 
     private static Map<String, VerificationKeyMaterial> configuredKeys(SkillTaskProperties.Approval approval) {
@@ -164,6 +229,26 @@ public class HmacSkillTaskApprovalVerifier implements SkillTaskApprovalVerifier 
             throw new IllegalArgumentException(field + " is required");
         }
         return value.trim();
+    }
+
+    private static String subject(SkillTaskApprovalContext context) {
+        return context.operatorType() + ":" + context.operatorId();
+    }
+
+    private static void requireClaimsScope(SkillTaskApprovalContext context, SkillTaskApprovalPermitClaims claims) {
+        if (!claims.issuer().equals(SkillTaskApprovalRefCodec.DEFAULT_ISSUER)
+                || !claims.audience().equals(SkillTaskApprovalRefCodec.DEFAULT_AUDIENCE)) {
+            throw new SecurityException("approvalRef issuer or audience is invalid");
+        }
+        if (claims.tenantId() != context.tenantId()
+                || !subject(context).equals(claims.subject())
+                || !context.skillId().equals(claims.skillId())
+                || !context.skillVersion().equals(claims.skillVersion())
+                || !context.definitionClosureSha256().equals(claims.definitionClosureSha256())
+                || !context.inputSha256().equals(claims.inputSha256())
+                || !context.riskLevel().equalsIgnoreCase(claims.riskLevel())) {
+            throw new SecurityException("approvalRef signature or scope is invalid");
+        }
     }
 
     private static Duration positive(Duration value, String field) {

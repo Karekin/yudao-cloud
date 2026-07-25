@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.cloudmold.customerservice.service;
 
+import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.module.cloudmold.customerservice.api.CustomerServiceCommand;
 import cn.iocoder.yudao.module.cloudmold.customerservice.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.customerservice.dal.mysql.CustomerServiceStoreMapper;
@@ -59,7 +60,8 @@ public class CustomerServiceEventService {
         payload.put("sender_type", message.getSenderType());
         payload.put("sender_principal_id", message.getSenderPrincipalId());
         payload.put("message_type", message.getMessageType());
-        payload.put("content_token", message.getContentToken());
+        payload.put("has_content", hasText(message.getContentToken()));
+        payload.put("content_digest_sha256", safeDigest(message.getContentToken()));
         payload.put("attachment_count", message.getAttachmentCount());
         payload.put("occurred_at", occurredAt.toString());
         append("customer_service.message.recorded", "customer_service_message", message.getMessageId(), 1L,
@@ -74,7 +76,8 @@ public class CustomerServiceEventService {
         payload.put("ticket_id", attachment.getTicketId());
         payload.put("message_id", attachment.getMessageId());
         payload.put("media_type", attachment.getMediaType());
-        payload.put("object_token", attachment.getObjectToken());
+        payload.put("has_object_locator", hasText(attachment.getObjectToken()));
+        payload.put("object_locator_digest_sha256", safeDigest(attachment.getObjectToken()));
         payload.put("content_sha256", attachment.getContentSha256());
         payload.put("size_bytes", attachment.getSizeBytes());
         payload.put("malware_scan_status", attachment.getMalwareScanStatus());
@@ -93,7 +96,8 @@ public class CustomerServiceEventService {
         payload.put("sentiment_code", feedback.getSentimentCode());
         payload.put("score_basis_points", feedback.getScoreBasisPoints());
         payload.put("reason_code", feedback.getReasonCode());
-        payload.put("comment_token", feedback.getCommentToken());
+        payload.put("has_comment", hasText(feedback.getCommentToken()));
+        payload.put("comment_digest_sha256", safeDigest(feedback.getCommentToken()));
         payload.put("occurred_at", occurredAt.toString());
         append("customer_service.buyer_feedback.recorded", "customer_service_buyer_feedback",
                 feedback.getFeedbackId(), 1L, feedback.getTenantId(), feedback.getRunId(), command, occurredAt,
@@ -157,5 +161,20 @@ public class CustomerServiceEventService {
         if (links == null) return null;
         return links.stream().filter(link -> type.equals(link.getReferenceType()))
                 .map(TicketOrderLinkDO::getReferenceId).findFirst().orElse(null);
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String safeDigest(String tokenOrDigest) {
+        if (!hasText(tokenOrDigest)) {
+            return null;
+        }
+        String trimmed = tokenOrDigest.trim();
+        if (trimmed.startsWith("sha256:") && trimmed.length() == 71) {
+            return trimmed.substring("sha256:".length());
+        }
+        return DigestUtil.sha256Hex(trimmed);
     }
 }

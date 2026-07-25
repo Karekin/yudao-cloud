@@ -170,4 +170,18 @@ public interface FulfillmentQueryMapper {
             """)
     List<FulfillmentDetailItem> selectFulfillmentItems(@Param("tenantId") Long tenantId,
                                                        @Param("fulfillmentId") String fulfillmentId);
+
+    @Select("""
+            SELECT f.fulfillment_id,f.fulfillment_no,f.order_id,f.order_no,f.seller_id,f.warehouse_id,f.status,
+                   s.shipment_id AS first_slice_shipment_id,s.status AS first_slice_shipment_status,
+                   s.carrier_code,s.waybill_no,f.version AS aggregate_version,f.created_at,f.updated_at
+            FROM cloudmold_fulfillment_order f
+            LEFT JOIN cloudmold_shipment s
+              ON s.tenant_id=f.tenant_id AND s.fulfillment_id=f.fulfillment_id
+            WHERE f.tenant_id=#{tenantId} AND f.order_id=#{orderId}
+            ORDER BY f.created_at DESC
+            LIMIT 1
+            """)
+    FulfillmentDetailVO selectByOrder(@Param("tenantId") Long tenantId,
+                                      @Param("orderId") String orderId);
 }

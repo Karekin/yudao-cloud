@@ -6,15 +6,17 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskRetryCommand;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskSubmitCommand;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskView;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
 import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalEvidence;
 import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalVerifier;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskMapper;
+import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.PermitConsumption;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Task;
 import cn.iocoder.yudao.module.cloudmold.skilltask.definition.SkillTaskDefinition;
 import cn.iocoder.yudao.module.cloudmold.skilltask.definition.SkillTaskDefinitionRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -46,11 +48,6 @@ class SkillTaskApiServiceTest {
     private final SkillTaskApiService service = new SkillTaskApiService(mapper, definitions, json,
             approvalVerifier, clock);
 
-    @BeforeEach
-    void acceptDefinitionProofFreeze() {
-        when(mapper.freezeDefinitionProof(anyLong(), any(), any(), any(), any())).thenReturn(1);
-    }
-
     @AfterEach
     void clearContext() {
         TenantContextHolder.clear();
@@ -68,8 +65,8 @@ class SkillTaskApiServiceTest {
         SkillTaskView result = service.submit(command("request-1", "{}"));
 
         assertThat(result.getTaskId()).isEqualTo("task-existing");
-        verify(mapper, never()).insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), anyLong(), any(), any(), any(), any());
+        verify(mapper, never()).insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), anyLong(), any(), any(), any(), any());
     }
 
     @Test
@@ -79,10 +76,13 @@ class SkillTaskApiServiceTest {
         when(definitions.require("skill.read", "1.0.0")).thenReturn(definition);
         AtomicReference<Task> stored = new AtomicReference<>();
         when(mapper.selectByRequestKey(8L, "skill.read", "request-1")).thenReturn(null);
-        when(mapper.insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), anyLong(), any(), any(), any(), any())).thenAnswer(invocation -> {
+        when(mapper.insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), anyLong(), any(), any(), any(), any())).thenAnswer(invocation -> {
                     String taskId = invocation.getArgument(1);
-                    stored.set(task(taskId, "request-1", "{}", json.sha256("{}")));
+                    Task created = task(taskId, "request-1", "{}", json.sha256("{}"));
+                    created.setRiskLevel(invocation.getArgument(10));
+                    created.setApprovalRef(invocation.getArgument(11));
+                    stored.set(created);
                     return 1;
                 });
         when(mapper.selectByRequestKeyForUpdate(8L, "skill.read", "request-1"))
@@ -92,8 +92,9 @@ class SkillTaskApiServiceTest {
         SkillTaskView result = service.submit(command("request-1", "{}"));
 
         assertThat(result.getTaskId()).isNotBlank().isEqualTo(result.getRunId());
-        verify(mapper).insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), anyLong(), any(), any(), any(), any());
+        assertThat(result.getApprovalSummary()).isNull();
+        verify(mapper).insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), anyLong(), any(), any(), any(), any());
         verify(mapper).insertStep(8L, result.getTaskId(), "read", 1, "cap.read", "READ", "[]",
                 result.getTaskId() + ":read", LocalDateTime.of(2026, 7, 18, 12, 0));
         verify(mapper).insertHistory(8L, result.getTaskId(), 0L, null, "QUEUED", "read",
@@ -141,8 +142,53 @@ class SkillTaskApiServiceTest {
         assertThatThrownBy(() -> service.submit(command))
                 .isInstanceOf(SecurityException.class)
                 .hasMessage("approval scope rejected");
-        verify(mapper, never()).insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), anyLong(), any(), any(), any(), any());
+        verify(mapper, never()).insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), anyLong(), any(), any(), any(), any());
+    }
+
+    @Test
+    void consumesCma3PermitOnceAndRejectsDifferentRequestKeyReplay() throws Exception {
+        authenticate();
+        SkillTaskDefinition definition = readDefinition();
+        definition.setRiskLevel("R3");
+        when(definitions.require("skill.read", "1.0.0")).thenReturn(definition);
+        SkillTaskSubmitCommand first = command("request-1", "{}");
+        first.setRiskLevel("R3");
+        SkillTaskSubmitCommand replay = command("request-2", "{}");
+        replay.setRiskLevel("R3");
+        SkillTaskApprovalEvidence evidence = approvalEvidence("permit-1", "approval-r3-1",
+                definition.getDefinitionClosureSha256());
+        String approvalRef = validClaimsReference(evidence.claims());
+        first.setApprovalRef(approvalRef);
+        replay.setApprovalRef(approvalRef);
+        when(approvalVerifier.verify(any())).thenReturn(evidence);
+        AtomicReference<Task> stored = new AtomicReference<>();
+        PermitConsumption consumed = new PermitConsumption();
+        consumed.setTenantId(8L);
+        consumed.setPermitId("permit-1");
+        consumed.setRootRequestIdentity(evidence.rootRequestIdentity());
+        consumed.setClientRequestKey("request-1");
+        when(mapper.selectByRequestKey(8L, "skill.read", "request-1")).thenReturn(null);
+        when(mapper.insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), anyLong(), any(), any(), any(), any())).thenAnswer(invocation -> {
+                    String taskId = invocation.getArgument(1);
+                    String requestKey = invocation.getArgument(5);
+                    Task created = task(taskId, requestKey, "{}", json.sha256("{}"));
+                    created.setRiskLevel(invocation.getArgument(10));
+                    created.setApprovalRef(invocation.getArgument(11));
+                    stored.set(created);
+                    return 1;
+                });
+        when(mapper.selectByRequestKeyForUpdate(eq(8L), eq("skill.read"), any())).thenAnswer(invocation -> stored.get());
+        when(mapper.selectTask(eq(8L), any())).thenAnswer(invocation -> stored.get());
+        when(mapper.selectPermitConsumption(8L, "permit-1")).thenReturn(consumed);
+
+        service.submit(first);
+
+        when(mapper.selectByRequestKey(8L, "skill.read", "request-2")).thenReturn(null);
+        assertThatThrownBy(() -> service.submit(replay))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("different clientRequestKey");
     }
 
     @Test
@@ -220,5 +266,18 @@ class SkillTaskApiServiceTest {
         task.setNextRetryAt(LocalDateTime.of(2026, 7, 18, 12, 0));
         task.setCreatedAt(task.getNextRetryAt()); task.setUpdatedAt(task.getNextRetryAt());
         return task;
+    }
+
+    private SkillTaskApprovalEvidence approvalEvidence(String permitId, String approvalId, String definitionClosureSha256) {
+        SkillTaskApprovalPermitClaims claims = new SkillTaskApprovalPermitClaims("cma3", "risk-1",
+                "cloudmold.agent-control", "cloudmold.skill-task", permitId, "wo-r3-1", approvalId,
+                "f".repeat(64), "skill.read", "1.0.0", definitionClosureSha256, json.sha256("{}"), "R3",
+                "2:42", 8L, Instant.parse("2026-07-18T12:00:00Z"), Instant.parse("2026-07-18T12:00:00Z"),
+                Instant.parse("2026-07-18T12:05:00Z"));
+        return new SkillTaskApprovalEvidence(claims, "e".repeat(64), "cma3:hmac");
+    }
+
+    private static String validClaimsReference(SkillTaskApprovalPermitClaims claims) {
+        return SkillTaskApprovalRefCodec.issueClaims("0123456789abcdef0123456789abcdef".getBytes(), claims);
     }
 }

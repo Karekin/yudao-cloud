@@ -26,6 +26,7 @@ public final class SkillTaskRecords {
         private String approvalRef;
         private String approvalScopeSkillId;
         private String approvalScopeSkillVersion;
+        private String approvalScopeDefinitionClosureSha256;
         private String approvalScopeInputSha256;
         private String approvalScopeRiskLevel;
         private String parentTaskId;
@@ -90,5 +91,22 @@ public final class SkillTaskRecords {
         private Long version;
         private Integer attemptCount;
         private Integer maxAttempts;
+    }
+
+    @Data
+    public static class PermitConsumption {
+        private Long tenantId;
+        private String permitId;
+        private String approvalId;
+        private String workOrderId;
+        private String rootRequestIdentity;
+        private String clientRequestKey;
+        private String taskId;
+        private String approvalRefSha256;
+        private String definitionClosureSha256;
+        private String inputSha256;
+        private String riskLevel;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
     }
 }

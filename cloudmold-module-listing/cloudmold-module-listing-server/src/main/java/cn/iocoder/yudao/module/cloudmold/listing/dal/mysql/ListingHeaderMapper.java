@@ -79,4 +79,52 @@ public interface ListingHeaderMapper extends BaseMapperX<ListingHeaderDO> {
                                                     @Param("listingId") String listingId,
                                                     @Param("listingOfferId") String listingOfferId,
                                                     @Param("canonicalSkuId") String canonicalSkuId);
+
+    @Select("""
+            SELECT COUNT(*)
+            FROM cloudmold_listing_header h
+            WHERE h.tenant_id=#{tenantId} AND h.status='PUBLISHED'
+              AND (h.publish_start_at IS NULL OR h.publish_start_at <= UTC_TIMESTAMP(6))
+              AND (h.publish_end_at IS NULL OR h.publish_end_at > UTC_TIMESTAMP(6))
+              AND (#{channelCode} IS NULL OR h.channel_code=#{channelCode})
+              AND (#{keyword} IS NULL OR h.title LIKE CONCAT('%',#{keyword},'%')
+                   OR h.listing_no LIKE CONCAT('%',#{keyword},'%'))
+            """)
+    long countCurrentPublished(@Param("tenantId") Long tenantId,
+                               @Param("keyword") String keyword,
+                               @Param("channelCode") String channelCode);
+
+    @Select("""
+            SELECT listing_id,tenant_id,listing_no,run_id,merchant_id,channel_code,shop_id,canonical_spu_id,
+                   revision,title,primary_image_url,category_ref,brand_ref,source_system,publisher_ref,currency_code,
+                   publish_start_at,publish_end_at,status,completion_passed,business_approved,risk_approved,
+                   version,created_at,updated_at
+            FROM cloudmold_listing_header h
+            WHERE h.tenant_id=#{tenantId} AND h.status='PUBLISHED'
+              AND (h.publish_start_at IS NULL OR h.publish_start_at <= UTC_TIMESTAMP(6))
+              AND (h.publish_end_at IS NULL OR h.publish_end_at > UTC_TIMESTAMP(6))
+              AND (#{channelCode} IS NULL OR h.channel_code=#{channelCode})
+              AND (#{keyword} IS NULL OR h.title LIKE CONCAT('%',#{keyword},'%')
+                   OR h.listing_no LIKE CONCAT('%',#{keyword},'%'))
+            ORDER BY h.updated_at DESC,h.listing_id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            """)
+    List<ListingHeaderDO> selectCurrentPublished(@Param("tenantId") Long tenantId,
+                                                  @Param("keyword") String keyword,
+                                                  @Param("channelCode") String channelCode,
+                                                  @Param("offset") long offset,
+                                                  @Param("limit") int limit);
+
+    @Select("""
+            SELECT listing_id,tenant_id,listing_no,run_id,merchant_id,channel_code,shop_id,canonical_spu_id,
+                   revision,title,primary_image_url,category_ref,brand_ref,source_system,publisher_ref,currency_code,
+                   publish_start_at,publish_end_at,status,completion_passed,business_approved,risk_approved,
+                   version,created_at,updated_at
+            FROM cloudmold_listing_header h
+            WHERE h.tenant_id=#{tenantId} AND h.listing_id=#{listingId} AND h.status='PUBLISHED'
+              AND (h.publish_start_at IS NULL OR h.publish_start_at <= UTC_TIMESTAMP(6))
+              AND (h.publish_end_at IS NULL OR h.publish_end_at > UTC_TIMESTAMP(6))
+            """)
+    ListingHeaderDO selectCurrentPublishedById(@Param("tenantId") Long tenantId,
+                                                @Param("listingId") String listingId);
 }

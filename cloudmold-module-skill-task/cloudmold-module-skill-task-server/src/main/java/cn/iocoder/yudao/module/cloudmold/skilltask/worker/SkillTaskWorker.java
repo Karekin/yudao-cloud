@@ -290,10 +290,13 @@ public class SkillTaskWorker {
                 : task.getApprovalScopeSkillVersion();
         String inputSha256 = task.getApprovalScopeInputSha256() == null ? task.getInputSha256()
                 : task.getApprovalScopeInputSha256();
+        String definitionClosureSha256 = task.getApprovalScopeDefinitionClosureSha256() == null
+                ? task.getDefinitionClosureSha256() : task.getApprovalScopeDefinitionClosureSha256();
         String riskLevel = task.getApprovalScopeRiskLevel() == null ? task.getRiskLevel()
                 : task.getApprovalScopeRiskLevel();
         approvalVerifier.verify(new SkillTaskApprovalContext(task.getTenantId(), task.getOperatorId(),
-                task.getOperatorType(), skillId, skillVersion, inputSha256, riskLevel, task.getApprovalRef()));
+                task.getOperatorType(), skillId, skillVersion, definitionClosureSha256,
+                inputSha256, riskLevel, task.getApprovalRef()));
     }
 
     private static ArrayNode requireArray(JsonNode value) {

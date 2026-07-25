@@ -18,4 +18,14 @@ public interface SourceIdentityMapper extends BaseMapperX<SourceIdentityDO> {
                                           @Param("sourceSystem") String sourceSystem,
                                           @Param("sourceType") String sourceType,
                                           @Param("sourceId") String sourceId);
+
+    @Select("""
+            SELECT COUNT(*) FROM cloudmold_identity_source_identity
+            WHERE tenant_id=#{tenantId} AND source_system=#{sourceSystem}
+              AND source_type=#{sourceType} AND source_id=#{sourceId}
+            """)
+    long countBySource(@Param("tenantId") Long tenantId,
+                       @Param("sourceSystem") String sourceSystem,
+                       @Param("sourceType") String sourceType,
+                       @Param("sourceId") String sourceId);
 }

@@ -782,7 +782,9 @@ public interface AgentControlStoreMapper {
     int insertAgentRun(AgentRun value);
 
     @Update("""
-            UPDATE cloudmold_agent_run SET status=#{status},completed_at=CASE WHEN #{status}='COMPLETED' THEN #{now} ELSE completed_at END,
+            UPDATE cloudmold_agent_run
+            SET status=#{status},
+                completed_at=CASE WHEN #{status}<>'ACTIVE' AND completed_at IS NULL THEN #{now} ELSE completed_at END,
                 updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND run_id=#{runId} AND status='ACTIVE'
             """)
@@ -843,6 +845,15 @@ public interface AgentControlStoreMapper {
                         @Param("leaseToken") String leaseToken, @Param("fencingToken") Long fencingToken,
                         @Param("now") LocalDateTime now);
 
+    @Update("""
+            UPDATE cloudmold_agent_run_lease SET status='EXPIRED',version=version+1,updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND work_order_id=#{workOrderId} AND run_id=#{runId}
+              AND fencing_token=#{fencingToken} AND status='ACTIVE' AND lease_until<=#{now}
+            """)
+    int expireRunLease(@Param("tenantId") Long tenantId, @Param("workOrderId") String workOrderId,
+                       @Param("runId") String runId, @Param("fencingToken") Long fencingToken,
+                       @Param("now") LocalDateTime now);
+
     @Insert("""
             INSERT INTO cloudmold_agent_event_subscription
               (subscription_id,tenant_id,mission_id,work_order_id,event_type,schema_version,source_system,
@@ -895,6 +906,18 @@ public interface AgentControlStoreMapper {
             WHERE status='SCHEDULED' AND due_at<=#{now} ORDER BY due_at,timer_id LIMIT #{limit}
             """)
     java.util.List<MissionTimer> selectDueMissionTimers(@Param("now") LocalDateTime now,@Param("limit") int limit);
+
+    @TenantIgnore
+    @Select("""
+            SELECT DISTINCT w.* FROM cloudmold_agent_work_order w
+            JOIN cloudmold_agent_run_lease l
+              ON l.tenant_id=w.tenant_id AND l.work_order_id=w.work_order_id
+            WHERE w.status='IN_PROGRESS' AND w.active_run_id=l.run_id
+              AND l.status='ACTIVE' AND l.lease_until<=#{now}
+            ORDER BY l.lease_until,w.work_order_id LIMIT #{limit}
+            """)
+    java.util.List<WorkOrder> selectExpiredRunLeaseWorkOrders(@Param("now") LocalDateTime now,
+                                                              @Param("limit") int limit);
 
     @TenantIgnore
     @Select("""

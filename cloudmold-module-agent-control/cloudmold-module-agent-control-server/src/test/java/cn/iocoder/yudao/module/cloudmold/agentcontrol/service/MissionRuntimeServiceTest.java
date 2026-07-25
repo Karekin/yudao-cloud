@@ -57,24 +57,34 @@ class MissionRuntimeServiceTest {
     }
 
     @Test
-    void expiredLeaseTakeoverGetsANewFencingTokenAndOldRunCannotCheckpoint() {
+    void expiredInProgressLeaseTakeoverGetsANewFencingTokenAndOldRunCannotCheckpoint() {
         WorkOrder work = new WorkOrder().setWorkOrderId("wo-1").setMissionId("mission-1").setRoleCode("buyer")
-                .setActionCode("buyer.prepare-replenishment").setStatus("READY").setAssigneeUserId(102L).setVersion(3L);
-        AgentRunLease expired = new AgentRunLease().setWorkOrderId("wo-1").setStatus("ACTIVE")
-                .setLeaseUntil(LocalDateTime.of(2026, 7, 19, 3, 59)).setFencingToken(4L).setVersion(2L);
+                .setActionCode("buyer.prepare-replenishment").setStatus("IN_PROGRESS").setAssigneeUserId(102L)
+                .setActiveRunId("run-old").setVersion(3L);
+        AgentRunLease expired = new AgentRunLease().setWorkOrderId("wo-1").setRunId("run-old").setStatus("ACTIVE")
+                .setLeaseOwner("worker-old").setLeaseToken("lease-old").setLeaseUntil(LocalDateTime.of(2026, 7, 19, 3, 59))
+                .setFencingToken(4L).setVersion(2L);
         when(mapper.selectWorkOrderForUpdate(17L, "wo-1")).thenReturn(work);
         when(mapper.selectEffectiveActorRoleGrant(eq(17L), eq(102L), eq("buyer"), any())).thenReturn(new ActorRoleGrant());
         when(mapper.selectMissionForUpdate(17L, "mission-1")).thenReturn(new Mission().setStatus("ACTIVE"));
         when(mapper.selectRunLeaseForUpdate(17L, "wo-1")).thenReturn(expired);
+        when(mapper.expireRunLease(17L, "wo-1", "run-old", 4L,
+                LocalDateTime.of(2026, 7, 19, 4, 0))).thenReturn(1);
+        when(mapper.finishAgentRun(17L, "run-old", "EXPIRED",
+                LocalDateTime.of(2026, 7, 19, 4, 0))).thenReturn(1);
         when(mapper.upsertRunLease(any())).thenReturn(2);
         when(mapper.insertAgentRun(any())).thenReturn(1);
-        when(mapper.transitionMissionWorkOrder(eq(17L), eq("wo-1"), eq(3L), eq("READY"), eq("IN_PROGRESS"),
+        when(mapper.transitionMissionWorkOrder(eq(17L), eq("wo-1"), eq(3L), eq("IN_PROGRESS"), eq("IN_PROGRESS"),
                 isNull(), anyString(), any())).thenReturn(1);
         when(mapper.insertAgentOutbox(any(), anyLong(), any(), any(), any(), any(), any())).thenReturn(1);
 
         AgentRunLeaseView lease = service.claim(AgentRunClaimCommand.builder().workOrderId("wo-1")
                 .workOrderExpectedVersion(3L).leaseOwner("worker-new").build(), 102L);
         assertThat(lease.getFencingToken()).isEqualTo(5L);
+        verify(mapper).expireRunLease(17L, "wo-1", "run-old", 4L,
+                LocalDateTime.of(2026, 7, 19, 4, 0));
+        verify(mapper).finishAgentRun(17L, "run-old", "EXPIRED",
+                LocalDateTime.of(2026, 7, 19, 4, 0));
 
         AgentRunLease active = new AgentRunLease().setRunId(lease.getRunId()).setLeaseOwner("worker-new")
                 .setLeaseToken(lease.getLeaseToken()).setFencingToken(5L).setStatus("ACTIVE")
@@ -86,6 +96,40 @@ class MissionRuntimeServiceTest {
                 .fencingToken(4L).decisionCode("WAIT").decisionJson("{}").build(), 102L))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("stale fencing");
         verify(mapper, never()).insertMissionCheckpoint(any());
+    }
+
+    @Test
+    void staleSecondTakeoverAttemptLosesOnUpdatedWorkOrderVersion() {
+        WorkOrder beforeTakeover = new WorkOrder().setWorkOrderId("wo-1").setMissionId("mission-1").setRoleCode("buyer")
+                .setActionCode("buyer.prepare-replenishment").setStatus("IN_PROGRESS").setAssigneeUserId(102L)
+                .setActiveRunId("run-old").setVersion(3L);
+        WorkOrder afterTakeover = new WorkOrder().setWorkOrderId("wo-1").setMissionId("mission-1").setRoleCode("buyer")
+                .setActionCode("buyer.prepare-replenishment").setStatus("IN_PROGRESS").setAssigneeUserId(102L)
+                .setActiveRunId("run-new").setVersion(4L);
+        AgentRunLease expired = new AgentRunLease().setWorkOrderId("wo-1").setRunId("run-old").setStatus("ACTIVE")
+                .setLeaseOwner("worker-old").setLeaseToken("lease-old").setLeaseUntil(LocalDateTime.of(2026, 7, 19, 3, 59))
+                .setFencingToken(4L).setVersion(2L);
+        when(mapper.selectWorkOrderForUpdate(17L, "wo-1")).thenReturn(beforeTakeover, afterTakeover);
+        when(mapper.selectEffectiveActorRoleGrant(eq(17L), eq(102L), eq("buyer"), any())).thenReturn(new ActorRoleGrant());
+        when(mapper.selectMissionForUpdate(17L, "mission-1")).thenReturn(new Mission().setStatus("ACTIVE"));
+        when(mapper.selectRunLeaseForUpdate(17L, "wo-1")).thenReturn(expired);
+        when(mapper.expireRunLease(17L, "wo-1", "run-old", 4L,
+                LocalDateTime.of(2026, 7, 19, 4, 0))).thenReturn(1);
+        when(mapper.finishAgentRun(17L, "run-old", "EXPIRED",
+                LocalDateTime.of(2026, 7, 19, 4, 0))).thenReturn(1);
+        when(mapper.upsertRunLease(any())).thenReturn(1);
+        when(mapper.insertAgentRun(any())).thenReturn(1);
+        when(mapper.transitionMissionWorkOrder(eq(17L), eq("wo-1"), eq(3L), eq("IN_PROGRESS"), eq("IN_PROGRESS"),
+                isNull(), anyString(), any())).thenReturn(1);
+        when(mapper.insertAgentOutbox(any(), anyLong(), any(), any(), any(), any(), any())).thenReturn(1);
+
+        service.claim(AgentRunClaimCommand.builder().workOrderId("wo-1")
+                .workOrderExpectedVersion(3L).leaseOwner("worker-new").build(), 102L);
+
+        assertThatThrownBy(() -> service.claim(AgentRunClaimCommand.builder().workOrderId("wo-1")
+                .workOrderExpectedVersion(3L).leaseOwner("worker-racer").build(), 102L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("work order version is stale");
     }
 
     @Test
@@ -177,5 +221,29 @@ class MissionRuntimeServiceTest {
         verify(mapper).releaseRunLease(eq(17L), eq("wo-prepare"), eq("run-prepare-current"),
                 eq("worker-prepare"), eq("lease-prepare"), eq(7L), any());
         verify(mapper).finishAgentRun(eq(17L), eq("run-prepare-current"), eq("COMPLETED"), any());
+    }
+
+    @Test
+    void recoverExpiredRunIsIdempotentAfterTheLeaseHasAlreadyBeenExpired() {
+        WorkOrder work = new WorkOrder().setWorkOrderId("wo-recover").setMissionId("mission-1").setStatus("IN_PROGRESS")
+                .setActiveRunId("run-recover").setVersion(8L);
+        AgentRunLease expiredLease = new AgentRunLease().setRunId("run-recover").setStatus("ACTIVE")
+                .setFencingToken(9L).setLeaseUntil(LocalDateTime.of(2026, 7, 19, 3, 59));
+        AgentRunLease alreadyExpiredLease = new AgentRunLease().setRunId("run-recover").setStatus("EXPIRED")
+                .setFencingToken(9L).setLeaseUntil(LocalDateTime.of(2026, 7, 19, 3, 59));
+        when(mapper.selectWorkOrderForUpdate(17L, "wo-recover")).thenReturn(work, work);
+        when(mapper.selectRunLeaseForUpdate(17L, "wo-recover")).thenReturn(expiredLease, alreadyExpiredLease);
+        when(mapper.expireRunLease(17L, "wo-recover", "run-recover", 9L,
+                LocalDateTime.of(2026, 7, 19, 4, 0))).thenReturn(1);
+        when(mapper.finishAgentRun(17L, "run-recover", "EXPIRED",
+                LocalDateTime.of(2026, 7, 19, 4, 0))).thenReturn(1);
+        when(mapper.insertAgentOutbox(any(), anyLong(), any(), any(), any(), any(), any())).thenReturn(1);
+
+        assertThat(service.recoverExpiredRun("wo-recover").getStatus()).isEqualTo("RUN_EXPIRED");
+        assertThat(service.recoverExpiredRun("wo-recover").getStatus()).isEqualTo("NO_ACTION");
+        verify(mapper, times(1)).expireRunLease(17L, "wo-recover", "run-recover", 9L,
+                LocalDateTime.of(2026, 7, 19, 4, 0));
+        verify(mapper, times(1)).finishAgentRun(17L, "run-recover", "EXPIRED",
+                LocalDateTime.of(2026, 7, 19, 4, 0));
     }
 }

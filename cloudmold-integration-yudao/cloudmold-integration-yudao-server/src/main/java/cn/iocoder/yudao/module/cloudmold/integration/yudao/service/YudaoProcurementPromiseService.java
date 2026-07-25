@@ -6,9 +6,7 @@ import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoProcurementPromiseApi;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.dal.YudaoPurchasePromiseMapper;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.dal.YudaoPurchasePromiseRow;
-import cn.iocoder.yudao.module.erp.dal.dataobject.purchase.ErpPurchaseOrderDO;
-import cn.iocoder.yudao.module.erp.dal.dataobject.purchase.ErpPurchaseOrderItemDO;
-import cn.iocoder.yudao.module.erp.service.purchase.ErpPurchaseOrderService;
+import cn.iocoder.yudao.module.cloudmold.integration.yudao.procurement.LegacyProcurementReadPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -29,7 +27,7 @@ public class YudaoProcurementPromiseService implements YudaoProcurementPromiseAp
     private static final String SOURCE_SYSTEM = "cloudmold-integration-yudao";
     private static final Set<String> ALLOWED_STATUS = Set.of("ACTIVE", "CANCELLED");
 
-    private final ErpPurchaseOrderService purchaseOrderService;
+    private final LegacyProcurementReadPort procurementReadPort;
     private final YudaoPurchasePromiseMapper promiseMapper;
     private final YudaoCommandOperationService operationService;
     private final OutboxAppender outboxAppender;
@@ -59,19 +57,18 @@ public class YudaoProcurementPromiseService implements YudaoProcurementPromiseAp
     @Override
     public List<PurchaseOrderLineView> listPurchaseOrderLines(Long purchaseOrderId) {
         require(purchaseOrderId != null && purchaseOrderId > 0, "purchaseOrderId must be positive");
-        ErpPurchaseOrderDO order = purchaseOrderService.validatePurchaseOrder(purchaseOrderId);
-        return purchaseOrderService.getPurchaseOrderItemListByOrderId(order.getId()).stream()
+        LegacyProcurementReadPort.PurchaseOrderSnapshot order = procurementReadPort.getPurchaseOrder(purchaseOrderId);
+        return order.lines().stream()
                 .map(line -> new PurchaseOrderLineView(
-                        line.getId(), line.getOrderId(), line.getProductId(), line.getProductUnitId(),
-                        line.getCount(), line.getInCount(), line.getReturnCount()))
+                        line.purchaseOrderLineId(), line.purchaseOrderId(), line.productId(), line.productUnitId(),
+                        line.orderedQuantity(), line.receivedQuantity(), line.returnedQuantity()))
                 .toList();
     }
 
     private void upsert(Long tenantId, PurchasePromiseCommand command) {
-        ErpPurchaseOrderDO order = purchaseOrderService.validatePurchaseOrder(command.purchaseOrderId());
-        List<ErpPurchaseOrderItemDO> items = purchaseOrderService.getPurchaseOrderItemListByOrderId(order.getId());
-        ErpPurchaseOrderItemDO line = items.stream()
-                .filter(item -> Objects.equals(item.getId(), command.purchaseOrderLineId()))
+        LegacyProcurementReadPort.PurchaseOrderSnapshot order = procurementReadPort.getPurchaseOrder(command.purchaseOrderId());
+        LegacyProcurementReadPort.PurchaseOrderLineSnapshot line = order.lines().stream()
+                .filter(item -> Objects.equals(item.purchaseOrderLineId(), command.purchaseOrderLineId()))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("purchase order line does not belong to purchase order"));
 
@@ -91,13 +88,13 @@ public class YudaoProcurementPromiseService implements YudaoProcurementPromiseAp
                 .setPromiseId(promiseId)
                 .setPromiseKey(promiseKey)
                 .setTenantId(tenantId)
-                .setPurchaseOrderId(order.getId())
-                .setPurchaseOrderNo(order.getNo())
-                .setPurchaseOrderLineId(line.getId())
-                .setSupplierId(order.getSupplierId())
-                .setProductId(line.getProductId())
-                .setProductUnitId(line.getProductUnitId())
-                .setOrderedQuantity(line.getCount())
+                .setPurchaseOrderId(order.purchaseOrderId())
+                .setPurchaseOrderNo(order.purchaseOrderNo())
+                .setPurchaseOrderLineId(line.purchaseOrderLineId())
+                .setSupplierId(order.supplierId())
+                .setProductId(line.productId())
+                .setProductUnitId(line.productUnitId())
+                .setOrderedQuantity(line.orderedQuantity())
                 .setPromisedReceiptAt(LocalDateTime.ofInstant(promisedAt.toInstant(), ZoneOffset.UTC))
                 .setPromiseTimezone(timezone)
                 .setGraceMinutes(graceMinutes)

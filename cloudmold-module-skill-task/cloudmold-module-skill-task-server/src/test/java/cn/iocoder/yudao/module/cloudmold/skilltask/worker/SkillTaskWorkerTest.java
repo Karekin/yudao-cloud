@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.cloudmold.skilltask.worker;
 import cn.iocoder.yudao.module.cloudmold.executor.CloudMoldCapabilityExecutor;
 import cn.iocoder.yudao.module.cloudmold.rpc.CloudMoldRpcCallContext;
 import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
 import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalEvidence;
 import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalVerifier;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskMapper;
@@ -67,8 +68,13 @@ class SkillTaskWorkerTest {
         when(checkpoints.claim(eq(candidate), anyString())).thenReturn(task);
         when(mapper.selectStep(8L, "task-1", "write")).thenReturn(step);
         when(mapper.selectSteps(8L, "task-1")).thenReturn(List.of(step));
-        when(approvalVerifier.verify(any())).thenReturn(new SkillTaskApprovalEvidence("approval-1",
-                "a".repeat(64), Instant.parse("2026-07-18T13:00:00Z"), "test"));
+        when(approvalVerifier.verify(any())).thenReturn(new SkillTaskApprovalEvidence(
+                new SkillTaskApprovalPermitClaims("cma3", "risk-1", "cloudmold.agent-control",
+                        "cloudmold.skill-task", "permit-1", "wo-r3-1", "approval-1", "f".repeat(64),
+                        "skill.write", "1.0.0", "c".repeat(64), "a".repeat(64), "R3", "2:42", 8L,
+                        Instant.parse("2026-07-18T12:00:00Z"), Instant.parse("2026-07-18T12:00:00Z"),
+                        Instant.parse("2026-07-18T13:00:00Z")),
+                "a".repeat(64), "test"));
         when(executor.execute(eq("cap.write"), any(), any(), anyBoolean())).thenReturn(TextNode.valueOf("ok"));
         when(checkpoints.checkpointSuccess(eq(task), eq(step), anyString(), eq("\"ok\""), anyString()))
                 .thenReturn(null);

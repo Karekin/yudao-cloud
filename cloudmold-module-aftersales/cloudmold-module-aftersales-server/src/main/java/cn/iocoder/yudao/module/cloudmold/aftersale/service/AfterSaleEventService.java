@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.cloudmold.aftersale.service;
 
+import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.module.cloudmold.aftersale.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.aftersale.dal.mysql.*;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventCommand;
@@ -55,7 +56,6 @@ public class AfterSaleEventService {
         payload.put("provider_code", "INTERNAL_TEST");
         payload.put("resolution_saga_id", sale.getResolutionSagaId());
         payload.put("step_ordinal", "SUCCEEDED".equals(current) ? 3 : 0);
-        payload.put("reason", sale.getReason());
         outboxAppender.append(AppendDomainEventCommand.builder().eventType("after_sale.refund.status.changed")
                 .schemaVersion(2).sourceSystem("cloudmold-aftersales").tenantId(sale.getTenantId())
                 .aggregateType("after_sale_refund").aggregateId(sale.getAfterSaleId())
@@ -188,7 +188,8 @@ public class AfterSaleEventService {
         payload.put("after_sale_type", sale.getAfterSaleType());
         payload.put("reason_code", sale.getReasonCode());
         payload.put("responsibility", sale.getResponsibility());
-        payload.put("reason", sale.getReason());
+        payload.put("has_reason_text", hasText(sale.getReason()));
+        payload.put("reason_text_digest_sha256", digestOrNull(sale.getReason()));
         payload.put("order_id", sale.getOrderId());
         payload.put("order_item_id", item.getOrderItemId());
         payload.put("canonical_sku_id", item.getCanonicalSkuId());
@@ -224,5 +225,13 @@ public class AfterSaleEventService {
 
     private static String instant(LocalDateTime value) {
         return value == null ? null : value.toInstant(ZoneOffset.UTC).toString();
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String digestOrNull(String value) {
+        return hasText(value) ? DigestUtil.sha256Hex(value.trim()) : null;
     }
 }

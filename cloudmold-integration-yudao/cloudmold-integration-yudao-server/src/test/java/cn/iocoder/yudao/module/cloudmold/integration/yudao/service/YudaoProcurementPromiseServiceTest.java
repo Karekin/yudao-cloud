@@ -7,10 +7,7 @@ import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoProcurementPromiseApi;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.dal.YudaoPurchasePromiseMapper;
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.dal.YudaoPurchasePromiseRow;
-import cn.iocoder.yudao.module.erp.dal.dataobject.purchase.ErpPurchaseOrderDO;
-import cn.iocoder.yudao.module.erp.dal.dataobject.purchase.ErpPurchaseOrderItemDO;
-import cn.iocoder.yudao.module.erp.enums.ErpAuditStatus;
-import cn.iocoder.yudao.module.erp.service.purchase.ErpPurchaseOrderService;
+import cn.iocoder.yudao.module.cloudmold.integration.yudao.procurement.LegacyProcurementReadPort;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,13 +26,13 @@ import static org.mockito.Mockito.*;
 
 class YudaoProcurementPromiseServiceTest {
 
-    private final ErpPurchaseOrderService purchaseOrderService = mock(ErpPurchaseOrderService.class);
+    private final LegacyProcurementReadPort procurementReadPort = mock(LegacyProcurementReadPort.class);
     private final YudaoPurchasePromiseMapper promiseMapper = mock(YudaoPurchasePromiseMapper.class);
     private final YudaoCommandOperationService operationService = mock(YudaoCommandOperationService.class);
     private final OutboxAppender outboxAppender = mock(OutboxAppender.class);
 
     private final YudaoProcurementPromiseService service = new YudaoProcurementPromiseService(
-            purchaseOrderService, promiseMapper, operationService, outboxAppender);
+            procurementReadPort, promiseMapper, operationService, outboxAppender);
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -57,13 +54,11 @@ class YudaoProcurementPromiseServiceTest {
 
     @Test
     void shouldCreatePurchasePromiseAndAppendGovernedEvent() {
-        ErpPurchaseOrderDO order = approvedOrder();
-        ErpPurchaseOrderItemDO line = orderLine(31L, new BigDecimal("10"));
-        when(purchaseOrderService.validatePurchaseOrder(51L)).thenReturn(order);
-        when(purchaseOrderService.getPurchaseOrderItemListByOrderId(51L)).thenReturn(List.of(line));
+        LegacyProcurementReadPort.PurchaseOrderSnapshot order = approvedOrder();
         when(promiseMapper.selectForUpdateByLineId(1L, 31L)).thenReturn(null);
         when(promiseMapper.insert(any())).thenReturn(1);
-        when(promiseMapper.selectByLineId(1L, 31L)).thenAnswer(invocation -> captureRow(invocation, line, order));
+        when(procurementReadPort.getPurchaseOrder(51L)).thenReturn(order);
+        when(promiseMapper.selectByLineId(1L, 31L)).thenAnswer(invocation -> captureRow(invocation, order));
 
         YudaoProcurementPromiseApi.PurchasePromiseView result = service.savePurchasePromise(
                 new YudaoProcurementPromiseApi.PurchasePromiseCommand(
@@ -85,8 +80,7 @@ class YudaoProcurementPromiseServiceTest {
 
     @Test
     void shouldBumpVersionWhenPromiseIsUpdated() {
-        ErpPurchaseOrderDO order = approvedOrder();
-        ErpPurchaseOrderItemDO line = orderLine(31L, new BigDecimal("10"));
+        LegacyProcurementReadPort.PurchaseOrderSnapshot order = approvedOrder();
         YudaoPurchasePromiseRow existing = new YudaoPurchasePromiseRow()
                 .setPromiseId("10000000-0000-4000-8000-000000000001")
                 .setPromiseKey("ERP_PO_LINE:51:31")
@@ -108,8 +102,7 @@ class YudaoProcurementPromiseServiceTest {
                 .setRunId("old-run")
                 .setCreatedAt(LocalDateTime.of(2026, 7, 18, 2, 0))
                 .setUpdatedAt(LocalDateTime.of(2026, 7, 18, 2, 0));
-        when(purchaseOrderService.validatePurchaseOrder(51L)).thenReturn(order);
-        when(purchaseOrderService.getPurchaseOrderItemListByOrderId(51L)).thenReturn(List.of(line));
+        when(procurementReadPort.getPurchaseOrder(51L)).thenReturn(order);
         when(promiseMapper.selectForUpdateByLineId(1L, 31L)).thenReturn(existing);
         when(promiseMapper.update(any(), eq(2L))).thenReturn(1);
         when(promiseMapper.selectByLineId(1L, 31L)).thenAnswer(invocation -> updatedRow(existing));
@@ -127,9 +120,8 @@ class YudaoProcurementPromiseServiceTest {
 
     @Test
     void shouldRejectLineOutsidePurchaseOrder() {
-        when(purchaseOrderService.validatePurchaseOrder(51L)).thenReturn(approvedOrder());
-        when(purchaseOrderService.getPurchaseOrderItemListByOrderId(51L))
-                .thenReturn(List.of(orderLine(99L, new BigDecimal("10"))));
+        when(procurementReadPort.getPurchaseOrder(51L)).thenReturn(new LegacyProcurementReadPort.PurchaseOrderSnapshot(
+                51L, "CG-51", 11L, List.of(orderLine(99L, new BigDecimal("10")))));
 
         assertThatThrownBy(() -> service.savePurchasePromise(
                 new YudaoProcurementPromiseApi.PurchasePromiseCommand(
@@ -142,12 +134,8 @@ class YudaoProcurementPromiseServiceTest {
 
     @Test
     void shouldListTypedPurchaseOrderLinesForSkillComposition() {
-        ErpPurchaseOrderDO order = approvedOrder();
-        ErpPurchaseOrderItemDO line = orderLine(31L, new BigDecimal("10"))
-                .setInCount(new BigDecimal("2"))
-                .setReturnCount(BigDecimal.ONE);
-        when(purchaseOrderService.validatePurchaseOrder(51L)).thenReturn(order);
-        when(purchaseOrderService.getPurchaseOrderItemListByOrderId(51L)).thenReturn(List.of(line));
+        when(procurementReadPort.getPurchaseOrder(51L)).thenReturn(new LegacyProcurementReadPort.PurchaseOrderSnapshot(
+                51L, "CG-51", 11L, List.of(orderLine(31L, new BigDecimal("10"), new BigDecimal("2"), BigDecimal.ONE))));
 
         List<YudaoProcurementPromiseApi.PurchaseOrderLineView> result =
                 service.listPurchaseOrderLines(51L);
@@ -162,38 +150,52 @@ class YudaoProcurementPromiseServiceTest {
         });
     }
 
-    private static ErpPurchaseOrderDO approvedOrder() {
-        return new ErpPurchaseOrderDO()
-                .setId(51L)
-                .setNo("CG-51")
-                .setStatus(ErpAuditStatus.APPROVE.getStatus())
-                .setSupplierId(11L)
-                .setOrderTime(LocalDateTime.of(2026, 7, 18, 9, 0));
+    @Test
+    void shouldFailClosedWhenProcurementLineViewIsMissing() {
+        when(procurementReadPort.getPurchaseOrder(51L)).thenReturn(new LegacyProcurementReadPort.PurchaseOrderSnapshot(
+                51L, "CG-51", 11L, List.of()));
+
+        assertThatThrownBy(() -> service.savePurchasePromise(
+                new YudaoProcurementPromiseApi.PurchasePromiseCommand(
+                        "promise-op-004", "procurement-promise-run-004", 51L, 31L,
+                        "2026-07-20T18:00:00+08:00", "Asia/Shanghai", 0, 0,
+                        "ACTIVE", null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("purchase order line does not belong");
     }
 
-    private static ErpPurchaseOrderItemDO orderLine(Long id, BigDecimal count) {
-        return new ErpPurchaseOrderItemDO()
-                .setId(id)
-                .setOrderId(51L)
-                .setProductId(21L)
-                .setProductUnitId(22L)
-                .setCount(count);
+    private static LegacyProcurementReadPort.PurchaseOrderSnapshot approvedOrder() {
+        return new LegacyProcurementReadPort.PurchaseOrderSnapshot(
+                51L,
+                "CG-51",
+                11L,
+                List.of(orderLine(31L, new BigDecimal("10"), BigDecimal.ZERO, BigDecimal.ZERO)));
+    }
+
+    private static LegacyProcurementReadPort.PurchaseOrderLineSnapshot orderLine(
+            Long id, BigDecimal count, BigDecimal receivedQuantity, BigDecimal returnedQuantity) {
+        return new LegacyProcurementReadPort.PurchaseOrderLineSnapshot(
+                id, 51L, 21L, 22L, count, receivedQuantity, returnedQuantity);
+    }
+
+    private static LegacyProcurementReadPort.PurchaseOrderLineSnapshot orderLine(Long id, BigDecimal count) {
+        return orderLine(id, count, BigDecimal.ZERO, BigDecimal.ZERO);
     }
 
     private static YudaoPurchasePromiseRow captureRow(org.mockito.invocation.InvocationOnMock ignored,
-                                                      ErpPurchaseOrderItemDO line,
-                                                      ErpPurchaseOrderDO order) {
+                                                      LegacyProcurementReadPort.PurchaseOrderSnapshot order) {
+        LegacyProcurementReadPort.PurchaseOrderLineSnapshot line = order.lines().get(0);
         return new YudaoPurchasePromiseRow()
                 .setPromiseId("10000000-0000-4000-8000-000000000010")
                 .setPromiseKey("ERP_PO_LINE:51:31")
                 .setTenantId(1L)
-                .setPurchaseOrderId(order.getId())
-                .setPurchaseOrderNo(order.getNo())
-                .setPurchaseOrderLineId(line.getId())
-                .setSupplierId(order.getSupplierId())
-                .setProductId(line.getProductId())
-                .setProductUnitId(line.getProductUnitId())
-                .setOrderedQuantity(line.getCount())
+                .setPurchaseOrderId(order.purchaseOrderId())
+                .setPurchaseOrderNo(order.purchaseOrderNo())
+                .setPurchaseOrderLineId(line.purchaseOrderLineId())
+                .setSupplierId(order.supplierId())
+                .setProductId(line.productId())
+                .setProductUnitId(line.productUnitId())
+                .setOrderedQuantity(line.orderedQuantity())
                 .setPromisedReceiptAt(LocalDateTime.of(2026, 7, 20, 10, 0))
                 .setPromiseTimezone("Asia/Shanghai")
                 .setGraceMinutes(120)

@@ -36,6 +36,13 @@ public class IdentityQueryService implements IdentityQueryApi, PrincipalValidati
     }
 
     @Override
+    public boolean hasHistoricalSource(SourceIdentityReference reference) {
+        validateReference(reference);
+        return sourceIdentityMapper.countBySource(TenantContextHolder.getRequiredTenantId(),
+                reference.getSourceSystem(), reference.getSourceType(), reference.getSourceId()) > 0;
+    }
+
+    @Override
     public void requireActivePrincipal(String principalId) {
         requireText(principalId, "principalId", 36);
         requireActive(TenantContextHolder.getRequiredTenantId(), principalId);

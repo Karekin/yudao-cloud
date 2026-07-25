@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.cloudmold.skilltask.approval;
 
 import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
 import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties.VerificationKey;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalScope;
 import org.junit.jupiter.api.Test;
@@ -39,6 +40,27 @@ class HmacSkillTaskApprovalVerifierTest {
     }
 
     @Test
+    void verifiesClaimsBoundCma3ReferenceAndExposesFrozenClosure() {
+        HmacSkillTaskApprovalVerifier verifier = verifier(SECRET, Duration.ofHours(4));
+        SkillTaskApprovalContext context = context(null);
+        SkillTaskApprovalPermitClaims claims = new SkillTaskApprovalPermitClaims(
+                SkillTaskApprovalRefCodec.CLAIMS_VERSION, SkillTaskApprovalRefCodec.LOCAL_HMAC_KEY_ID,
+                SkillTaskApprovalRefCodec.DEFAULT_ISSUER, SkillTaskApprovalRefCodec.DEFAULT_AUDIENCE,
+                "permit-0718", "wo-r3-1", "approval-0718", "f".repeat(64),
+                context.skillId(), context.skillVersion(), context.definitionClosureSha256(),
+                context.inputSha256(), context.riskLevel(), "2:42", context.tenantId(),
+                CLOCK.instant(), CLOCK.instant(), CLOCK.instant().plusSeconds(300));
+
+        SkillTaskApprovalEvidence evidence = verifier.verify(context(
+                SkillTaskApprovalRefCodec.issueClaims(SECRET.getBytes(StandardCharsets.UTF_8), claims)));
+
+        assertThat(evidence.permitId()).isEqualTo("permit-0718");
+        assertThat(evidence.rootRequestIdentity()).isEqualTo("f".repeat(64));
+        assertThat(evidence.definitionClosureSha256()).isEqualTo("c".repeat(64));
+        assertThat(evidence.verifier()).isEqualTo("cma3:hmac-sha256-claims:local-hmac");
+    }
+
+    @Test
     void failsClosedWhenTheApprovalAuthorityIsNotConfigured() {
         HmacSkillTaskApprovalVerifier verifier = verifier("", Duration.ofHours(4));
 
@@ -55,7 +77,8 @@ class HmacSkillTaskApprovalVerifierTest {
         String valid = reference(original, "approval-0718", validExpiry);
 
         assertThatThrownBy(() -> verifier.verify(new SkillTaskApprovalContext(9L, 42L, 2,
-                original.skillId(), original.skillVersion(), original.inputSha256(), original.riskLevel(), valid)))
+                original.skillId(), original.skillVersion(), original.definitionClosureSha256(),
+                original.inputSha256(), original.riskLevel(), valid)))
                 .isInstanceOf(SecurityException.class).hasMessageContaining("scope");
 
         long expiredAt = CLOCK.instant().minusSeconds(31).getEpochSecond();
@@ -137,6 +160,38 @@ class HmacSkillTaskApprovalVerifierTest {
     }
 
     @Test
+    void rejectsRevokedAndTamperedCma3References() {
+        SkillTaskProperties revoked = keyedProperties();
+        revoked.getApproval().getKeys().put("risk-revoked", key(SECRET,
+                CLOCK.instant().minusSeconds(60), CLOCK.instant().plusSeconds(600), CLOCK.instant()));
+        HmacSkillTaskApprovalVerifier revokedVerifier = new HmacSkillTaskApprovalVerifier(revoked, CLOCK);
+        SkillTaskApprovalContext context = context(null);
+        SkillTaskApprovalPermitClaims claims = new SkillTaskApprovalPermitClaims(
+                SkillTaskApprovalRefCodec.CLAIMS_VERSION, "risk-revoked",
+                SkillTaskApprovalRefCodec.DEFAULT_ISSUER, SkillTaskApprovalRefCodec.DEFAULT_AUDIENCE,
+                "permit-0718", "wo-r3-1", "approval-0718", "f".repeat(64),
+                context.skillId(), context.skillVersion(), context.definitionClosureSha256(),
+                context.inputSha256(), context.riskLevel(), "2:42", context.tenantId(),
+                CLOCK.instant(), CLOCK.instant(), CLOCK.instant().plusSeconds(60));
+        String revokedRef = SkillTaskApprovalRefCodec.issueClaims(SECRET.getBytes(StandardCharsets.UTF_8), claims);
+        assertThatThrownBy(() -> revokedVerifier.verify(context(revokedRef)))
+                .isInstanceOf(SecurityException.class).hasMessageContaining("revoked");
+
+        HmacSkillTaskApprovalVerifier localVerifier = verifier(SECRET, Duration.ofHours(4));
+        String valid = SkillTaskApprovalRefCodec.issueClaims(SECRET.getBytes(StandardCharsets.UTF_8),
+                new SkillTaskApprovalPermitClaims(
+                        SkillTaskApprovalRefCodec.CLAIMS_VERSION, SkillTaskApprovalRefCodec.LOCAL_HMAC_KEY_ID,
+                        SkillTaskApprovalRefCodec.DEFAULT_ISSUER, SkillTaskApprovalRefCodec.DEFAULT_AUDIENCE,
+                        "permit-0719", "wo-r3-1", "approval-0719", "e".repeat(64),
+                        context.skillId(), context.skillVersion(), context.definitionClosureSha256(),
+                        context.inputSha256(), context.riskLevel(), "2:42", context.tenantId(),
+                        CLOCK.instant(), CLOCK.instant(), CLOCK.instant().plusSeconds(60)));
+        String tampered = valid.substring(0, valid.length() - 1) + (valid.endsWith("a") ? "b" : "a");
+        assertThatThrownBy(() -> localVerifier.verify(context(tampered)))
+                .isInstanceOf(SecurityException.class).hasMessageContaining("signature");
+    }
+
+    @Test
     void rejectsLegacyReferenceWhenCompatibilityModeIsDisabled() throws Exception {
         SkillTaskProperties properties = keyedProperties();
         properties.getApproval().setHmacSecret(SECRET);
@@ -174,7 +229,7 @@ class HmacSkillTaskApprovalVerifierTest {
 
     private static SkillTaskApprovalContext context(String reference) {
         return new SkillTaskApprovalContext(8L, 42L, 2, "skill.full-chain", "1.0.0",
-                "a".repeat(64), "R3", reference);
+                "c".repeat(64), "a".repeat(64), "R3", reference);
     }
 
     private static String reference(SkillTaskApprovalContext context, String approvalId, long expires) throws Exception {

@@ -4,15 +4,18 @@ import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.fulfillment.controller.admin.vo.FulfillmentPageReqVO;
 import cn.iocoder.yudao.module.cloudmold.fulfillment.dal.mysql.FulfillmentQueryMapper;
+import cn.iocoder.yudao.module.cloudmold.fulfillment.dal.mysql.TrackingEventMapper;
+import cn.iocoder.yudao.module.cloudmold.fulfillment.api.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
-public class FulfillmentQueryService {
+public class FulfillmentQueryService implements AppFulfillmentQueryApi {
 
     private final FulfillmentQueryMapper queryMapper;
+    private final TrackingEventMapper trackingEventMapper;
 
     public PageResult<FulfillmentPageItem> getPage(FulfillmentPageReqVO request) {
         Long tenantId = TenantContextHolder.getRequiredTenantId();
@@ -47,6 +50,26 @@ public class FulfillmentQueryService {
         }
         detail.setItems(queryMapper.selectFulfillmentItems(tenantId, normalizedFulfillmentId));
         return detail;
+    }
+
+    @Override
+    public AppFulfillmentView getByOrder(String orderId) {
+        if (!StringUtils.hasText(orderId)) throw new IllegalArgumentException("orderId is required");
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        FulfillmentDetailVO detail = queryMapper.selectByOrder(tenantId, orderId.trim());
+        if (detail == null) return null;
+        var items = queryMapper.selectFulfillmentItems(tenantId, detail.getFulfillmentId()).stream()
+                .map(item -> AppFulfillmentView.Item.builder().orderItemId(item.getOrderItemId())
+                        .canonicalSkuId(item.getCanonicalSkuId()).quantity(item.getQuantity()).build()).toList();
+        var events = detail.getFirstSliceShipmentId() == null ? java.util.List.<AppFulfillmentView.TrackingEvent>of()
+                : trackingEventMapper.selectByShipment(tenantId, detail.getFirstSliceShipmentId()).stream()
+                .map(event -> AppFulfillmentView.TrackingEvent.builder().status(event.getTrackingStatus())
+                        .occurredAt(event.getOccurredAt()).description(event.getContent()).build()).toList();
+        return AppFulfillmentView.builder().fulfillmentId(detail.getFulfillmentId())
+                .fulfillmentNo(detail.getFulfillmentNo()).orderId(detail.getOrderId()).status(detail.getStatus())
+                .aggregateVersion(detail.getAggregateVersion()).warehouseId(detail.getWarehouseId())
+                .carrierCode(detail.getCarrierCode()).waybillNo(detail.getWaybillNo())
+                .shipmentId(detail.getFirstSliceShipmentId()).items(items).trackingEvents(events).build();
     }
 
     private static String normalize(String value) {

@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.cloudmold.skilltask.api;
 
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitSummary;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -23,7 +24,7 @@ public class SkillTaskView implements java.io.Serializable {
     private String definitionClosureSha256;
     private String terminalResultSha256;
     private String riskLevel;
-    private String approvalRef;
+    private SkillTaskApprovalPermitSummary approvalSummary;
     private Long submitterId;
     private Integer submitterType;
     private Long operatorId;

@@ -99,17 +99,28 @@ public interface CatalogQueryMapper {
                    c.color_code,
                    c.display_name AS color_name,
                    k.size_id,
+                   g.size_group_id,
                    z.size_code,
                    z.size_name,
                    g.size_group_code,
+                   s.status AS style_status,
+                   s.version AS style_version,
+                   p.status AS spu_status,
+                   p.version AS spu_version,
+                   c.status AS color_status,
+                   c.version AS color_version,
+                   g.status AS size_group_status,
+                   g.version AS size_group_version,
+                   z.status AS size_status,
+                   z.version AS size_version,
                    (SELECT b.barcode
                       FROM cloudmold_catalog_barcode b
                      WHERE b.tenant_id = k.tenant_id
                        AND b.sku_id = k.sku_id
                        AND b.is_primary = b'1'
                        AND b.status = 10
-                       AND b.valid_from &lt;= UTC_TIMESTAMP(6)
-                       AND (b.valid_to IS NULL OR b.valid_to &gt; UTC_TIMESTAMP(6))
+                       AND b.valid_from <= UTC_TIMESTAMP(6)
+                       AND (b.valid_to IS NULL OR b.valid_to > UTC_TIMESTAMP(6))
                      ORDER BY b.valid_from DESC, b.barcode_id DESC
                      LIMIT 1) AS primary_barcode,
                    k.base_uom_code,

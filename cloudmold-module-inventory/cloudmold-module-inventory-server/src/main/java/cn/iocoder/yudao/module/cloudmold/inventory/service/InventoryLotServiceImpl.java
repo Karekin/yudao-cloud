@@ -9,6 +9,7 @@ import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
 import cn.iocoder.yudao.module.cloudmold.inventory.api.*;
 import cn.iocoder.yudao.module.cloudmold.inventory.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.inventory.dal.mysql.InventoryLotStoreMapper;
+import cn.iocoder.yudao.module.cloudmold.inventory.dal.mysql.InventoryV3BalanceMapper;
 import cn.iocoder.yudao.module.cloudmold.merchant.api.MerchantOwnerValidationApi;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,7 @@ public class InventoryLotServiceImpl implements InventoryLotCommandApi, Inventor
             "(?i)(sha256|sha512|ticket|run|evidence|vault|kms|token):[a-z0-9._/-]+";
 
     private final InventoryLotStoreMapper mapper;
+    private final InventoryV3BalanceMapper balanceMapper;
     private final MerchantOwnerValidationApi merchantOwnerValidationApi;
     private final CatalogSkuValidationApi catalogSkuValidationApi;
     private final OutboxAppender outboxAppender;
@@ -129,6 +131,27 @@ public class InventoryLotServiceImpl implements InventoryLotCommandApi, Inventor
                     .setEligibilityAt(evaluatedAt));
         }
         return List.copyOf(result);
+    }
+
+    @Override
+    public InventorySkuAvailabilityView getBySku(String canonicalSkuId, Instant eligibilityAt) {
+        requireUuid(canonicalSkuId, "canonicalSkuId");
+        String skuId = canonicalSkuId;
+        Instant evaluatedAt = requireInstant(eligibilityAt, "eligibilityAt");
+        InventorySkuAvailabilityView result = balanceMapper.selectSkuAvailability(
+                TenantContextHolder.getRequiredTenantId(), skuId,
+                evaluatedAt.atZone(ZoneOffset.UTC).toLocalDate());
+        if (result == null) {
+            return InventorySkuAvailabilityView.builder().canonicalSkuId(skuId)
+                    .allocatableQuantity(ZERO).inventoryVersion(0L).balanceCount(0).uomCount(0).build();
+        }
+        require(result.getUomCount() == null || result.getUomCount() <= 1,
+                "canonical SKU availability spans incompatible units of measure");
+        if (result.getBalanceCount() != null && result.getBalanceCount() != 1) {
+            result.setInventoryVersion(null);
+        }
+        result.setAllocatableQuantity(scaled(result.getAllocatableQuantity()));
+        return result;
     }
 
     private InventoryLotResult register(Long tenantId, Long operationId, InventoryLotCommand command,

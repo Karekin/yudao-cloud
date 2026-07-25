@@ -10,10 +10,12 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskStepView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskSubmitCommand;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskTerminalProofView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskView;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
 import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalContext;
 import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalEvidence;
 import cn.iocoder.yudao.module.cloudmold.skilltask.approval.SkillTaskApprovalVerifier;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskMapper;
+import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.PermitConsumption;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Step;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Task;
 import cn.iocoder.yudao.module.cloudmold.skilltask.definition.SkillTaskDefinition;
@@ -33,6 +35,8 @@ import java.util.UUID;
 
 @Service
 public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryApi {
+
+    private static final int APPROVAL_REF_MAX_LENGTH = 2048;
 
     private final SkillTaskMapper mapper;
     private final SkillTaskDefinitionRegistry definitions;
@@ -62,7 +66,7 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
         if (!definition.getRiskLevel().equals(riskLevel)) {
             throw new IllegalArgumentException("riskLevel does not match the registered Skill definition");
         }
-        String approvalRef = optionalText(command.getApprovalRef(), "approvalRef", 191);
+        String approvalRef = optionalText(command.getApprovalRef(), "approvalRef", APPROVAL_REF_MAX_LENGTH);
         if (!"R1".equals(riskLevel) && approvalRef == null) {
             throw new SecurityException(riskLevel + " Skill submission requires approvalRef");
         }
@@ -79,15 +83,16 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
             return toView(existing);
         }
         SkillTaskApprovalEvidence approval = verifyApproval(tenantId, operator, skillId, skillVersion,
-                inputSha256, riskLevel, approvalRef);
+                inputSha256, definition.getDefinitionClosureSha256(), riskLevel, approvalRef);
 
         String taskId = UUID.randomUUID().toString().replace("-", "");
         String runId = requestedRunId == null ? taskId : requestedRunId;
         LocalDateTime now = now();
         SkillTaskDefinition.Step first = definition.getSteps().get(0);
         mapper.insertTask(tenantId, taskId, runId, skillId, skillVersion, requestKey,
-                inputJson, inputSha256, riskLevel, approvalRef, operator.getId(), operator.getUserType(),
-                first.getStepCode(), definition.getMaxAttempts(), now);
+                inputJson, inputSha256, definition.getDefinitionSha256(), definition.getDefinitionClosureSha256(),
+                riskLevel, approvalRef, operator.getId(), operator.getUserType(), first.getStepCode(),
+                definition.getMaxAttempts(), now);
 
         Task stored = requireByRequestKeyForUpdate(tenantId, skillId, requestKey);
         verifyReplay(stored, skillVersion, requestedRunId, inputSha256, riskLevel, approvalRef);
@@ -95,7 +100,7 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
             verifyDefinitionProof(stored, definition);
             return toView(stored);
         }
-        freezeDefinitionProof(stored, definition, now);
+        consumeRootPermit(tenantId, requestKey, stored.getTaskId(), inputSha256, riskLevel, definition, approval, now);
         insertSteps(tenantId, taskId, definition, now);
         mapper.insertHistory(tenantId, taskId, 0L, null, "QUEUED", first.getStepCode(),
                 "TASK_SUBMITTED", submittedMessage(approval), operator.getId(), operator.getUserType(), now);
@@ -123,14 +128,14 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
         if (!command.getExpectedVersion().equals(task.getVersion())) {
             throw new IllegalStateException("Skill task version changed; reload before retrying");
         }
-        String approvalRef = optionalText(command.getApprovalRef(), "approvalRef", 191);
+        String approvalRef = optionalText(command.getApprovalRef(), "approvalRef", APPROVAL_REF_MAX_LENGTH);
         String effectiveApprovalRef = approvalRef == null ? task.getApprovalRef() : approvalRef;
         if (!"R1".equals(task.getRiskLevel()) && effectiveApprovalRef == null) {
             throw new SecurityException(task.getRiskLevel() + " Skill retry requires approvalRef");
         }
         SkillTaskApprovalEvidence approval = verifyApproval(tenantId, retryOperator,
                 approvalScopeSkillId(task), approvalScopeSkillVersion(task), approvalScopeInputSha256(task),
-                approvalScopeRiskLevel(task), effectiveApprovalRef);
+                approvalScopeDefinitionClosureSha256(task), approvalScopeRiskLevel(task), effectiveApprovalRef);
         LocalDateTime now = now();
         resumeDescendants(task, effectiveApprovalRef, retryOperator, now);
         mapper.resetFailedSteps(tenantId, taskId, now);
@@ -211,15 +216,16 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
         LocalDateTime now = now();
         SkillTaskDefinition.Step first = definition.getSteps().get(0);
         mapper.insertChildTask(parent.getTenantId(), taskId, expectedRunId, definition.getSkillId(),
-                definition.getSkillVersion(), requestKey, inputJson, inputSha256, definition.getRiskLevel(),
-                parent.getApprovalRef(), approvalScopeSkillId(parent), approvalScopeSkillVersion(parent),
-                approvalScopeInputSha256(parent), approvalScopeRiskLevel(parent), parent.getTaskId(),
-                parentStep.getStepCode(), parent.getOperatorId(), parent.getOperatorType(), first.getStepCode(),
-                definition.getMaxAttempts(), now);
+                definition.getSkillVersion(), requestKey, inputJson, inputSha256, definition.getDefinitionSha256(),
+                definition.getDefinitionClosureSha256(), definition.getRiskLevel(), parent.getApprovalRef(),
+                approvalScopeSkillId(parent), approvalScopeSkillVersion(parent),
+                approvalScopeDefinitionClosureSha256(parent), approvalScopeInputSha256(parent),
+                approvalScopeRiskLevel(parent), parent.getTaskId(), parentStep.getStepCode(),
+                parent.getOperatorId(), parent.getOperatorType(), first.getStepCode(), definition.getMaxAttempts(),
+                now);
         Task stored = requireByRequestKeyForUpdate(parent.getTenantId(), definition.getSkillId(), requestKey);
         verifyChildReplay(stored, parent, parentStep, expectedRunId, inputSha256);
         if (taskId.equals(stored.getTaskId())) {
-            freezeDefinitionProof(stored, definition, now);
             insertSteps(parent.getTenantId(), taskId, definition, now);
             mapper.insertHistory(parent.getTenantId(), taskId, 0L, null, "QUEUED", first.getStepCode(),
                     "CHILD_TASK_SUBMITTED", "Parent task=" + parent.getTaskId() + "; parentStep="
@@ -254,16 +260,31 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
         }
     }
 
-    private void freezeDefinitionProof(Task task, SkillTaskDefinition definition, LocalDateTime now) {
+    private void consumeRootPermit(long tenantId, String requestKey, String taskId, String inputSha256,
+                                   String riskLevel, SkillTaskDefinition definition,
+                                   SkillTaskApprovalEvidence approval, LocalDateTime now) {
+        if (approval == null) {
+            return;
+        }
         if (definition.getDefinitionSha256() == null || definition.getDefinitionClosureSha256() == null) {
             throw new IllegalStateException("Skill Task registry did not produce immutable definition proof");
         }
-        if (mapper.freezeDefinitionProof(task.getTenantId(), task.getTaskId(), definition.getDefinitionSha256(),
-                definition.getDefinitionClosureSha256(), now) != 1) {
-            throw new IllegalStateException("Skill Task definition proof could not be frozen");
+        if (!approval.definitionClosureSha256().equals(definition.getDefinitionClosureSha256())) {
+            throw new SecurityException("approvalRef definition closure does not match the registered Skill");
         }
-        task.setDefinitionSha256(definition.getDefinitionSha256());
-        task.setDefinitionClosureSha256(definition.getDefinitionClosureSha256());
+        mapper.insertPermitConsumption(tenantId, approval.permitId(), approval.approvalId(), approval.workOrderId(),
+                approval.rootRequestIdentity(), requestKey, taskId, approval.referenceSha256(),
+                definition.getDefinitionClosureSha256(), inputSha256, riskLevel, now);
+        PermitConsumption consumption = mapper.selectPermitConsumption(tenantId, approval.permitId());
+        if (consumption == null) {
+            throw new IllegalStateException("Skill Task permit consumption did not become visible");
+        }
+        if (!requestKey.equals(consumption.getClientRequestKey())) {
+            throw new IllegalStateException("approvalRef was already consumed by a different clientRequestKey");
+        }
+        if (!approval.rootRequestIdentity().equals(consumption.getRootRequestIdentity())) {
+            throw new IllegalStateException("approvalRef root request identity drifted after first consumption");
+        }
     }
 
     private void verifyChildReplay(Task child, Task parent, Step parentStep, String expectedRunId,
@@ -356,13 +377,15 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
     }
 
     private SkillTaskApprovalEvidence verifyApproval(long tenantId, LoginUser operator, String skillId,
-                                                      String skillVersion, String inputSha256, String riskLevel,
-                                                      String approvalRef) {
+                                                     String skillVersion, String inputSha256,
+                                                     String definitionClosureSha256, String riskLevel,
+                                                     String approvalRef) {
         if ("R1".equals(riskLevel)) {
             return null;
         }
         return approvalVerifier.verify(new SkillTaskApprovalContext(tenantId, operator.getId(),
-                operator.getUserType(), skillId, skillVersion, inputSha256, riskLevel, approvalRef));
+                operator.getUserType(), skillId, skillVersion, definitionClosureSha256,
+                inputSha256, riskLevel, approvalRef));
     }
 
     private static String approvalScopeSkillId(Task task) {
@@ -377,6 +400,11 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
     private static String approvalScopeInputSha256(Task task) {
         return task.getApprovalScopeInputSha256() == null ? task.getInputSha256()
                 : task.getApprovalScopeInputSha256();
+    }
+
+    private static String approvalScopeDefinitionClosureSha256(Task task) {
+        return task.getApprovalScopeDefinitionClosureSha256() == null ? task.getDefinitionClosureSha256()
+                : task.getApprovalScopeDefinitionClosureSha256();
     }
 
     private static String approvalScopeRiskLevel(Task task) {
@@ -403,7 +431,8 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
                 .inputSha256(task.getInputSha256()).definitionSha256(task.getDefinitionSha256())
                 .definitionClosureSha256(task.getDefinitionClosureSha256())
                 .terminalResultSha256(task.getTerminalResultSha256())
-                .riskLevel(task.getRiskLevel()).approvalRef(task.getApprovalRef())
+                .riskLevel(task.getRiskLevel())
+                .approvalSummary(SkillTaskApprovalRefCodec.summarize(task.getApprovalRef()))
                 .submitterId(task.getSubmitterId()).submitterType(task.getSubmitterType())
                 .operatorId(task.getOperatorId()).operatorType(task.getOperatorType()).status(task.getStatus())
                 .currentStepCode(task.getCurrentStepCode()).attemptCount(task.getAttemptCount())

@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.cloudmold.skilltask.dal;
 
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Candidate;
+import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.PermitConsumption;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Step;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Task;
 import org.apache.ibatis.annotations.Insert;
@@ -19,12 +20,14 @@ public interface SkillTaskMapper {
     @Insert("""
             INSERT INTO cloudmold_skill_task_instance
               (tenant_id,task_id,run_id,skill_id,skill_version,client_request_key,input_json,input_sha256,
-               risk_level,approval_ref,submitter_id,submitter_type,operator_id,operator_type,status,current_step_code,
+               definition_sha256,definition_closure_sha256,risk_level,approval_ref,
+               submitter_id,submitter_type,operator_id,operator_type,status,current_step_code,
                attempt_count,max_attempts,
                next_retry_at,version,created_at,updated_at)
             VALUES
               (#{tenantId},#{taskId},#{runId},#{skillId},#{skillVersion},#{clientRequestKey},#{inputJson},#{inputSha256},
-               #{riskLevel},#{approvalRef},#{operatorId},#{operatorType},#{operatorId},#{operatorType},'QUEUED',
+               #{definitionSha256},#{definitionClosureSha256},#{riskLevel},#{approvalRef},
+               #{operatorId},#{operatorType},#{operatorId},#{operatorType},'QUEUED',
                #{currentStepCode},0,#{maxAttempts},
                #{now},0,#{now},#{now})
             ON DUPLICATE KEY UPDATE task_id=task_id
@@ -33,6 +36,8 @@ public interface SkillTaskMapper {
                    @Param("runId") String runId, @Param("skillId") String skillId,
                    @Param("skillVersion") String skillVersion, @Param("clientRequestKey") String clientRequestKey,
                    @Param("inputJson") String inputJson, @Param("inputSha256") String inputSha256,
+                   @Param("definitionSha256") String definitionSha256,
+                   @Param("definitionClosureSha256") String definitionClosureSha256,
                    @Param("riskLevel") String riskLevel, @Param("approvalRef") String approvalRef,
                    @Param("operatorId") Long operatorId, @Param("operatorType") Integer operatorType,
                    @Param("currentStepCode") String currentStepCode, @Param("maxAttempts") Integer maxAttempts,
@@ -41,13 +46,15 @@ public interface SkillTaskMapper {
     @Insert("""
             INSERT INTO cloudmold_skill_task_instance
               (tenant_id,task_id,run_id,skill_id,skill_version,client_request_key,input_json,input_sha256,
-               risk_level,approval_ref,approval_scope_skill_id,approval_scope_skill_version,
+               definition_sha256,definition_closure_sha256,risk_level,approval_ref,
+               approval_scope_skill_id,approval_scope_skill_version,approval_scope_definition_closure_sha256,
                approval_scope_input_sha256,approval_scope_risk_level,parent_task_id,parent_step_code,
                submitter_id,submitter_type,operator_id,operator_type,status,current_step_code,
                attempt_count,max_attempts,next_retry_at,version,created_at,updated_at)
             VALUES
               (#{tenantId},#{taskId},#{runId},#{skillId},#{skillVersion},#{clientRequestKey},#{inputJson},#{inputSha256},
-               #{riskLevel},#{approvalRef},#{approvalScopeSkillId},#{approvalScopeSkillVersion},
+               #{definitionSha256},#{definitionClosureSha256},#{riskLevel},#{approvalRef},
+               #{approvalScopeSkillId},#{approvalScopeSkillVersion},#{approvalScopeDefinitionClosureSha256},
                #{approvalScopeInputSha256},#{approvalScopeRiskLevel},#{parentTaskId},#{parentStepCode},
                #{operatorId},#{operatorType},#{operatorId},#{operatorType},'QUEUED',#{currentStepCode},
                0,#{maxAttempts},#{now},0,#{now},#{now})
@@ -58,9 +65,12 @@ public interface SkillTaskMapper {
                         @Param("skillVersion") String skillVersion,
                         @Param("clientRequestKey") String clientRequestKey,
                         @Param("inputJson") String inputJson, @Param("inputSha256") String inputSha256,
+                        @Param("definitionSha256") String definitionSha256,
+                        @Param("definitionClosureSha256") String definitionClosureSha256,
                         @Param("riskLevel") String riskLevel, @Param("approvalRef") String approvalRef,
                         @Param("approvalScopeSkillId") String approvalScopeSkillId,
                         @Param("approvalScopeSkillVersion") String approvalScopeSkillVersion,
+                        @Param("approvalScopeDefinitionClosureSha256") String approvalScopeDefinitionClosureSha256,
                         @Param("approvalScopeInputSha256") String approvalScopeInputSha256,
                         @Param("approvalScopeRiskLevel") String approvalScopeRiskLevel,
                         @Param("parentTaskId") String parentTaskId, @Param("parentStepCode") String parentStepCode,
@@ -167,16 +177,28 @@ public interface SkillTaskMapper {
                                      @Param("clientRequestKey") String clientRequestKey);
 
     @Update("""
-            UPDATE cloudmold_skill_task_instance
-            SET definition_sha256=#{definitionSha256},definition_closure_sha256=#{definitionClosureSha256},
-                updated_at=#{now}
-            WHERE tenant_id=#{tenantId} AND task_id=#{taskId}
-              AND definition_sha256 IS NULL AND definition_closure_sha256 IS NULL
+            INSERT INTO cloudmold_skill_task_permit_consumption
+              (tenant_id,permit_id,approval_id,work_order_id,root_request_identity,client_request_key,
+               task_id,approval_ref_sha256,definition_closure_sha256,input_sha256,risk_level,created_at,updated_at)
+            VALUES
+              (#{tenantId},#{permitId},#{approvalId},#{workOrderId},#{rootRequestIdentity},#{clientRequestKey},
+               #{taskId},#{approvalRefSha256},#{definitionClosureSha256},#{inputSha256},#{riskLevel},#{now},#{now})
+            ON DUPLICATE KEY UPDATE permit_id=permit_id
             """)
-    int freezeDefinitionProof(@Param("tenantId") Long tenantId, @Param("taskId") String taskId,
-                              @Param("definitionSha256") String definitionSha256,
-                              @Param("definitionClosureSha256") String definitionClosureSha256,
-                              @Param("now") LocalDateTime now);
+    int insertPermitConsumption(@Param("tenantId") Long tenantId, @Param("permitId") String permitId,
+                                @Param("approvalId") String approvalId, @Param("workOrderId") String workOrderId,
+                                @Param("rootRequestIdentity") String rootRequestIdentity,
+                                @Param("clientRequestKey") String clientRequestKey, @Param("taskId") String taskId,
+                                @Param("approvalRefSha256") String approvalRefSha256,
+                                @Param("definitionClosureSha256") String definitionClosureSha256,
+                                @Param("inputSha256") String inputSha256, @Param("riskLevel") String riskLevel,
+                                @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT * FROM cloudmold_skill_task_permit_consumption
+            WHERE tenant_id=#{tenantId} AND permit_id=#{permitId}
+            """)
+    PermitConsumption selectPermitConsumption(@Param("tenantId") Long tenantId, @Param("permitId") String permitId);
 
     @Select("""
             SELECT * FROM cloudmold_skill_task_step

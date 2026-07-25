@@ -4,6 +4,7 @@ import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.fulfillment.controller.admin.vo.FulfillmentPageReqVO;
 import cn.iocoder.yudao.module.cloudmold.fulfillment.dal.mysql.FulfillmentQueryMapper;
+import cn.iocoder.yudao.module.cloudmold.fulfillment.dal.mysql.TrackingEventMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,7 +18,8 @@ import static org.mockito.Mockito.*;
 class FulfillmentQueryServiceTest {
 
     private final FulfillmentQueryMapper mapper = mock(FulfillmentQueryMapper.class);
-    private final FulfillmentQueryService service = new FulfillmentQueryService(mapper);
+    private final TrackingEventMapper trackingEventMapper = mock(TrackingEventMapper.class);
+    private final FulfillmentQueryService service = new FulfillmentQueryService(mapper, trackingEventMapper);
 
     @BeforeEach
     void setUp() {

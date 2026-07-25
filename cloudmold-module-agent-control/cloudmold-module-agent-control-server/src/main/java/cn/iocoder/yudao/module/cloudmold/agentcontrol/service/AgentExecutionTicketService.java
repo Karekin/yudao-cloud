@@ -4,8 +4,6 @@ import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.common.enums.UserTypeEnum;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
-import cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties;
-import cn.iocoder.yudao.module.cloudmold.agentcontrol.SkillTaskApprovalSigningProperties.SigningKey;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentExecutionTicketApi;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentExecutionTicketCommand;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentExecutionTicketResult;
@@ -16,15 +14,13 @@ import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentContro
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.RoleActionPolicy;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.WorkOrder;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
-import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalScope;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -39,18 +35,18 @@ import java.util.UUID;
 public class AgentExecutionTicketService implements AgentExecutionTicketApi {
 
     private final AgentControlStoreMapper mapper;
-    private final SkillTaskApprovalSigningProperties properties;
-    private final Clock clock;
+    private final AgentExecutionPermitSigner permitSigner;
+    private final java.time.Clock clock;
 
     @Autowired
-    public AgentExecutionTicketService(AgentControlStoreMapper mapper, SkillTaskApprovalSigningProperties properties) {
-        this(mapper, properties, Clock.systemUTC());
+    public AgentExecutionTicketService(AgentControlStoreMapper mapper, AgentExecutionPermitSigner permitSigner) {
+        this(mapper, permitSigner, java.time.Clock.systemUTC());
     }
 
-    AgentExecutionTicketService(AgentControlStoreMapper mapper, SkillTaskApprovalSigningProperties properties,
-                                Clock clock) {
+    AgentExecutionTicketService(AgentControlStoreMapper mapper, AgentExecutionPermitSigner permitSigner,
+                                java.time.Clock clock) {
         this.mapper = mapper;
-        this.properties = properties;
+        this.permitSigner = permitSigner;
         this.clock = clock;
     }
 
@@ -59,9 +55,6 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
     public AgentExecutionTicketResult issue(AgentExecutionTicketCommand command, Long operatorUserId) {
         require(command != null, "command is required");
         requireActor(operatorUserId);
-        SigningMaterial signing = configuredSigningMaterial(clock.instant());
-        Duration maxValidity = requirePositive(properties.getMaxValidity(), "maxValidity");
-        Duration requestedValidity = requireRequestedValidity(command.getValidForSeconds(), maxValidity);
         Long tenantId = TenantContextHolder.getRequiredTenantId();
         LocalDateTime now = now();
         WorkOrder workOrder = requireNonNull(mapper.selectWorkOrderForUpdate(tenantId,
@@ -124,63 +117,22 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
                         && Objects.equals(grant.getScopeHash(), scopeHash),
                 "approved execution approver grant drifted from the frozen work order");
 
-        Instant requestedExpiry = clock.instant().plus(requestedValidity);
-        Instant expiresAt = effectiveExpiry(now, requestedExpiry, actorGrant, grant);
         Instant issuedAt = clock.instant();
-        if (signing.keyed()) {
-            require(!expiresAt.isAfter(signing.expiresAt()),
-                    "execution ticket validity exceeds the active signing key lifetime");
-        }
-        SkillTaskApprovalScope approvalScope = new SkillTaskApprovalScope(tenantId, operatorUserId,
-                UserTypeEnum.ADMIN.getValue(), workOrder.getSkillId(), workOrder.getSkillVersion(),
-                workOrder.getExecutionInputSha256(), workOrder.getRiskLevel());
-        String approvalRef = signing.keyed()
-                ? SkillTaskApprovalRefCodec.issueKeyed(signing.secret(), signing.keyId(), approvalScope,
-                approval.getApprovalId(), issuedAt, expiresAt)
-                : SkillTaskApprovalRefCodec.issue(signing.secret(), approvalScope, approval.getApprovalId(), expiresAt);
-        String approvalRefSha256 = SkillTaskApprovalRefCodec.sha256(approvalRef);
-        appendAudit(tenantId, operatorUserId, workOrder, approval, expiresAt, approvalRefSha256, signing, now);
+        Instant expiresAt = effectiveExpiry(now, issuedAt.plus(requireRequestedValidity(command.getValidForSeconds())),
+                actorGrant, grant);
+        String subject = permitSubject(UserTypeEnum.ADMIN.getValue(), operatorUserId);
+        SignedAgentExecutionPermit signed = permitSigner.sign(new SkillTaskApprovalPermitClaims(
+                SkillTaskApprovalRefCodec.CLAIMS_VERSION, SkillTaskApprovalRefCodec.LOCAL_HMAC_KEY_ID,
+                SkillTaskApprovalRefCodec.DEFAULT_ISSUER, SkillTaskApprovalRefCodec.DEFAULT_AUDIENCE,
+                UUID.randomUUID().toString().replace("-", ""), workOrder.getWorkOrderId(), approval.getApprovalId(),
+                rootRequestIdentity(workOrder, subject), workOrder.getSkillId(), workOrder.getSkillVersion(),
+                workOrder.getSkillDefinitionClosureSha256(), workOrder.getExecutionInputSha256(),
+                workOrder.getRiskLevel(), subject, tenantId, issuedAt, issuedAt, expiresAt));
+        appendAudit(tenantId, operatorUserId, workOrder, approval, signed, now);
         return AgentExecutionTicketResult.builder().workOrderId(workOrder.getWorkOrderId())
-                .approvalId(approval.getApprovalId()).approvalRef(approvalRef)
-                .approvalRefSha256(approvalRefSha256)
+                .approvalId(approval.getApprovalId()).approvalRef(signed.approvalRef())
+                .approvalRefSha256(signed.approvalRefSha256())
                 .expiresAt(expiresAt).build();
-    }
-
-    private SigningMaterial configuredSigningMaterial(Instant now) {
-        String activeKeyId = Objects.toString(properties.getActiveKeyId(), "").trim();
-        if (!activeKeyId.isEmpty()) {
-            SigningKey key = properties.getKeys().get(activeKeyId);
-            if (key == null) {
-                throw new IllegalStateException("active Skill Task approval signing key is not configured");
-            }
-            byte[] secret = requireSecret(key.getSecret());
-            Instant notBefore = requireNonNull(key.getNotBefore(), "active signing key notBefore is missing");
-            Instant expiresAt = requireNonNull(key.getExpiresAt(), "active signing key expiresAt is missing");
-            require(!now.isBefore(notBefore), "active Skill Task approval signing key is not active yet");
-            require(expiresAt.isAfter(now), "active Skill Task approval signing key has expired");
-            if (key.getRevokedAt() != null && !now.isBefore(key.getRevokedAt())) {
-                throw new IllegalStateException("active Skill Task approval signing key is revoked");
-            }
-            return new SigningMaterial(activeKeyId, secret, true, expiresAt);
-        }
-        if (!properties.isLegacyHmacEnabled()) {
-            throw new IllegalStateException(
-                    "Skill Task approval signing is disabled because no active keyed signer is configured");
-        }
-        return new SigningMaterial("legacy", requireSecret(properties.getHmacSecret()), false, null);
-    }
-
-    private byte[] requireSecret(String configured) {
-        String value = Objects.toString(configured, "").trim();
-        if (value.isEmpty()) {
-            throw new IllegalStateException(
-                    "Skill Task approval signing is disabled because no signing secret is configured");
-        }
-        byte[] secret = value.getBytes(StandardCharsets.UTF_8);
-        if (secret.length < 32) {
-            throw new IllegalStateException("Skill Task approval signing secret must contain at least 32 bytes");
-        }
-        return secret;
     }
 
     private ActorRoleGrant requireExactRoleGrant(Long tenantId, Long actorUserId, String roleCode, LocalDateTime now) {
@@ -190,13 +142,9 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
         return grant;
     }
 
-    private Duration requireRequestedValidity(Long validForSeconds, Duration maxValidity) {
+    private Duration requireRequestedValidity(Long validForSeconds) {
         require(validForSeconds != null && validForSeconds > 0, "validForSeconds is required");
-        Duration requested = Duration.ofSeconds(validForSeconds);
-        if (requested.compareTo(maxValidity) > 0) {
-            throw new IllegalStateException("execution ticket validity exceeds the configured maximum");
-        }
-        return requested;
+        return Duration.ofSeconds(validForSeconds);
     }
 
     private Instant effectiveExpiry(LocalDateTime now, Instant requestedExpiry, ActorRoleGrant actorGrant,
@@ -220,16 +168,15 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
         return value;
     }
 
-    private void appendAudit(Long tenantId, Long operatorUserId, WorkOrder workOrder, Approval approval, Instant expiresAt,
-                             String approvalRefSha256, SigningMaterial signing, LocalDateTime now) {
+    private void appendAudit(Long tenantId, Long operatorUserId, WorkOrder workOrder, Approval approval,
+                             SignedAgentExecutionPermit signed, LocalDateTime now) {
         String detailJson = JsonUtils.toJsonString(Map.ofEntries(
                 Map.entry("approvalId", approval.getApprovalId()),
                 Map.entry("workOrderId", workOrder.getWorkOrderId()),
-                Map.entry("approvalRefSha256", approvalRefSha256),
-                Map.entry("approvalRefVersion", signing.keyed()
-                        ? SkillTaskApprovalRefCodec.VERSION : SkillTaskApprovalRefCodec.LEGACY_VERSION),
-                Map.entry("signingKeyId", signing.keyId()),
-                Map.entry("expiresAt", expiresAt.toString()),
+                Map.entry("approvalRefSha256", signed.approvalRefSha256()),
+                Map.entry("approvalRefVersion", signed.permitVersion()),
+                Map.entry("signingKeyId", signed.keyId()),
+                Map.entry("expiresAt", signed.expiresAt().toString()),
                 Map.entry("skillId", workOrder.getSkillId()),
                 Map.entry("skillVersion", workOrder.getSkillVersion()),
                 Map.entry("inputSha256", workOrder.getExecutionInputSha256()),
@@ -242,7 +189,16 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
         require(mapper.insertAuditEvent(event) == 1, "failed to append execution-ticket audit event");
     }
 
-    private record SigningMaterial(String keyId, byte[] secret, boolean keyed, Instant expiresAt) {
+    private String rootRequestIdentity(WorkOrder workOrder, String subject) {
+        return SkillTaskApprovalRefCodec.sha256(String.join("\n",
+                String.valueOf(workOrder.getTenantId()), workOrder.getWorkOrderId(), workOrder.getApprovalId(),
+                workOrder.getSkillId(), workOrder.getSkillVersion(),
+                workOrder.getSkillDefinitionClosureSha256(), workOrder.getExecutionInputSha256(),
+                workOrder.getRiskLevel(), subject));
+    }
+
+    private static String permitSubject(int operatorType, Long operatorUserId) {
+        return operatorType + ":" + operatorUserId;
     }
 
     private String approvalScopeHash(WorkOrder workOrder) {

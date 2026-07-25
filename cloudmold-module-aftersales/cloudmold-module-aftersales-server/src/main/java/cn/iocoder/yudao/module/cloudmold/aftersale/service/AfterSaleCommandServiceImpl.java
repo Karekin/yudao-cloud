@@ -88,6 +88,21 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
         return view(null, sale, requireSingleItem(tenantId, sale.getAfterSaleId()), false);
     }
 
+    @Override
+    public AppAfterSalePageView listOwned(String buyerPrincipalId, int pageNo, int pageSize) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        requireText(buyerPrincipalId, "buyerPrincipalId", 128);
+        require(pageNo >= 1, "pageNo must be at least 1");
+        require(pageSize >= 1 && pageSize <= 50, "pageSize must be between 1 and 50");
+        long total = caseMapper.countByBuyer(tenantId, buyerPrincipalId);
+        List<AfterSaleView> list = total == 0 ? List.of()
+                : caseMapper.selectByBuyer(tenantId, buyerPrincipalId, (long) (pageNo - 1) * pageSize, pageSize)
+                .stream()
+                .map(sale -> view(null, sale, requireSingleItem(tenantId, sale.getAfterSaleId()), false))
+                .toList();
+        return AppAfterSalePageView.builder().list(list).total(total).pageNo(pageNo).pageSize(pageSize).build();
+    }
+
     private AfterSaleView request(Long tenantId, Long operationId, AfterSaleCommand command, LocalDateTime now) {
         require(command.getAfterSaleId() == null && command.getExpectedVersion() == null,
                 "REQUEST does not accept aggregate identity or version");

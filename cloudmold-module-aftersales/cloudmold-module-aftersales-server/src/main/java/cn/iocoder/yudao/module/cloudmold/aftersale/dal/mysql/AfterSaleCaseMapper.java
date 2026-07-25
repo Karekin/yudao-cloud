@@ -5,6 +5,7 @@ import cn.iocoder.yudao.module.cloudmold.aftersale.dal.dataobject.AfterSaleCaseD
 import org.apache.ibatis.annotations.*;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface AfterSaleCaseMapper extends BaseMapperX<AfterSaleCaseDO> {
@@ -21,6 +22,18 @@ public interface AfterSaleCaseMapper extends BaseMapperX<AfterSaleCaseDO> {
     @Select("SELECT c.* FROM cloudmold_after_sale_case c JOIN cloudmold_after_sale_item i ON i.tenant_id=c.tenant_id AND i.after_sale_id=c.after_sale_id WHERE c.tenant_id=#{tenantId} AND c.order_id=#{orderId} AND i.order_item_id=#{orderItemId} AND c.status IN ('REQUESTED','APPROVED','RESOLUTION_PENDING','MANUAL_REVIEW') LIMIT 1")
     AfterSaleCaseDO selectActiveByOrderItem(@Param("tenantId") Long tenantId, @Param("orderId") String orderId,
                                             @Param("orderItemId") String orderItemId);
+
+    @Select("SELECT COUNT(*) FROM cloudmold_after_sale_case WHERE tenant_id=#{tenantId} AND buyer_id=#{buyerId}")
+    long countByBuyer(@Param("tenantId") Long tenantId, @Param("buyerId") String buyerId);
+
+    @Select("""
+            SELECT * FROM cloudmold_after_sale_case
+            WHERE tenant_id=#{tenantId} AND buyer_id=#{buyerId}
+            ORDER BY updated_at DESC,after_sale_id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            """)
+    List<AfterSaleCaseDO> selectByBuyer(@Param("tenantId") Long tenantId, @Param("buyerId") String buyerId,
+                                        @Param("offset") long offset, @Param("limit") int limit);
 
     @Update("""
             UPDATE cloudmold_after_sale_case

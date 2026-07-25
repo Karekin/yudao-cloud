@@ -18,6 +18,7 @@ cn.iocoder.yudao.module.cloudmold.customerservice.api.CustomerServiceCommandApi
 cn.iocoder.yudao.module.cloudmold.customerservice.api.CustomerServiceQueryApi
 cn.iocoder.yudao.module.cloudmold.engagement.api.EngagementCommandApi
 cn.iocoder.yudao.module.cloudmold.engagement.api.EngagementQueryApi
+cn.iocoder.yudao.module.cloudmold.fulfillment.api.AppFulfillmentQueryApi
 cn.iocoder.yudao.module.cloudmold.fulfillment.api.ForwardFulfillmentAfterSaleQueryApi
 cn.iocoder.yudao.module.cloudmold.fulfillment.api.FulfillmentCancellationQueryApi
 cn.iocoder.yudao.module.cloudmold.fulfillment.api.FulfillmentCommandApi
@@ -37,10 +38,12 @@ cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryMigrationPilotApi
 cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryMigrationQualificationApi
 cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryMigrationQueryApi
 cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryMigrationShadowApi
+cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryCheckoutReservationApi
 cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryReservationQueryApi
 cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryStockoutDiagnosisQueryApi
 cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryV3AvailabilityQueryApi
 cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryV3CommandApi
+cn.iocoder.yudao.module.cloudmold.listing.api.AppListingQueryApi
 cn.iocoder.yudao.module.cloudmold.listing.api.ListingCommandApi
 cn.iocoder.yudao.module.cloudmold.listing.api.ListingQueryApi
 cn.iocoder.yudao.module.cloudmold.listing.api.unpublish.ListingUnpublishSagaCommandApi
@@ -62,6 +65,7 @@ cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.OperationsIntellige
 cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.OperationsIntelligenceQueryApi
 cn.iocoder.yudao.module.cloudmold.order.api.OrderAfterSaleQueryApi
 cn.iocoder.yudao.module.cloudmold.order.api.OrderAfterSaleSettlementApi
+cn.iocoder.yudao.module.cloudmold.order.api.AppOrderQueryApi
 cn.iocoder.yudao.module.cloudmold.order.api.OrderCommandApi
 cn.iocoder.yudao.module.cloudmold.order.api.OrderQueryApi
 cn.iocoder.yudao.module.cloudmold.order.api.cancellation.OrderCancellationSagaCommandApi
