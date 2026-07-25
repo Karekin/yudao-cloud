@@ -21,6 +21,7 @@
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-fulfillment-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-aftersales-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-customer-service-api</artifactId><version>${revision}</version></dependency>
+        <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-commerce-behavior-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>yudao-module-member-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>yudao-spring-boot-starter-mybatis</artifactId></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>yudao-spring-boot-starter-biz-tenant</artifactId></dependency>

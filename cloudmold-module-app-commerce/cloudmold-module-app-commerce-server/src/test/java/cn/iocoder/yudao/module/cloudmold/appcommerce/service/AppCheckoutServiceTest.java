@@ -220,7 +220,7 @@ class AppCheckoutServiceTest {
                 .payableAmountMinor(39800L).currencyCode("CNY").build());
         PaymentCommandResult paid = PaymentCommandResult.builder()
                 .paymentId("payment-1").orderId("order-pay-1").capturedAmountMinor(39800L)
-                .currencyCode("CNY").duplicate(false).build();
+                .currencyCode("CNY").currentStatus("CAPTURED").duplicate(false).build();
         when(paymentCommandApi.execute(any())).thenReturn(paid);
         when(orderCommandApi.execute(argThat(command ->
                 command.getOperation().name().equals("CONFIRM_PAYMENT"))))

@@ -4,6 +4,13 @@ server:
 --- #################### CloudMold Dubbo 内部能力总线 ####################
 
 cloudmold:
+  # 仅供本地端到端验收使用。生产配置不得覆盖为 true/LOCAL。
+  app-commerce:
+    internal-test-payment-enabled: true
+  payment:
+    internal-test:
+      enabled: true
+      environment: LOCAL
   rpc:
     enabled: ${CLOUDMOLD_RPC_ENABLED:true}
     export-enabled: true
@@ -247,7 +254,8 @@ yudao:
   captcha:
     enable: false # 本地环境，暂时关闭图片验证码，方便登录等接口的测试；
   security:
-    mock-enable: true
+    # App Commerce 验收必须使用服务端签发的真实 Token，禁止 mock 登录旁路。
+    mock-enable: false
   pay:
     order-notify-url: http://yunai.natapp1.cc/admin-api/pay/notify/order # 支付渠道的【支付】回调地址
     refund-notify-url: http://yunai.natapp1.cc/admin-api/pay/notify/refund # 支付渠道的【退款】回调地址
@@ -279,6 +287,7 @@ justauth:
       client-secret: ${wx.miniapp.secret}
       ignore-check-redirect-uri: true
       ignore-check-state: true # 微信小程序，不会使用到 state，所以不进行校验
+
     WECHAT_MP: # 微信公众号
       client-id: ${wx.mp.app-id}
       client-secret: ${wx.mp.secret}

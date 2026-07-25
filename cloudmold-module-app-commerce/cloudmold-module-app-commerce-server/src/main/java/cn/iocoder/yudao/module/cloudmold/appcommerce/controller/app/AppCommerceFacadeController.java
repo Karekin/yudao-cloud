@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.cloudmold.fulfillment.api.AppFulfillmentView;
 import cn.iocoder.yudao.module.cloudmold.order.api.*;
 import cn.iocoder.yudao.module.cloudmold.aftersale.api.AppAfterSalePageView;
 import cn.iocoder.yudao.module.cloudmold.payment.api.PaymentCommandResult;
+import cn.iocoder.yudao.module.cloudmold.commercebehavior.api.CommerceBehaviorCommandApi.CommerceBehaviorCommandResult;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
@@ -36,6 +37,7 @@ public class AppCommerceFacadeController {
     @Resource private AppOrderQueryApi orderQueryApi;
     @Resource private AppSupportService supportService;
     @Resource private AppFulfillmentQueryApi fulfillmentQueryApi;
+    @Resource private AppCommerceBehaviorService commerceBehaviorService;
 
     @GetMapping("/me")
     @Operation(summary = "校验当前登录会员并解析规范 Principal")
@@ -102,6 +104,26 @@ public class AppCommerceFacadeController {
                 request.orderId, request.expectedOrderVersion));
     }
 
+    @PostMapping("/payments/internal-test/capture-with-attribution")
+    @Operation(summary = "仅限非生产环境的内部测试支付并归因消费者会话")
+    public CommonResult<AppPaymentCaptureView> captureWithAttribution(
+            @Valid @RequestBody AttributedPaymentCaptureReq request) {
+        PaymentCommandResult payment = checkoutService.captureInternalTest(request.idempotencyKey,
+                request.orderId, request.expectedOrderVersion);
+        CommerceBehaviorCommandResult attribution = commerceBehaviorService.attributePayment(
+                request.idempotencyKey + ":attribution", request.sessionId,
+                request.expectedSessionVersion, request.checkoutToken, request.orderId, payment.getPaymentId());
+        return success(AppPaymentCaptureView.from(payment, attribution));
+    }
+
+    @PostMapping("/behavior/sessions/link")
+    @Operation(summary = "将当前真实会员 Principal 关联到匿名消费者会话")
+    public CommonResult<CommerceBehaviorCommandResult> linkBehaviorSession(
+            @Valid @RequestBody LinkBehaviorSessionReq request) {
+        return success(commerceBehaviorService.linkCurrentMember(request.idempotencyKey,
+                request.sessionId, request.expectedSessionVersion));
+    }
+
     @PostMapping("/after-sales")
     public CommonResult<AfterSaleView> requestAfterSale(@Valid @RequestBody AfterSaleReq request) {
         return success(supportService.requestAfterSale(request.idempotencyKey, request.orderId,
@@ -158,6 +180,53 @@ public class AppCommerceFacadeController {
         @NotBlank @Size(min = 8, max = 128) private String idempotencyKey;
         @NotBlank private String orderId;
         @NotNull @Positive private Long expectedOrderVersion;
+    }
+
+    @Data
+    public static class AttributedPaymentCaptureReq {
+        @NotBlank @Size(min = 8, max = 128) private String idempotencyKey;
+        @NotBlank private String orderId;
+        @NotNull @Positive private Long expectedOrderVersion;
+        @NotBlank @Pattern(regexp = "^[0-9a-fA-F-]{36}$") private String sessionId;
+        @NotNull @Positive private Long expectedSessionVersion;
+        @NotBlank @Pattern(regexp = "^[A-Za-z0-9][A-Za-z0-9:_-]{7,127}$") private String checkoutToken;
+    }
+
+    @Data
+    public static class LinkBehaviorSessionReq {
+        @NotBlank @Size(min = 8, max = 128) private String idempotencyKey;
+        @NotBlank @Pattern(regexp = "^[0-9a-fA-F-]{36}$") private String sessionId;
+        @NotNull @Positive private Long expectedSessionVersion;
+    }
+
+    @Data
+    public static class AppPaymentCaptureView {
+        private String paymentId;
+        private String orderId;
+        private String currentStatus;
+        private Long capturedAmountMinor;
+        private String currencyCode;
+        private Long aggregateVersion;
+        private Boolean duplicate;
+        private String behaviorStatus;
+        private Long behaviorVersion;
+        private Boolean attributionDuplicate;
+
+        static AppPaymentCaptureView from(PaymentCommandResult payment,
+                                          CommerceBehaviorCommandResult attribution) {
+            AppPaymentCaptureView view = new AppPaymentCaptureView();
+            view.setPaymentId(payment.getPaymentId());
+            view.setOrderId(payment.getOrderId());
+            view.setCurrentStatus(payment.getCurrentStatus());
+            view.setCapturedAmountMinor(payment.getCapturedAmountMinor());
+            view.setCurrencyCode(payment.getCurrencyCode());
+            view.setAggregateVersion(payment.getAggregateVersion());
+            view.setDuplicate(payment.getDuplicate());
+            view.setBehaviorStatus(attribution.getStatus());
+            view.setBehaviorVersion(attribution.getAggregateVersion());
+            view.setAttributionDuplicate(attribution.getDuplicate());
+            return view;
+        }
     }
 
     @Data
