@@ -4,6 +4,7 @@ import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.integration.bpm.AgentApprovalWorkflowRegistrar;
 import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
 
@@ -148,6 +149,33 @@ class AgentControlServiceImplTest {
         verify(mapper, never()).selectEffectiveActorRoleGrant(eq(17L), eq(200L), eq("buyer"), any());
         verify(mapper).insertAuditEvent(argThat(event -> event.getActorUserId().equals(200L)
                 && event.getEventType().equals("agent_control.approval.decided")));
+    }
+
+    @Test
+    void registersBpmBindingInTheApprovalRequestTransaction() {
+        AgentApprovalWorkflowRegistrar workflows = mock(AgentApprovalWorkflowRegistrar.class);
+        AgentControlServiceImpl integratedService = new AgentControlServiceImpl(
+                mapper, Clock.fixed(NOW, ZoneOffset.UTC), workflows);
+        WorkOrder row = new WorkOrder().setWorkOrderId("wo-bpm-1").setTenantId(17L)
+                .setRoleCode("buyer").setActionCode("purchase.commit")
+                .setRequesterUserId(100L).setStatus("WAITING_APPROVAL").setVersion(1L);
+        workOrder.set(row);
+        RoleActionPolicy approvalPolicy = policy("buyer", "purchase.commit", true);
+        freeze(row, approvalPolicy, "{}");
+        when(mapper.selectActionPolicy(17L, "buyer", "purchase.commit")).thenReturn(approvalPolicy);
+        when(mapper.attachApproval(eq(17L), eq("wo-bpm-1"), eq(1L), eq("approval-bpm-1"), any()))
+                .thenReturn(1);
+
+        integratedService.execute(base(AgentControlOperation.REQUEST_APPROVAL, "approval-bpm-request-1")
+                .approval(AgentControlCommand.ApprovalDefinition.builder().approvalId("approval-bpm-1")
+                        .workOrderId("wo-bpm-1").reasonCode("PURCHASE_COMMIT")
+                        .workOrderExpectedVersion(1L).build())
+                .build(), 100L);
+
+        verify(workflows).register(eq(17L), argThat(value ->
+                        value.getApprovalId().equals("approval-bpm-1")
+                                && value.getScopeHash().equals(approval.get().getScopeHash())),
+                same(row), eq(LocalDateTime.ofInstant(NOW, ZoneOffset.UTC)));
     }
 
     @Test

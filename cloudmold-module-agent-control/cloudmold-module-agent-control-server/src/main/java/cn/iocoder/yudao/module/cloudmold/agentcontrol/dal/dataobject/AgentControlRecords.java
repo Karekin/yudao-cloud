@@ -231,6 +231,61 @@ public final class AgentControlRecords {
     }
 
     @Data @Accessors(chain = true)
+    public static class ApprovalWorkflowBinding {
+        private String approvalId;
+        private Long tenantId;
+        private String workOrderId;
+        private String actionCode;
+        private String roleCode;
+        private String riskLevel;
+        private Long requesterUserId;
+        private String scopeHash;
+        private String processDefinitionKey;
+        private String processInstanceId;
+        private String businessKey;
+        private String status;
+        private Integer lastBpmStatus;
+        private String lastReasonSha256;
+        private String startAttemptToken;
+        private Integer startAttemptCount;
+        private Long version;
+        private LocalDateTime requestedAt;
+        private LocalDateTime startAttemptedAt;
+        private LocalDateTime startedAt;
+        private LocalDateTime terminalAt;
+        private String lastErrorCode;
+        private LocalDateTime updatedAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class ApprovalWorkflowStartCandidate {
+        private String approvalId;
+        private Long tenantId;
+        private String workOrderId;
+        private String actionCode;
+        private String roleCode;
+        private String riskLevel;
+        private Long requesterUserId;
+        private String scopeHash;
+        private String processDefinitionKey;
+        private String businessKey;
+        private String status;
+        private Long version;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class ApprovalWorkflowEvent {
+        private String eventId;
+        private Long tenantId;
+        private String approvalId;
+        private String processInstanceId;
+        private Integer bpmStatus;
+        private String observedStatus;
+        private String reasonSha256;
+        private LocalDateTime observedAt;
+    }
+
+    @Data @Accessors(chain = true)
     public static class BusinessResult {
         private String resultId;
         private Long tenantId;

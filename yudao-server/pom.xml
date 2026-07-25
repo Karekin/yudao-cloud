@@ -311,6 +311,19 @@
 
     </dependencies>
 
+    <profiles>
+        <profile>
+            <id>cloudmold-agent-approval-bpm</id>
+            <dependencies>
+                <dependency>
+                    <groupId>cn.iocoder.cloud</groupId>
+                    <artifactId>yudao-module-bpm-server</artifactId>
+                    <version>${revision}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
+
     <build>
         <!-- 设置构建的 jar 包名 -->
         <finalName>${project.artifactId}</finalName>

@@ -15,7 +15,9 @@
 - [x] 前序结构化 Checkpoint 派生并冻结后继输入；R3 后继自动创建审批请求，审批人不继承执行岗位权限。
 - [x] 事件去重、定时唤醒、依赖恢复、租约接管和 fencing token 负向测试。
 - [x] 模块/中央迁移镜像、隔离 MySQL 非空夹具和 35 项 DQC 全 0。
-- [x] CI 编译测试休眠候选，并断言 `yudao-server` 未装配模块。
+- [x] CI 编译测试默认休眠候选；模块已装配但所有运行开关默认关闭。
+- [x] P1.0 首切片：隔离 Maven BPM profile、Approval/ProcessInstance 绑定、单次启动 claim、
+  重复/乱序终态事件收据和防越权候选状态。
 
 ## P0 激活前仍必须完成
 
@@ -23,7 +25,15 @@
 - [ ] Agent Control 签发、SkillTask 公钥验签的非共享密钥 execution permit；当前 HMAC approval 不能作为最终跨服务信任模型。
 - [ ] 至少一次真实进程重启 E2E：提交后写回前、SkillTask 成功后工作单完成前、事件匹配后唤醒前。
 - [ ] 为授权自动过期追加逐条 lifecycle audit，并补非空 DQC。
-- [ ] 通过激活评审后，才允许加入 `yudao-server`；MCP 暴露需要独立评审。
+- [ ] 通过激活评审后，才允许打开生产运行开关；MCP 暴露需要独立评审。
+
+## P1.0 BPM 审批融合仍需完成
+
+- [ ] 在 yudao BPM 中发布固定 key `cloudmold-agent-approval-v1` 的流程定义，并冻结 definition id/version 证据。
+- [ ] 建立 BPM task approver 到 Agent Control exact approval grant 的实名 attestation，禁止只凭流程终态放行。
+- [ ] 完成模块迁移的中央 V91+ 镜像、回滚、checksum 和 DQC；不得与并行 V83–V90 抢序号。
+- [ ] 完成真实审批 E2E：请求、待办、不同审批人通过/拒绝、重复回调、服务重启和 `START_UNCERTAIN` 人工对账。
+- [ ] DeerFlow 只调用受治理的请求/查询工具，不保存或改写 BPM、Approval、Risk 与 SkillTask 权威状态。
 
 ## 首条真实业务 E2E
 

@@ -1,6 +1,7 @@
-# CloudMold Agent Autonomy Kernel（休眠候选）
+# CloudMold Agent Autonomy Kernel（默认休眠）
 
-> 未完成真实安全端点 smoke、重启 E2E 和业务数据闭环前，不得把本模块装配到 `yudao-server`，也不得通过 MCP 暴露。
+> 模块已经装配到 `yudao-server`，但 Agent Control、Runtime 与 BPM 审批适配默认全部关闭。未完成真实安全端点
+> smoke、重启 E2E 和业务数据闭环前，不得在生产配置中启用，也不得通过 MCP 暴露。
 
 该 CloudMold 红区模块现在包含三层权威能力：
 
@@ -34,22 +35,41 @@
 - 业务事件通过 Inbox 去重；事件订阅只支持服务端固定的 `EXACT_AGGREGATE` 匹配器。
 - 定时器和已完成依赖由可开关的 reconciler 自动唤醒，默认开关关闭。
 - Mission Runtime 状态变化写入独立 Agent Control Outbox；审计记录不冒充集成事件。
+- yudao BPM 只承载人工流程编排。BPM 终态写入独立绑定/事件证据，审批通过停在
+  `BPM_APPROVED_PENDING_ATTESTATION`；它不会直接决定 Agent Control Approval，更不能签发生产 execution permit。
+- BPM 启动使用确定性 business key 和单次 CAS claim。远端结果不确定时进入 `START_UNCERTAIN` 并停止自动重试，
+  防止重复流程；迟到的终态事件可以解除该不确定状态。
 
 运行开关：
 
 ```yaml
 cloudmold:
   agent-control:
+    enabled: false
+    approval-workflow:
+      enabled: false
+      process-definition-key: cloudmold-agent-approval-v1
+      reconcile-delay-ms: 2000
     runtime:
       enabled: false
       reconcile-delay-ms: 2000
 ```
 
+本地启用 yudao BPM 实现时，构建启动模块需显式增加
+`-Pcloudmold-agent-approval-bpm`。默认 Maven 构建不包含 `yudao-module-bpm-server`；仅设置运行开关但未启用
+profile 会启动失败，从而避免误以为空壳 Adapter 已有流程引擎。
+
 当前限制：
 
-- 模块仍未装配进正式应用，因此没有生产 API、菜单或 DeerFlow adapter；当前是可验证的休眠实现，不是已上线自治平台。
+- 当前仍是可验证的默认休眠实现，不是已上线自治平台；DeerFlow 工具调用闭环尚未完成。
+- 仓库尚未提供 `cloudmold-agent-approval-v1` 的已部署、已发布流程定义，也尚未完成真实审批人任务 E2E。
+- yudao BPM 的状态事件没有审批任务操作人身份；因此终态只能作为候选证据，仍需由 Agent Control 的实名审批命令
+  重新校验 exact grant、scope hash、策略快照和职责分离。
 - 缺断码模板、租约、事件和依赖恢复已通过单测与隔离 MySQL 演练，但尚未完成真实服务重启 E2E。
 - `buyer.execute-replenishment` 只能在本地测试中绑定 Legacy ERP Skill；规范 Procurement SoR 和预算账本未完成前，真实采购保持 R3 人工审批并关闭无人生产写入。
 - 自动授权过期尚未逐条产生 lifecycle audit；当前过期授权会失效，但上线前仍需补审计投影。
+- 中央 Demo 迁移序号 83–90 当前存在并行未提交改动；本切片先提交模块内
+  `V20260725_06__cloudmold_agent_approval_workflow.sql`，待序号基线收口后再生成中央镜像、回滚和 checksum，
+  不抢占或重排并行迁移。
 
 剩余激活条件见 [NEXT_SLICE.md](NEXT_SLICE.md)。

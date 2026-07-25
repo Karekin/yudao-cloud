@@ -6,7 +6,9 @@ import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.integration.bpm.AgentApprovalWorkflowRegistrar;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,15 +31,24 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
 
     private final AgentControlStoreMapper mapper;
     private final Clock clock;
+    private final AgentApprovalWorkflowRegistrar approvalWorkflows;
 
     @Autowired
-    public AgentControlServiceImpl(AgentControlStoreMapper mapper) {
-        this(mapper, Clock.systemUTC());
+    public AgentControlServiceImpl(AgentControlStoreMapper mapper,
+                                   ObjectProvider<AgentApprovalWorkflowRegistrar> approvalWorkflows) {
+        this(mapper, Clock.systemUTC(),
+                approvalWorkflows.getIfAvailable(() -> AgentApprovalWorkflowRegistrar.DISABLED));
     }
 
     AgentControlServiceImpl(AgentControlStoreMapper mapper, Clock clock) {
+        this(mapper, clock, AgentApprovalWorkflowRegistrar.DISABLED);
+    }
+
+    AgentControlServiceImpl(AgentControlStoreMapper mapper, Clock clock,
+                            AgentApprovalWorkflowRegistrar approvalWorkflows) {
         this.mapper = mapper;
         this.clock = clock;
+        this.approvalWorkflows = approvalWorkflows;
     }
 
     @Override
@@ -275,6 +286,7 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
         require(mapper.insertApproval(row) == 1, "failed to persist approval request");
         require(mapper.attachApproval(tenantId, workOrder.getWorkOrderId(), workOrder.getVersion(),
                 row.getApprovalId(), now) == 1, "work order approval attachment conflict");
+        approvalWorkflows.register(tenantId, row, workOrder, now);
         return new Outcome("role_approval", row.getApprovalId(), 1L, "PENDING",
                 "agent_control.approval.requested");
     }

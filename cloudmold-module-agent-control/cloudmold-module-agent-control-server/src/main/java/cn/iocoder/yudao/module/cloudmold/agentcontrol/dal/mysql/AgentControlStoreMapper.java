@@ -470,6 +470,115 @@ public interface AgentControlStoreMapper {
                        @Param("now") LocalDateTime now);
 
     @Insert("""
+            INSERT IGNORE INTO cloudmold_agent_approval_workflow_binding
+              (approval_id,tenant_id,work_order_id,action_code,role_code,risk_level,requester_user_id,scope_hash,
+               process_definition_key,business_key,status,start_attempt_count,version,requested_at,updated_at)
+            VALUES (#{approvalId},#{tenantId},#{workOrderId},#{actionCode},#{roleCode},#{riskLevel},
+                    #{requesterUserId},#{scopeHash},#{processDefinitionKey},#{businessKey},#{status},
+                    #{startAttemptCount},#{version},#{requestedAt},#{updatedAt})
+            """)
+    int insertApprovalWorkflowBinding(ApprovalWorkflowBinding value);
+
+    @Select("""
+            SELECT approval_id,tenant_id,work_order_id,action_code,role_code,risk_level,requester_user_id,scope_hash,
+                   process_definition_key,process_instance_id,business_key,status,last_bpm_status,last_reason_sha256,
+                   start_attempt_token,start_attempt_count,version,requested_at,start_attempted_at,started_at,
+                   terminal_at,last_error_code,updated_at
+            FROM cloudmold_agent_approval_workflow_binding
+            WHERE tenant_id=#{tenantId} AND approval_id=#{approvalId}
+            """)
+    ApprovalWorkflowBinding selectApprovalWorkflowBinding(@Param("tenantId") Long tenantId,
+                                                           @Param("approvalId") String approvalId);
+
+    @TenantIgnore
+    @Select("""
+            SELECT approval_id,tenant_id,work_order_id,action_code,role_code,risk_level,requester_user_id,scope_hash,
+                   process_definition_key,business_key,status,version
+            FROM cloudmold_agent_approval_workflow_binding
+            WHERE status='START_REQUESTED'
+            ORDER BY requested_at,tenant_id,approval_id
+            LIMIT #{limit}
+            """)
+    List<ApprovalWorkflowStartCandidate> selectApprovalWorkflowStartCandidates(@Param("limit") int limit);
+
+    @Update("""
+            UPDATE cloudmold_agent_approval_workflow_binding
+            SET status='STARTING',start_attempt_token=#{attemptToken},start_attempt_count=start_attempt_count+1,
+                start_attempted_at=#{now},last_error_code=NULL,version=version+1,updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND approval_id=#{approvalId} AND version=#{expectedVersion}
+              AND status='START_REQUESTED' AND start_attempt_count=0
+            """)
+    int claimApprovalWorkflowStart(@Param("tenantId") Long tenantId, @Param("approvalId") String approvalId,
+                                   @Param("expectedVersion") Long expectedVersion,
+                                   @Param("attemptToken") String attemptToken,
+                                   @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE cloudmold_agent_approval_workflow_binding
+            SET status='RUNNING',process_instance_id=#{processInstanceId},started_at=#{now},
+                version=version+1,updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND approval_id=#{approvalId} AND status='STARTING'
+              AND start_attempt_token=#{attemptToken}
+            """)
+    int markApprovalWorkflowRunning(@Param("tenantId") Long tenantId, @Param("approvalId") String approvalId,
+                                    @Param("attemptToken") String attemptToken,
+                                    @Param("processInstanceId") String processInstanceId,
+                                    @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE cloudmold_agent_approval_workflow_binding
+            SET status='START_UNCERTAIN',last_error_code=#{errorCode},version=version+1,updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND approval_id=#{approvalId} AND status='STARTING'
+              AND start_attempt_token=#{attemptToken}
+            """)
+    int markApprovalWorkflowStartUncertain(@Param("tenantId") Long tenantId,
+                                           @Param("approvalId") String approvalId,
+                                           @Param("attemptToken") String attemptToken,
+                                           @Param("errorCode") String errorCode,
+                                           @Param("now") LocalDateTime now);
+
+    @TenantIgnore
+    @Select("""
+            SELECT approval_id,tenant_id,work_order_id,action_code,role_code,risk_level,requester_user_id,scope_hash,
+                   process_definition_key,process_instance_id,business_key,status,last_bpm_status,last_reason_sha256,
+                   start_attempt_token,start_attempt_count,version,requested_at,start_attempted_at,started_at,
+                   terminal_at,last_error_code,updated_at
+            FROM cloudmold_agent_approval_workflow_binding
+            WHERE process_definition_key=#{processDefinitionKey}
+              AND (process_instance_id=#{processInstanceId} OR business_key=#{businessKey})
+            LIMIT 1 FOR UPDATE
+            """)
+    ApprovalWorkflowBinding selectApprovalWorkflowBindingForEvent(
+            @Param("processDefinitionKey") String processDefinitionKey,
+            @Param("processInstanceId") String processInstanceId,
+            @Param("businessKey") String businessKey);
+
+    @Insert("""
+            INSERT IGNORE INTO cloudmold_agent_approval_workflow_event
+              (event_id,tenant_id,approval_id,process_instance_id,bpm_status,observed_status,reason_sha256,observed_at)
+            VALUES (#{eventId},#{tenantId},#{approvalId},#{processInstanceId},#{bpmStatus},#{observedStatus},
+                    #{reasonSha256},#{observedAt})
+            """)
+    int insertApprovalWorkflowEvent(ApprovalWorkflowEvent value);
+
+    @Update("""
+            UPDATE cloudmold_agent_approval_workflow_binding
+            SET status=#{status},process_instance_id=COALESCE(process_instance_id,#{processInstanceId}),
+                last_bpm_status=#{bpmStatus},last_reason_sha256=#{reasonSha256},terminal_at=#{now},
+                version=version+1,updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND approval_id=#{approvalId}
+              AND status IN ('STARTING','RUNNING','START_UNCERTAIN')
+              AND (process_instance_id IS NULL OR process_instance_id=#{processInstanceId})
+            """)
+    int markApprovalWorkflowTerminal(@Param("tenantId") Long tenantId,
+                                     @Param("approvalId") String approvalId,
+                                     @Param("processInstanceId") String processInstanceId,
+                                     @Param("bpmStatus") Integer bpmStatus,
+                                     @Param("status") String status,
+                                     @Param("reasonSha256") String reasonSha256,
+                                     @Param("now") LocalDateTime now);
+
+    @Insert("""
             INSERT INTO cloudmold_agent_business_result
               (result_id,tenant_id,work_order_id,outcome_code,summary,evidence_ref,recorded_by_user_id,recorded_at)
             VALUES (#{resultId},#{tenantId},#{workOrderId},#{outcomeCode},#{summary},#{evidenceRef},
