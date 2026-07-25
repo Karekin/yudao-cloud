@@ -14,7 +14,8 @@ spring:
       - cn.iocoder.yudao.framework.apilog.config.YudaoApiLogRpcAutoConfiguration
 
   profiles:
-    active: local
+    # Local remains the developer default. An explicit prod profile replaces it.
+    default: local
 
   main:
     allow-circular-references: true # 允许循环依赖，因为项目是三层架构，无法避免这个情况。
@@ -383,11 +384,11 @@ yudao:
       comment-expire-time: 7d # 评论的过期时间
       status-sync-to-wxa-enable: true # 是否同步订单状态到微信小程序
     express:
-      client: kd_100
+      client: ${YUDAO_TRADE_EXPRESS_CLIENT:NOT_PROVIDE}
       kd-niao:
         api-key: ${YUDAO_EXPRESS_KDNIAO_API_KEY:}
         business-id: ${YUDAO_EXPRESS_KDNIAO_BUSINESS_ID:}
-        request-type: 1002 # 免费版 1002；付费版 8001
+        request-type: ${YUDAO_EXPRESS_KDNIAO_REQUEST_TYPE:1002}
       kd100:
         key: ${YUDAO_EXPRESS_KD100_KEY:}
         customer: ${YUDAO_EXPRESS_KD100_CUSTOMER:}
