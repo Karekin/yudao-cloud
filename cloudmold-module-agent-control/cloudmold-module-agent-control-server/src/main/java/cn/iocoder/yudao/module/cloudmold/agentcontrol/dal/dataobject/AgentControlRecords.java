@@ -4,6 +4,7 @@ import lombok.Data;
 import lombok.experimental.Accessors;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 public final class AgentControlRecords {
     private AgentControlRecords() {}
@@ -185,6 +186,24 @@ public final class AgentControlRecords {
     }
 
     @Data @Accessors(chain = true)
+    public static class MetricSubscription {
+        private String subscriptionId; private Long tenantId; private String missionId; private String workOrderId;
+        private String metricId; private String metricVersion; private String dimensionHash;
+        private String comparisonOperator; private BigDecimal thresholdValue; private String unitCode;
+        private Integer maxAgeSeconds; private String status; private String matchedObservationId;
+        private BigDecimal matchedValue; private String matchedEvidenceSha256; private LocalDateTime matchedAt;
+        private Long version; private LocalDateTime createdAt; private LocalDateTime updatedAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class MetricObservation {
+        private Long tenantId; private String observationId; private String metricId; private String metricVersion;
+        private String dimensionHash; private BigDecimal value; private String unitCode; private String sourceQueryId;
+        private String evidenceSha256; private String observationSha256; private LocalDateTime observedAt;
+        private LocalDateTime receivedAt;
+    }
+
+    @Data @Accessors(chain = true)
     public static class MissionTimer {
         private String timerId; private Long tenantId; private String missionId; private String workOrderId;
         private String timerType; private LocalDateTime dueAt; private Integer generation; private String status;
@@ -291,6 +310,17 @@ public final class AgentControlRecords {
         private String terminalTaskId;
         private String terminalTaskDefinitionKey;
         private LocalDateTime observedAt;
+    }
+
+    @Data @Accessors(chain = true)
+    public static class ApprovalWorkflowDecisionCandidate {
+        private String approvalId;
+        private Long tenantId;
+        private String workOrderId;
+        private String observedStatus;
+        private Long terminalOperatorUserId;
+        private Long approvalVersion;
+        private Long workOrderVersion;
     }
 
     @Data @Accessors(chain = true)

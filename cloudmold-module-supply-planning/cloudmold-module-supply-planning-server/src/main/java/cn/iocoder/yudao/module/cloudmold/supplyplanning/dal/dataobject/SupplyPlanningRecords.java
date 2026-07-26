@@ -156,6 +156,35 @@ public final class SupplyPlanningRecords {
 
     @Data
     @Accessors(chain = true)
+    public static class PlanScenarioRecommendation {
+        private String recommendationId;
+        private Long tenantId;
+        private String planId;
+        private String recommendedScenarioId;
+        private String candidateSetSha256;
+        private String candidateScenarioIdsJson;
+        private String policySha256;
+        private Integer targetServiceLevelFloorBasisPoints;
+        private Long maxProjectedCostMinor;
+        private Integer demandStressBasisPoints;
+        private Integer supplyAvailabilityBasisPoints;
+        private Integer worstCaseServiceLevelBasisPoints;
+        private Long projectedCostMinor;
+        private BigDecimal projectedShortageQuantity;
+        private Integer sensitivityBasisPoints;
+        private Integer violationCount;
+        private String constraintViolationsJson;
+        private String rationaleJson;
+        private String solverType;
+        private String status;
+        private Long version;
+        private LocalDateTime recommendedAt;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+    }
+
+    @Data
+    @Accessors(chain = true)
     public static class Replenishment {
         private String recommendationId;
         private Long tenantId;

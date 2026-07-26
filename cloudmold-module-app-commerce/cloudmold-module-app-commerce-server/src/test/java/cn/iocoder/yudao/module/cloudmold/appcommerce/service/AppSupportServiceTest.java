@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.cloudmold.appcommerce.service;
 
 import cn.iocoder.yudao.module.cloudmold.aftersale.api.AfterSaleCommand;
 import cn.iocoder.yudao.module.cloudmold.aftersale.api.AfterSaleCommandApi;
+import cn.iocoder.yudao.module.cloudmold.aftersale.api.AfterSaleOperation;
 import cn.iocoder.yudao.module.cloudmold.aftersale.api.AfterSaleQueryApi;
 import cn.iocoder.yudao.module.cloudmold.aftersale.api.AfterSaleView;
 import cn.iocoder.yudao.module.cloudmold.customerservice.api.CustomerServiceCommandApi;
@@ -78,6 +79,41 @@ class AppSupportServiceTest {
                 BigDecimal.ONE, "RETURN_AND_REFUND", "SIZE_NOT_FIT"))
                 .hasMessage("order item does not exist");
         verifyNoInteractions(facadeOperationService, afterSaleCommandApi);
+    }
+
+    @Test
+    void handOverReturnShouldEnforceOwnershipAndUseCanonicalAfterSaleCommand() {
+        when(principalResolver.requireCurrent()).thenReturn(AppMemberPrincipalView.builder()
+                .principalId("principal-member-1").build());
+        when(afterSaleQueryApi.get("after-sale-1")).thenReturn(AfterSaleView.builder()
+                .afterSaleId("after-sale-1").orderId("order-1").runId("run-1")
+                .caseStatus("APPROVED").returnFulfillmentId("return-1").aggregateVersion(2L).build());
+        when(orderQueryApi.requireOwned("principal-member-1", "order-1"))
+                .thenReturn(AppOrderView.builder().orderId("order-1").build());
+        when(facadeOperationService.execute(eq("HAND_OVER_RETURN"), eq("handover-idem-001"),
+                eq("principal-member-1"), any(), eq(AfterSaleView.class), any()))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    AppFacadeOperationService.Operation<AfterSaleView> operation =
+                            invocation.getArgument(5, AppFacadeOperationService.Operation.class);
+                    return new AppFacadeOperationService.Replay<>(
+                            operation.run(Instant.parse("2026-07-25T01:00:00Z")), false);
+                });
+        when(afterSaleCommandApi.execute(any())).thenReturn(AfterSaleView.builder()
+                .afterSaleId("after-sale-1").caseStatus("APPROVED")
+                .returnFulfillmentStatus("HANDED_OVER").build());
+
+        AfterSaleView result = service.handOverReturn(
+                "handover-idem-001", "after-sale-1", 2L, "SF", "SF10001");
+
+        ArgumentCaptor<AfterSaleCommand> command = ArgumentCaptor.forClass(AfterSaleCommand.class);
+        verify(afterSaleCommandApi).execute(command.capture());
+        assertThat(result.getReturnFulfillmentStatus()).isEqualTo("HANDED_OVER");
+        assertThat(command.getValue().getOperation()).isEqualTo(AfterSaleOperation.HAND_OVER_RETURN);
+        assertThat(command.getValue().getAfterSaleId()).isEqualTo("after-sale-1");
+        assertThat(command.getValue().getExpectedVersion()).isEqualTo(2L);
+        assertThat(command.getValue().getCarrierCode()).isEqualTo("SF");
+        assertThat(command.getValue().getWaybillNo()).isEqualTo("SF10001");
     }
 
     @Test

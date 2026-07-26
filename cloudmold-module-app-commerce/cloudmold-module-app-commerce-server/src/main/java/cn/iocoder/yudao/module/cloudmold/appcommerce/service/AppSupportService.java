@@ -65,6 +65,38 @@ public class AppSupportService {
         return view;
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public AfterSaleView handOverReturn(String idempotencyKey, String afterSaleId,
+                                        Long expectedVersion, String carrierCode, String waybillNo) {
+        AppMemberPrincipalView principal = principalResolver.requireCurrent();
+        AfterSaleView sale = afterSaleQueryApi.get(afterSaleId);
+        orderQueryApi.requireOwned(principal.getPrincipalId(), sale.getOrderId());
+        require("APPROVED".equals(sale.getCaseStatus()), "after-sale return is not ready for handover");
+        require(sale.getReturnFulfillmentId() != null && !sale.getReturnFulfillmentId().isBlank(),
+                "return fulfillment does not exist");
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("afterSaleId", afterSaleId);
+        payload.put("expectedVersion", expectedVersion);
+        payload.put("carrierCode", carrierCode);
+        payload.put("waybillNo", waybillNo);
+        AppFacadeOperationService.Replay<AfterSaleView> replay = facadeOperationService.execute(
+                "HAND_OVER_RETURN", idempotencyKey, principal.getPrincipalId(), payload, AfterSaleView.class,
+                occurredAt -> afterSaleCommandApi.execute(AfterSaleCommand.builder()
+                        .operation(AfterSaleOperation.HAND_OVER_RETURN)
+                        .idempotencyKey(idempotencyKey)
+                        .runId(sale.getRunId())
+                        .afterSaleId(afterSaleId)
+                        .expectedVersion(expectedVersion)
+                        .carrierCode(carrierCode)
+                        .waybillNo(waybillNo)
+                        .correlationId(sale.getRunId())
+                        .causationId(sale.getRunId())
+                        .occurredAt(occurredAt)
+                        .build()));
+        replay.value().setDuplicate(replay.duplicate() || Boolean.TRUE.equals(replay.value().getDuplicate()));
+        return replay.value();
+    }
+
     public AppAfterSalePageView listAfterSales(int pageNo, int pageSize) {
         AppMemberPrincipalView principal = principalResolver.requireCurrent();
         return afterSaleQueryApi.listOwned(principal.getPrincipalId(), pageNo, pageSize);

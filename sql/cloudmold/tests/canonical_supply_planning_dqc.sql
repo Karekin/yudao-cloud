@@ -152,3 +152,33 @@ WHERE plan.status='RELEASED'
         AND recommendation.warehouse_id=scenario.warehouse_id
         AND recommendation.suggested_quantity=scenario.constrained_order_quantity
   );
+
+SELECT 'scenario_recommendation_scope_or_result_invalid' AS check_name,
+       COUNT(*) AS violation_count
+FROM cloudmold_supply_plan_scenario_recommendation recommendation
+JOIN cloudmold_supply_plan plan
+  ON plan.tenant_id=recommendation.tenant_id
+ AND plan.plan_id=recommendation.plan_id
+LEFT JOIN cloudmold_supply_plan_scenario scenario
+  ON scenario.tenant_id=recommendation.tenant_id
+ AND scenario.plan_id=recommendation.plan_id
+ AND scenario.scenario_id=recommendation.recommended_scenario_id
+WHERE scenario.scenario_id IS NULL
+   OR scenario.status NOT IN ('EVALUATED','SELECTED')
+   OR recommendation.projected_cost_minor>plan.budget_amount_minor
+   OR recommendation.violation_count
+      <>JSON_LENGTH(recommendation.constraint_violations_json)
+   OR JSON_LENGTH(recommendation.candidate_scenario_ids_json) NOT BETWEEN 2 AND 20;
+
+SELECT 'scenario_recommendation_candidate_missing_or_cross_scope' AS check_name,
+       COUNT(*) AS violation_count
+FROM cloudmold_supply_plan_scenario_recommendation recommendation
+JOIN JSON_TABLE(
+    recommendation.candidate_scenario_ids_json,
+    '$[*]' COLUMNS (scenario_id VARCHAR(128) PATH '$')
+) candidate
+LEFT JOIN cloudmold_supply_plan_scenario scenario
+  ON scenario.tenant_id=recommendation.tenant_id
+ AND scenario.plan_id=recommendation.plan_id
+ AND scenario.scenario_id=candidate.scenario_id
+WHERE scenario.scenario_id IS NULL;

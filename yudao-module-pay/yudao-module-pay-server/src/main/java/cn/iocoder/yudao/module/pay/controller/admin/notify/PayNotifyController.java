@@ -68,7 +68,8 @@ public class PayNotifyController {
                               @RequestParam(required = false) Map<String, String> params,
                               @RequestBody(required = false) String body,
                               @RequestHeader Map<String, String> headers) {
-        log.info("[notifyOrder][channelId({}) 回调数据({}/{})]", channelId, params, body);
+        log.info("[notifyOrder][channelId({}) callback received: paramCount={}, bodyBytes={}, headerCount={}]",
+                channelId, size(params), length(body), size(headers));
         // 1. 校验支付渠道是否存在
         PayClient payClient = channelService.getPayClient(channelId);
         if (payClient == null) {
@@ -90,7 +91,8 @@ public class PayNotifyController {
                                @RequestParam(required = false) Map<String, String> params,
                                @RequestBody(required = false) String body,
                                @RequestHeader Map<String, String> headers) {
-        log.info("[notifyRefund][channelId({}) 回调数据({}/{})]", channelId, params, body);
+        log.info("[notifyRefund][channelId({}) callback received: paramCount={}, bodyBytes={}, headerCount={}]",
+                channelId, size(params), length(body), size(headers));
         // 1. 校验支付渠道是否存在
         PayClient payClient = channelService.getPayClient(channelId);
         if (payClient == null) {
@@ -112,7 +114,8 @@ public class PayNotifyController {
                                  @RequestParam(required = false) Map<String, String> params,
                                  @RequestBody(required = false) String body,
                                  @RequestHeader Map<String, String> headers) {
-        log.info("[notifyTransfer][channelId({}) 回调数据({}/{})]", channelId, params, body);
+        log.info("[notifyTransfer][channelId({}) callback received: paramCount={}, bodyBytes={}, headerCount={}]",
+                channelId, size(params), length(body), size(headers));
         // 1. 校验支付渠道是否存在
         PayClient payClient = channelService.getPayClient(channelId);
         if (payClient == null) {
@@ -164,6 +167,14 @@ public class PayNotifyController {
                 order.setAppName(app.getName());
             }
         }));
+    }
+
+    private static int size(Map<?, ?> value) {
+        return value == null ? 0 : value.size();
+    }
+
+    private static int length(String value) {
+        return value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
     }
 
 }

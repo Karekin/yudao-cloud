@@ -1,3 +1,36 @@
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+knife4j:
+  enable: false
+
+flowable:
+  database-schema-update: false
+  check-process-definitions: false
+
+management:
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+
+yudao:
+  xss:
+    enable: true
+
 cloudmold:
   skill-task:
     approval:
@@ -5,6 +38,8 @@ cloudmold:
       issue-version: cma3
       legacy-hmac-enabled: false
       hmac-secret: ""
+      issuer: ${CLOUDMOLD_RISK_AUTHORITY_ISSUER:cloudmold.agent-control}
+      audience: ${CLOUDMOLD_RISK_AUTHORITY_AUDIENCE:cloudmold.skill-task}
       active-key-id: ""
       remote:
         endpoint: ${CLOUDMOLD_RISK_AUTHORITY_SIGN_ENDPOINT:}
@@ -15,4 +50,5 @@ cloudmold:
         request-timeout: ${CLOUDMOLD_RISK_AUTHORITY_REQUEST_TIMEOUT:3s}
 
 # Production starts fail-closed until the external configuration authority
-# supplies cloudmold.skill-task.approval.remote.verification-keys.
+# supplies cloudmold.skill-task.approval.remote.verification-keys with RSA-3072+
+# public keys and explicit not-before/expires-at epochs.

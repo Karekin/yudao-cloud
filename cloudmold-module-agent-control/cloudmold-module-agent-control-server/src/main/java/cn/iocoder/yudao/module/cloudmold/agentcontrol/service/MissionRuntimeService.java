@@ -6,11 +6,14 @@ import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.integration.bpm.AgentApprovalWorkflowRegistrar;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
 
@@ -19,6 +22,7 @@ import java.util.*;
 public class MissionRuntimeService implements MissionRuntimeApi {
     static final String STOCKOUT_TEMPLATE = "mission.inventory-stockout-response.v1";
     private static final String TEMPLATE_VERSION = "1.0.0";
+    private static final Set<String> METRIC_COMPARISON_OPERATORS = Set.of("GT", "GTE", "LT", "LTE", "EQ");
     private static final List<Stage> STOCKOUT_STAGES = List.of(
             new Stage("diagnose", "inventory-control", "inventory.detect-size-stockout", "缺断码诊断"),
             new Stage("prepare", "buyer", "buyer.prepare-replenishment", "制定补货方案"),
@@ -28,10 +32,23 @@ public class MissionRuntimeService implements MissionRuntimeApi {
 
     private final AgentControlStoreMapper mapper;
     private final Clock clock;
+    private final AgentApprovalWorkflowRegistrar approvalWorkflows;
 
     @Autowired
-    public MissionRuntimeService(AgentControlStoreMapper mapper) { this(mapper, Clock.systemUTC()); }
-    MissionRuntimeService(AgentControlStoreMapper mapper, Clock clock) { this.mapper = mapper; this.clock = clock; }
+    public MissionRuntimeService(AgentControlStoreMapper mapper,
+                                 ObjectProvider<AgentApprovalWorkflowRegistrar> approvalWorkflows) {
+        this(mapper, Clock.systemUTC(),
+                approvalWorkflows.getIfAvailable(() -> AgentApprovalWorkflowRegistrar.DISABLED));
+    }
+    MissionRuntimeService(AgentControlStoreMapper mapper, Clock clock) {
+        this(mapper, clock, AgentApprovalWorkflowRegistrar.DISABLED);
+    }
+    MissionRuntimeService(AgentControlStoreMapper mapper, Clock clock,
+                          AgentApprovalWorkflowRegistrar approvalWorkflows) {
+        this.mapper = mapper;
+        this.clock = clock;
+        this.approvalWorkflows = approvalWorkflows;
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -230,6 +247,25 @@ public class MissionRuntimeService implements MissionRuntimeApi {
                     .setCorrelationId(command.getCorrelationId()).setMatcherCode(requireMatcher(command.getMatcherCode()))
                     .setStatus("ACTIVE").setVersion(1L).setCreatedAt(now).setUpdatedAt(now);
             require(mapper.insertEventSubscription(subscription) == 1, "failed to persist event subscription");
+        } else if ("METRIC".equals(command.getWaitType())) {
+            waitId = UUID.randomUUID().toString(); nextStatus = "WAITING_METRIC";
+            int maxAgeSeconds = command.getMaxAgeSeconds() == null ? 300 : command.getMaxAgeSeconds();
+            require(maxAgeSeconds >= 1 && maxAgeSeconds <= 86_400,
+                    "maxAgeSeconds must be between 1 and 86400");
+            require(command.getThresholdValue() != null, "thresholdValue is required");
+            MetricSubscription subscription = new MetricSubscription().setSubscriptionId(waitId)
+                    .setTenantId(tenantId).setMissionId(workOrder.getMissionId())
+                    .setWorkOrderId(workOrder.getWorkOrderId())
+                    .setMetricId(requireRef(command.getMetricId(), "metricId"))
+                    .setMetricVersion(requireRef(command.getMetricVersion(), "metricVersion"))
+                    .setDimensionHash(requireSha256(command.getDimensionHash(), "dimensionHash"))
+                    .setComparisonOperator(requireMetricComparison(command.getComparisonOperator()))
+                    .setThresholdValue(command.getThresholdValue())
+                    .setUnitCode(requireRef(command.getUnitCode(), "unitCode").toUpperCase(Locale.ROOT))
+                    .setMaxAgeSeconds(maxAgeSeconds).setStatus("ACTIVE").setVersion(1L)
+                    .setCreatedAt(now).setUpdatedAt(now);
+            require(mapper.insertMetricSubscription(subscription) == 1,
+                    "failed to persist metric subscription");
         } else if ("TIMER".equals(command.getWaitType())) {
             waitId = UUID.randomUUID().toString(); nextStatus = "WAITING_TIMER";
             LocalDateTime dueAt = command.getDueAt() == null ? null : LocalDateTime.ofInstant(command.getDueAt(), ZoneOffset.UTC);
@@ -238,7 +274,7 @@ public class MissionRuntimeService implements MissionRuntimeApi {
                     .setMissionId(workOrder.getMissionId()).setWorkOrderId(workOrder.getWorkOrderId())
                     .setTimerType("WAKEUP").setDueAt(dueAt).setGeneration(1).setStatus("SCHEDULED")
                     .setVersion(1L).setCreatedAt(now).setUpdatedAt(now)) == 1, "failed to persist mission timer");
-        } else throw new IllegalStateException("waitType must be EVENT or TIMER");
+        } else throw new IllegalStateException("waitType must be EVENT, METRIC or TIMER");
         require(mapper.releaseRunLease(tenantId, workOrder.getWorkOrderId(), command.getRunId(), command.getLeaseOwner(),
                 command.getLeaseToken(), command.getFencingToken(), now) == 1, "stale run cannot release lease");
         require(mapper.finishAgentRun(tenantId, command.getRunId(), "WAITING", now) == 1,
@@ -248,6 +284,77 @@ public class MissionRuntimeService implements MissionRuntimeApi {
         outbox(tenantId, "role_work_order", workOrder.getWorkOrderId(), "agent_control.work.waiting",
                 Map.of("waitType", command.getWaitType(), "waitId", waitId), now);
         return result("role_work_order", workOrder.getWorkOrderId(), workOrder.getVersion() + 1, nextStatus);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentControlResult observeMetric(MissionMetricObservationCommand command) {
+        require(command != null, "command is required");
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        require(Objects.equals(tenantId, command.getTenantId()),
+                "metric tenant does not match dispatcher context");
+        LocalDateTime now = now();
+        String observationId = requireRef(command.getObservationId(), "observationId");
+        String metricId = requireRef(command.getMetricId(), "metricId");
+        String metricVersion = requireRef(command.getMetricVersion(), "metricVersion");
+        String dimensionHash = requireSha256(command.getDimensionHash(), "dimensionHash");
+        require(command.getValue() != null, "metric value is required");
+        String unitCode = requireRef(command.getUnitCode(), "unitCode").toUpperCase(Locale.ROOT);
+        String sourceQueryId = requireRef(command.getSourceQueryId(), "sourceQueryId");
+        String evidenceSha256 = requireSha256(command.getEvidenceSha256(), "evidenceSha256");
+        LocalDateTime observedAt = command.getObservedAt() == null ? null
+                : LocalDateTime.ofInstant(command.getObservedAt(), ZoneOffset.UTC);
+        require(observedAt != null && !observedAt.isAfter(now),
+                "observedAt is required and must not be in the future");
+        String observationSha256 = DigestUtil.sha256Hex(String.join("\n",
+                observationId, tenantId.toString(), metricId, metricVersion, dimensionHash,
+                canonicalDecimal(command.getValue()), unitCode, sourceQueryId, evidenceSha256,
+                command.getObservedAt().toString()));
+        MetricObservation observation = new MetricObservation().setTenantId(tenantId)
+                .setObservationId(observationId).setMetricId(metricId).setMetricVersion(metricVersion)
+                .setDimensionHash(dimensionHash).setValue(command.getValue()).setUnitCode(unitCode)
+                .setSourceQueryId(sourceQueryId).setEvidenceSha256(evidenceSha256)
+                .setObservationSha256(observationSha256).setObservedAt(observedAt).setReceivedAt(now);
+        if (mapper.insertMetricObservation(observation) == 0) {
+            require(Objects.equals(observationSha256,
+                            mapper.selectMetricObservationHashForUpdate(tenantId, observationId)),
+                    "observationId was already used with a different metric payload");
+            return AgentControlResult.builder().aggregateType("mission_metric_observation")
+                    .aggregateId(observationId).aggregateVersion(1L).status("DUPLICATE")
+                    .duplicate(true).build();
+        }
+        int matched = 0;
+        int stale = 0;
+        List<MetricSubscription> subscriptions = mapper.selectMatchingMetricSubscriptions(
+                tenantId, metricId, metricVersion, dimensionHash, unitCode);
+        for (MetricSubscription subscription : subscriptions) {
+            long ageSeconds = Duration.between(observedAt, now).getSeconds();
+            if (ageSeconds > subscription.getMaxAgeSeconds()) {
+                stale++;
+                continue;
+            }
+            if (!metricThresholdMatches(command.getValue(), subscription.getThresholdValue(),
+                    subscription.getComparisonOperator())) {
+                continue;
+            }
+            if (mapper.matchMetricSubscription(tenantId, subscription.getSubscriptionId(),
+                    subscription.getVersion(), observationId, command.getValue(), evidenceSha256, now) != 1) {
+                continue;
+            }
+            WorkOrder workOrder = mapper.selectWorkOrderForUpdate(tenantId, subscription.getWorkOrderId());
+            require(workOrder != null && mapper.transitionMissionWorkOrder(tenantId,
+                            workOrder.getWorkOrderId(), workOrder.getVersion(), "WAITING_METRIC",
+                            "READY", null, null, now) == 1,
+                    "metric subscription matched but work-order wakeup conflicted");
+            matched++;
+        }
+        outbox(tenantId, "mission_metric_observation", observationId,
+                "agent_control.metric.observed",
+                Map.of("metricId", metricId, "metricVersion", metricVersion,
+                        "dimensionHash", dimensionHash, "matched", matched, "staleSubscriptions", stale),
+                now);
+        return result("mission_metric_observation", observationId, 1L,
+                matched > 0 ? "MATCHED" : stale > 0 ? "STALE_NO_MATCH" : "NO_MATCH");
     }
 
     @Override
@@ -429,6 +536,7 @@ public class MissionRuntimeService implements MissionRuntimeApi {
         require(mapper.insertApproval(approval) == 1, "failed to create mission approval request");
         require(mapper.attachApproval(tenantId, workOrder.getWorkOrderId(), workOrder.getVersion(), approvalId, now) == 1,
                 "failed to attach mission approval request");
+        approvalWorkflows.register(tenantId, approval, workOrder, now);
         audit(tenantId, "role_approval", approvalId, 1L, "agent_control.approval.requested",
                 mission.getSupervisorUserId(), Map.of("missionId", mission.getMissionId(),
                         "workOrderId", workOrder.getWorkOrderId()), now);
@@ -480,6 +588,27 @@ public class MissionRuntimeService implements MissionRuntimeApi {
     private Instant toInstant(LocalDateTime value){ return value.toInstant(ZoneOffset.UTC); }
     private static String requireMatcher(String value){ require("EXACT_AGGREGATE".equals(value), "matcherCode must be EXACT_AGGREGATE"); return value; }
     private static String requireSha256(String value,String field){ require(value != null && value.matches("[0-9a-f]{64}"), "invalid " + field); return value; }
+    private static String requireMetricComparison(String value) {
+        String normalized = value == null ? null : value.trim().toUpperCase(Locale.ROOT);
+        require(METRIC_COMPARISON_OPERATORS.contains(normalized),
+                "comparisonOperator must be one of GT, GTE, LT, LTE or EQ");
+        return normalized;
+    }
+    private static boolean metricThresholdMatches(BigDecimal value, BigDecimal threshold, String operator) {
+        int comparison = value.compareTo(threshold);
+        return switch (operator) {
+            case "GT" -> comparison > 0;
+            case "GTE" -> comparison >= 0;
+            case "LT" -> comparison < 0;
+            case "LTE" -> comparison <= 0;
+            case "EQ" -> comparison == 0;
+            default -> throw new IllegalStateException("unsupported metric comparison operator");
+        };
+    }
+    private static String canonicalDecimal(BigDecimal value) {
+        BigDecimal normalized = value.stripTrailingZeros();
+        return normalized.signum() == 0 ? "0" : normalized.toPlainString();
+    }
     private static Long requireActor(Long value,String field){ require(value != null && value > 0, field + " is required"); return value; }
     private static String requireRef(String value,String field){ require(value != null && value.matches("[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}"), "invalid " + field); return value; }
     private static String requireText(String value,String field,int max){ require(value != null && !value.isBlank() && value.length() <= max, "invalid " + field); return value; }

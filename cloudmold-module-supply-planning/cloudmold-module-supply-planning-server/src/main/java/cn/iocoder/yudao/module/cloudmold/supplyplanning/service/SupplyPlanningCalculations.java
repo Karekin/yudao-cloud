@@ -2,6 +2,8 @@ package cn.iocoder.yudao.module.cloudmold.supplyplanning.service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 final class SupplyPlanningCalculations {
@@ -61,6 +63,55 @@ final class SupplyPlanningCalculations {
         return new ScenarioResult(constrained, shortage, Math.min(10_000, serviceLevel), projectedCost);
     }
 
+    static RecommendationResult recommendScenario(List<ScenarioCandidate> candidates,
+                                                   long budgetAmountMinor,
+                                                   int serviceLevelFloorBasisPoints,
+                                                   long maxProjectedCostMinor,
+                                                   int demandStressBasisPoints,
+                                                   int supplyAvailabilityBasisPoints) {
+        List<ScenarioAssessment> assessments = new ArrayList<>();
+        for (ScenarioCandidate candidate : candidates) {
+            ScenarioResult baseline = evaluateScenario(
+                    candidate.forecastQuantity(), candidate.safetyStockQuantity(),
+                    candidate.onHandQuantity(), candidate.inboundQuantity(),
+                    candidate.capacityQuantity(), candidate.minimumOrderQuantity(),
+                    candidate.unitCostMinor(), budgetAmountMinor);
+            ScenarioResult stressed = evaluateScenario(
+                    applyBasisPoints(candidate.forecastQuantity(), demandStressBasisPoints),
+                    applyBasisPoints(candidate.safetyStockQuantity(), demandStressBasisPoints),
+                    candidate.onHandQuantity(),
+                    applyBasisPoints(candidate.inboundQuantity(), supplyAvailabilityBasisPoints),
+                    applyBasisPoints(candidate.capacityQuantity(), supplyAvailabilityBasisPoints),
+                    candidate.minimumOrderQuantity(), candidate.unitCostMinor(), budgetAmountMinor);
+            List<String> violations = new ArrayList<>();
+            if (stressed.projectedServiceLevelBasisPoints() < serviceLevelFloorBasisPoints) {
+                violations.add("SERVICE_LEVEL_FLOOR");
+            }
+            if (stressed.projectedCostMinor() > maxProjectedCostMinor) {
+                violations.add("COST_CEILING");
+            }
+            assessments.add(new ScenarioAssessment(
+                    candidate.scenarioId(), baseline, stressed,
+                    Math.max(0, baseline.projectedServiceLevelBasisPoints()
+                            - stressed.projectedServiceLevelBasisPoints()),
+                    List.copyOf(violations)));
+        }
+        Comparator<ScenarioAssessment> comparator = Comparator
+                .comparingInt((ScenarioAssessment value) -> value.constraintViolations().size())
+                .thenComparing((ScenarioAssessment value) ->
+                        value.stressed().projectedServiceLevelBasisPoints(), Comparator.reverseOrder())
+                .thenComparing(value -> value.stressed().projectedShortageQuantity())
+                .thenComparing(value -> value.stressed().projectedCostMinor())
+                .thenComparing(ScenarioAssessment::scenarioId);
+        List<ScenarioAssessment> ranked = assessments.stream().sorted(comparator).toList();
+        return new RecommendationResult(ranked.get(0), ranked);
+    }
+
+    private static BigDecimal applyBasisPoints(BigDecimal value, int basisPoints) {
+        return value.multiply(BigDecimal.valueOf(basisPoints))
+                .divide(TEN_THOUSAND, SCALE, RoundingMode.HALF_UP);
+    }
+
     record ForecastPair(BigDecimal forecast, BigDecimal actual) {
     }
 
@@ -73,5 +124,26 @@ final class SupplyPlanningCalculations {
                           BigDecimal projectedShortageQuantity,
                           Integer projectedServiceLevelBasisPoints,
                           Long projectedCostMinor) {
+    }
+
+    record ScenarioCandidate(String scenarioId,
+                             BigDecimal forecastQuantity,
+                             BigDecimal safetyStockQuantity,
+                             BigDecimal onHandQuantity,
+                             BigDecimal inboundQuantity,
+                             BigDecimal capacityQuantity,
+                             BigDecimal minimumOrderQuantity,
+                             long unitCostMinor) {
+    }
+
+    record ScenarioAssessment(String scenarioId,
+                              ScenarioResult baseline,
+                              ScenarioResult stressed,
+                              int sensitivityBasisPoints,
+                              List<String> constraintViolations) {
+    }
+
+    record RecommendationResult(ScenarioAssessment recommended,
+                                List<ScenarioAssessment> rankedAssessments) {
     }
 }

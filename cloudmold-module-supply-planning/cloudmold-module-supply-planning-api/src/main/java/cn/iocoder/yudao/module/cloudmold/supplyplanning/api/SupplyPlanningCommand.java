@@ -25,6 +25,7 @@ public class SupplyPlanningCommand {
     private ForecastEvaluationDefinition forecastEvaluation;
     private SupplyPlanDefinition supplyPlan;
     private PlanScenarioDefinition planScenario;
+    private ScenarioRecommendationDefinition scenarioRecommendation;
     private ReplenishmentDefinition replenishment;
     private ReplenishmentConversionDefinition replenishmentConversion;
     private InventoryIssueDefinition inventoryIssue;
@@ -123,6 +124,22 @@ public class SupplyPlanningCommand {
         private String parametersSha256;
         private Long expectedVersion;
         private String selectedByPrincipalId;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ScenarioRecommendationDefinition {
+        private String recommendationId;
+        private String planId;
+        private List<String> candidateScenarioIds;
+        private Long expectedPlanVersion;
+        private Integer targetServiceLevelFloorBasisPoints;
+        private Long maxProjectedCostMinor;
+        private Integer demandStressBasisPoints;
+        private Integer supplyAvailabilityBasisPoints;
+        private String policySha256;
     }
 
     @Data

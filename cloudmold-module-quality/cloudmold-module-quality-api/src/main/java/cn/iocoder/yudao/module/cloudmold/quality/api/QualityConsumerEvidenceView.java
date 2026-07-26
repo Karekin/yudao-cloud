@@ -15,8 +15,14 @@ public class QualityConsumerEvidenceView {
     private String canonicalSkuId;
     private String status;
     private String inspectionTaskId;
+    private String inspectionStatus;
     private String decision;
     private String evidenceToken;
     private LocalDateTime inspectedAt;
+    private LocalDateTime completedAt;
+    private String standardId;
+    private String standardCode;
+    private Long standardVersion;
+    private String standardVersionId;
     private Long aggregateVersion;
 }

@@ -19,6 +19,6 @@ ENV TZ=Asia/Shanghai \
 
 EXPOSE 48080
 HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=8 \
-  CMD curl --fail --silent http://127.0.0.1:48080/v3/api-docs >/dev/null || exit 1
+  CMD curl --fail --silent http://127.0.0.1:48080/actuator/health/readiness >/dev/null || exit 1
 
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

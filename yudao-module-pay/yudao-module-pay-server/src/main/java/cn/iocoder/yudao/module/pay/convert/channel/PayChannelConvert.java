@@ -23,18 +23,19 @@ public interface PayChannelConvert {
     @Mapping(target = "config",ignore = true)
     PayChannelDO convert(PayChannelUpdateReqVO bean);
 
-    @Mapping(target = "config",expression = "java(cn.iocoder.yudao.framework.common.util.json.JsonUtils.toJsonString(bean.getConfig()))")
+    @Mapping(target = "config",
+            expression = "java(cn.iocoder.yudao.framework.common.util.json.JsonUtils.toJsonString(bean.getConfig()))")
     PayChannelRespVO convert(PayChannelDO bean);
 
+    @Mapping(target = "config", ignore = true)
+    PayChannelRespVO convertRedacted(PayChannelDO bean);
+
     default List<PayChannelRespVO> convertList(List<PayChannelDO> list) {
-        // 列表不下发 config（密钥/证书），详情接口再返回完整配置
-        return CollectionUtils.convertList(list, channel -> {
-            PayChannelRespVO vo = convert(channel);
-            vo.setConfig(null);
-            return vo;
-        });
+        return CollectionUtils.convertList(list, this::convertRedacted);
     }
 
-    PageResult<PayChannelRespVO> convertPage(PageResult<PayChannelDO> page);
+    default PageResult<PayChannelRespVO> convertPage(PageResult<PayChannelDO> page) {
+        return new PageResult<>(convertList(page.getList()), page.getTotal());
+    }
 
 }

@@ -151,6 +151,49 @@ public interface SupplyPlanningMapper {
     int insertPlanScenario(PlanScenario value);
 
     @Select("""
+            <script>
+            SELECT scenario_id,tenant_id,plan_id,scenario_code,canonical_sku_id,warehouse_id,
+                   forecast_quantity,safety_stock_quantity,on_hand_quantity,inbound_quantity,
+                   capacity_quantity,minimum_order_quantity,unit_cost_minor,constrained_order_quantity,
+                   projected_shortage_quantity,projected_service_level_basis_points,projected_cost_minor,
+                   uom_code,parameters_sha256,solver_type,status,selected_by_principal_id,version,
+                   evaluated_at,selected_at,created_at,updated_at
+            FROM cloudmold_supply_plan_scenario
+            WHERE tenant_id=#{tenantId} AND plan_id=#{planId}
+              AND scenario_id IN
+              <foreach collection="scenarioIds" item="scenarioId" open="(" separator="," close=")">
+                #{scenarioId}
+              </foreach>
+            ORDER BY scenario_id
+            FOR UPDATE
+            </script>
+            """)
+    List<PlanScenario> selectPlanScenariosForRecommendation(
+            @Param("tenantId") Long tenantId,
+            @Param("planId") String planId,
+            @Param("scenarioIds") List<String> scenarioIds);
+
+    @Insert("""
+            INSERT INTO cloudmold_supply_plan_scenario_recommendation
+              (recommendation_id,tenant_id,plan_id,recommended_scenario_id,candidate_set_sha256,
+               candidate_scenario_ids_json,policy_sha256,target_service_level_floor_basis_points,
+               max_projected_cost_minor,demand_stress_basis_points,supply_availability_basis_points,
+               worst_case_service_level_basis_points,projected_cost_minor,
+               projected_shortage_quantity,sensitivity_basis_points,violation_count,
+               constraint_violations_json,rationale_json,solver_type,status,version,
+               recommended_at,created_at,updated_at)
+            VALUES (#{recommendationId},#{tenantId},#{planId},#{recommendedScenarioId},
+                    #{candidateSetSha256},#{candidateScenarioIdsJson},#{policySha256},
+                    #{targetServiceLevelFloorBasisPoints},#{maxProjectedCostMinor},
+                    #{demandStressBasisPoints},#{supplyAvailabilityBasisPoints},
+                    #{worstCaseServiceLevelBasisPoints},#{projectedCostMinor},
+                    #{projectedShortageQuantity},#{sensitivityBasisPoints},#{violationCount},
+                    #{constraintViolationsJson},#{rationaleJson},#{solverType},#{status},#{version},
+                    #{recommendedAt},#{createdAt},#{updatedAt})
+            """)
+    int insertPlanScenarioRecommendation(PlanScenarioRecommendation value);
+
+    @Select("""
             SELECT plan_id,tenant_id,plan_code,demand_forecast_id,horizon_start,horizon_end,
                    target_service_level_basis_points,budget_amount_minor,currency_code,constraints_sha256,
                    status,approver_principal_id,selected_scenario_id,release_principal_id,
@@ -368,6 +411,9 @@ public interface SupplyPlanningMapper {
                 UNION ALL
                 SELECT 'PLAN_SCENARIO',status FROM cloudmold_supply_plan_scenario WHERE tenant_id=#{tenantId}
                 UNION ALL
+                SELECT 'SCENARIO_RECOMMENDATION',status
+                FROM cloudmold_supply_plan_scenario_recommendation WHERE tenant_id=#{tenantId}
+                UNION ALL
                 SELECT 'REPLENISHMENT',status FROM cloudmold_replenishment_recommendation WHERE tenant_id=#{tenantId}
                 UNION ALL
                 SELECT 'INVENTORY_ISSUE',status FROM cloudmold_inventory_health_issue WHERE tenant_id=#{tenantId}
@@ -401,6 +447,11 @@ public interface SupplyPlanningMapper {
                 SELECT scenario_id,'PLAN_SCENARIO',scenario_code,plan_id,status,version,
                        DATE(evaluated_at),updated_at
                 FROM cloudmold_supply_plan_scenario WHERE tenant_id=#{tenantId}
+                UNION ALL
+                SELECT recommendation_id,'SCENARIO_RECOMMENDATION',
+                       CONCAT('worst_service=',worst_case_service_level_basis_points,'bp'),
+                       recommended_scenario_id,status,version,DATE(recommended_at),updated_at
+                FROM cloudmold_supply_plan_scenario_recommendation WHERE tenant_id=#{tenantId}
                 UNION ALL
                 SELECT recommendation_id,'REPLENISHMENT',reason_code,plan_id,status,version,need_by_date,updated_at
                 FROM cloudmold_replenishment_recommendation WHERE tenant_id=#{tenantId}

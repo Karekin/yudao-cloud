@@ -4,9 +4,11 @@ import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.integration.bpm.AgentApprovalWorkflowRegistrar;
 import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
 
+import java.math.BigDecimal;
 import java.time.*;
 import java.util.List;
 
@@ -17,7 +19,8 @@ import static org.mockito.Mockito.*;
 class MissionRuntimeServiceTest {
     private final AgentControlStoreMapper mapper = mock(AgentControlStoreMapper.class);
     private final Clock clock = Clock.fixed(Instant.parse("2026-07-19T04:00:00Z"), ZoneOffset.UTC);
-    private final MissionRuntimeService service = new MissionRuntimeService(mapper, clock);
+    private final AgentApprovalWorkflowRegistrar approvalWorkflows = mock(AgentApprovalWorkflowRegistrar.class);
+    private final MissionRuntimeService service = new MissionRuntimeService(mapper, clock, approvalWorkflows);
 
     @BeforeEach void setup() { TenantContextHolder.setTenantId(17L); }
     @AfterEach void clear() { TenantContextHolder.clear(); }
@@ -157,6 +160,69 @@ class MissionRuntimeServiceTest {
     }
 
     @Test
+    void waitsForGovernedMetricThresholdWithFreshnessAndReleasesTheRun() {
+        WorkOrder work = new WorkOrder().setWorkOrderId("wo-metric").setMissionId("mission-1")
+                .setStatus("IN_PROGRESS").setAssigneeUserId(102L).setVersion(4L);
+        AgentRunLease lease = new AgentRunLease().setRunId("run-metric").setLeaseOwner("worker-1")
+                .setLeaseToken("lease-1").setFencingToken(7L).setStatus("ACTIVE")
+                .setLeaseUntil(LocalDateTime.of(2026, 7, 19, 4, 1));
+        when(mapper.selectWorkOrderForUpdate(17L, "wo-metric")).thenReturn(work);
+        when(mapper.selectRunLeaseForUpdate(17L, "wo-metric")).thenReturn(lease);
+        when(mapper.insertMetricSubscription(any())).thenReturn(1);
+        when(mapper.releaseRunLease(eq(17L), eq("wo-metric"), eq("run-metric"),
+                eq("worker-1"), eq("lease-1"), eq(7L), any())).thenReturn(1);
+        when(mapper.finishAgentRun(eq(17L), eq("run-metric"), eq("WAITING"), any())).thenReturn(1);
+        when(mapper.transitionMissionWorkOrder(eq(17L), eq("wo-metric"), eq(4L),
+                eq("IN_PROGRESS"), eq("WAITING_METRIC"), eq("METRIC"), isNull(), any())).thenReturn(1);
+        when(mapper.insertAgentOutbox(any(), anyLong(), any(), any(), any(), any(), any())).thenReturn(1);
+
+        AgentControlResult result = service.waitFor(AgentWaitCommand.builder()
+                .workOrderId("wo-metric").runId("run-metric").leaseOwner("worker-1")
+                .leaseToken("lease-1").fencingToken(7L).waitType("METRIC")
+                .metricId("supply.stockout-risk").metricVersion("v2")
+                .dimensionHash("a".repeat(64)).comparisonOperator("GTE")
+                .thresholdValue(new BigDecimal("1800")).unitCode("BASIS_POINTS")
+                .maxAgeSeconds(300).build(), 102L);
+
+        assertThat(result.getStatus()).isEqualTo("WAITING_METRIC");
+        ArgumentCaptor<MetricSubscription> subscription =
+                ArgumentCaptor.forClass(MetricSubscription.class);
+        verify(mapper).insertMetricSubscription(subscription.capture());
+        assertThat(subscription.getValue().getMetricId()).isEqualTo("supply.stockout-risk");
+        assertThat(subscription.getValue().getComparisonOperator()).isEqualTo("GTE");
+        assertThat(subscription.getValue().getThresholdValue())
+                .isEqualByComparingTo("1800");
+        assertThat(subscription.getValue().getMaxAgeSeconds()).isEqualTo(300);
+    }
+
+    @Test
+    void freshMetricBreachWakesWorkButStaleObservationFailsClosed() {
+        MetricSubscription fresh = new MetricSubscription().setSubscriptionId("metric-sub-1")
+                .setWorkOrderId("wo-metric").setComparisonOperator("GTE")
+                .setThresholdValue(new BigDecimal("1800")).setMaxAgeSeconds(300).setVersion(1L);
+        when(mapper.insertMetricObservation(any())).thenReturn(1, 1);
+        when(mapper.selectMatchingMetricSubscriptions(17L, "supply.stockout-risk", "v2",
+                "a".repeat(64), "BASIS_POINTS")).thenReturn(List.of(fresh));
+        when(mapper.matchMetricSubscription(eq(17L), eq("metric-sub-1"), eq(1L),
+                eq("obs-fresh"), eq(new BigDecimal("2200")), eq("b".repeat(64)), any())).thenReturn(1);
+        when(mapper.selectWorkOrderForUpdate(17L, "wo-metric")).thenReturn(
+                new WorkOrder().setWorkOrderId("wo-metric").setStatus("WAITING_METRIC").setVersion(5L));
+        when(mapper.transitionMissionWorkOrder(eq(17L), eq("wo-metric"), eq(5L),
+                eq("WAITING_METRIC"), eq("READY"), isNull(), isNull(), any())).thenReturn(1);
+        when(mapper.insertAgentOutbox(any(), anyLong(), any(), any(), any(), any(), any())).thenReturn(1);
+
+        AgentControlResult matched = service.observeMetric(metricObservation(
+                "obs-fresh", new BigDecimal("2200"), Instant.parse("2026-07-19T03:59:00Z")));
+        assertThat(matched.getStatus()).isEqualTo("MATCHED");
+
+        AgentControlResult stale = service.observeMetric(metricObservation(
+                "obs-stale", new BigDecimal("2400"), Instant.parse("2026-07-19T03:00:00Z")));
+        assertThat(stale.getStatus()).isEqualTo("STALE_NO_MATCH");
+        verify(mapper, times(1)).matchMetricSubscription(anyLong(), any(), anyLong(),
+                any(), any(), any(), any());
+    }
+
+    @Test
     void derivesExecutableInputFromPredecessorPlanAndCreatesApprovalRequest() {
         WorkOrder completed = new WorkOrder().setWorkOrderId("wo-prepare").setMissionId("mission-1")
                 .setGoalId("goal-prepare").setRoleCode("buyer").setActionCode("buyer.prepare-replenishment")
@@ -218,6 +284,11 @@ class MissionRuntimeServiceTest {
         assertThat(inputHash.getValue()).hasSize(64).isNotEqualTo("a".repeat(64));
         verify(mapper).insertApproval(argThat(approval -> approval.getWorkOrderId().equals("wo-execute")
                 && approval.getRequesterUserId().equals(900L) && approval.getScopeHash().length() == 64));
+        verify(approvalWorkflows).register(eq(17L), argThat(value ->
+                        value.getWorkOrderId().equals("wo-execute")
+                                && value.getRequesterUserId().equals(900L)
+                                && "PENDING".equals(value.getStatus())),
+                same(successor), eq(LocalDateTime.of(2026, 7, 19, 4, 0)));
         verify(mapper).releaseRunLease(eq(17L), eq("wo-prepare"), eq("run-prepare-current"),
                 eq("worker-prepare"), eq("lease-prepare"), eq(7L), any());
         verify(mapper).finishAgentRun(eq(17L), eq("run-prepare-current"), eq("COMPLETED"), any());
@@ -295,5 +366,14 @@ class MissionRuntimeServiceTest {
         assertThat(first.getFencingToken()).isEqualTo(1L);
         assertThat(second.getFencingToken()).isEqualTo(2L);
         assertThat(third.getFencingToken()).isEqualTo(3L);
+    }
+
+    private static MissionMetricObservationCommand metricObservation(
+            String observationId, BigDecimal value, Instant observedAt) {
+        return MissionMetricObservationCommand.builder().observationId(observationId)
+                .tenantId(17L).metricId("supply.stockout-risk").metricVersion("v2")
+                .dimensionHash("a".repeat(64)).value(value).unitCode("BASIS_POINTS")
+                .sourceQueryId("starrocks-query-20260719").evidenceSha256("b".repeat(64))
+                .observedAt(observedAt).build();
     }
 }

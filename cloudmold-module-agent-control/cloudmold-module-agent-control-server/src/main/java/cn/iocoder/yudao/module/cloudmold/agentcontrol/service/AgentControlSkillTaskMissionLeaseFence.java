@@ -5,6 +5,7 @@ import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentContro
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.WorkOrder;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskMissionLeaseFencePort;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,7 +22,12 @@ public class AgentControlSkillTaskMissionLeaseFence implements SkillTaskMissionL
     private final AgentControlStoreMapper mapper;
     private final Clock clock;
 
-    public AgentControlSkillTaskMissionLeaseFence(AgentControlStoreMapper mapper, Clock clock) {
+    @Autowired
+    public AgentControlSkillTaskMissionLeaseFence(AgentControlStoreMapper mapper) {
+        this(mapper, Clock.systemUTC());
+    }
+
+    AgentControlSkillTaskMissionLeaseFence(AgentControlStoreMapper mapper, Clock clock) {
         this.mapper = mapper;
         this.clock = clock;
     }

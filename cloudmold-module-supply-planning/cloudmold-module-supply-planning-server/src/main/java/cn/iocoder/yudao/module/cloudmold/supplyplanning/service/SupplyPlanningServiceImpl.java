@@ -73,6 +73,7 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
             case EVALUATE_FORECAST -> evaluateForecast(tenantId, command, now);
             case CREATE_SUPPLY_PLAN -> createSupplyPlan(tenantId, command, now);
             case EVALUATE_PLAN_SCENARIO -> evaluatePlanScenario(tenantId, command, now);
+            case RECOMMEND_PLAN_SCENARIO -> recommendPlanScenario(tenantId, command, now);
             case SELECT_PLAN_SCENARIO -> selectPlanScenario(tenantId, command, now);
             case APPROVE_SUPPLY_PLAN -> approveSupplyPlan(tenantId, command, now);
             case RELEASE_SUPPLY_PLAN -> releaseSupplyPlan(tenantId, command, now);
@@ -354,6 +355,148 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                         row.getProjectedServiceLevelBasisPoints(),
                         "projected_cost_minor", row.getProjectedCostMinor(),
                         "previous_status", "EVALUATED", "current_status", "SELECTED"));
+    }
+
+    private Outcome recommendPlanScenario(Long tenantId, SupplyPlanningCommand command,
+                                          LocalDateTime now) {
+        SupplyPlanningCommand.ScenarioRecommendationDefinition input =
+                nonNull(command.getScenarioRecommendation(),
+                        "scenarioRecommendation is required");
+        String recommendationId = valueOrUuid(input.getRecommendationId());
+        requireRef(input.getPlanId(), "planId", 128);
+        require(input.getTargetServiceLevelFloorBasisPoints() != null
+                        && input.getTargetServiceLevelFloorBasisPoints() >= 0
+                        && input.getTargetServiceLevelFloorBasisPoints() <= 10_000,
+                "target service level floor must be between 0 and 10000 basis points");
+        require(input.getMaxProjectedCostMinor() != null
+                        && input.getMaxProjectedCostMinor() >= 0,
+                "maxProjectedCostMinor must not be negative");
+        require(input.getDemandStressBasisPoints() != null
+                        && input.getDemandStressBasisPoints() >= 10_000
+                        && input.getDemandStressBasisPoints() <= 20_000,
+                "demand stress must be between 10000 and 20000 basis points");
+        require(input.getSupplyAvailabilityBasisPoints() != null
+                        && input.getSupplyAvailabilityBasisPoints() >= 0
+                        && input.getSupplyAvailabilityBasisPoints() <= 10_000,
+                "supply availability must be between 0 and 10000 basis points");
+        requireSha256(input.getPolicySha256(), "policySha256");
+
+        SupplyPlan plan = nonNull(mapper.selectSupplyPlanForUpdate(tenantId, input.getPlanId()),
+                "supply plan not found");
+        requireExpectedVersion(input.getExpectedPlanVersion(), plan.getVersion());
+        require("DRAFT".equals(plan.getStatus()),
+                "scenario recommendation must be completed before supply-plan approval");
+
+        List<String> requestedIds =
+                nonNull(input.getCandidateScenarioIds(), "candidateScenarioIds are required");
+        require(requestedIds.size() >= 2 && requestedIds.size() <= 20,
+                "candidateScenarioIds must contain between 2 and 20 scenarios");
+        Set<String> uniqueIds = new HashSet<>();
+        for (String scenarioId : requestedIds) {
+            requireRef(scenarioId, "candidateScenarioId", 128);
+            require(uniqueIds.add(scenarioId), "candidateScenarioIds must be unique");
+        }
+        List<String> sortedIds = uniqueIds.stream().sorted().toList();
+        List<PlanScenario> candidates = mapper.selectPlanScenariosForRecommendation(
+                tenantId, plan.getPlanId(), sortedIds);
+        require(candidates.size() == sortedIds.size(),
+                "one or more candidate scenarios were not found in the supply plan");
+
+        PlanScenario scope = candidates.get(0);
+        List<SupplyPlanningCalculations.ScenarioCandidate> calculationCandidates =
+                new ArrayList<>();
+        for (PlanScenario candidate : candidates) {
+            require("EVALUATED".equals(candidate.getStatus()),
+                    "only evaluated scenarios can be recommended");
+            require(Objects.equals(scope.getCanonicalSkuId(), candidate.getCanonicalSkuId())
+                            && Objects.equals(scope.getWarehouseId(), candidate.getWarehouseId())
+                            && Objects.equals(scope.getUomCode(), candidate.getUomCode()),
+                    "candidate scenarios must share SKU, warehouse and UOM");
+            requireSha256(candidate.getParametersSha256(), "candidate parametersSha256");
+            calculationCandidates.add(new SupplyPlanningCalculations.ScenarioCandidate(
+                    candidate.getScenarioId(), candidate.getForecastQuantity(),
+                    candidate.getSafetyStockQuantity(), candidate.getOnHandQuantity(),
+                    candidate.getInboundQuantity(), candidate.getCapacityQuantity(),
+                    candidate.getMinimumOrderQuantity(), candidate.getUnitCostMinor()));
+        }
+        String candidateSetSha256 = DigestUtil.sha256Hex(candidates.stream()
+                .sorted(Comparator.comparing(PlanScenario::getScenarioId))
+                .map(candidate -> candidate.getScenarioId() + ":" + candidate.getParametersSha256())
+                .reduce((left, right) -> left + "\n" + right).orElseThrow());
+        SupplyPlanningCalculations.RecommendationResult result =
+                SupplyPlanningCalculations.recommendScenario(
+                        calculationCandidates, plan.getBudgetAmountMinor(),
+                        input.getTargetServiceLevelFloorBasisPoints(),
+                        input.getMaxProjectedCostMinor(), input.getDemandStressBasisPoints(),
+                        input.getSupplyAvailabilityBasisPoints());
+        SupplyPlanningCalculations.ScenarioAssessment recommended = result.recommended();
+        List<Map<String, Object>> rationale = result.rankedAssessments().stream()
+                .map(SupplyPlanningServiceImpl::assessmentPayload)
+                .toList();
+
+        PlanScenarioRecommendation row = new PlanScenarioRecommendation()
+                .setRecommendationId(recommendationId).setTenantId(tenantId)
+                .setPlanId(plan.getPlanId())
+                .setRecommendedScenarioId(recommended.scenarioId())
+                .setCandidateSetSha256(candidateSetSha256)
+                .setCandidateScenarioIdsJson(JsonUtils.toJsonString(sortedIds))
+                .setPolicySha256(input.getPolicySha256())
+                .setTargetServiceLevelFloorBasisPoints(
+                        input.getTargetServiceLevelFloorBasisPoints())
+                .setMaxProjectedCostMinor(input.getMaxProjectedCostMinor())
+                .setDemandStressBasisPoints(input.getDemandStressBasisPoints())
+                .setSupplyAvailabilityBasisPoints(input.getSupplyAvailabilityBasisPoints())
+                .setWorstCaseServiceLevelBasisPoints(
+                        recommended.stressed().projectedServiceLevelBasisPoints())
+                .setProjectedCostMinor(recommended.stressed().projectedCostMinor())
+                .setProjectedShortageQuantity(
+                        recommended.stressed().projectedShortageQuantity())
+                .setSensitivityBasisPoints(recommended.sensitivityBasisPoints())
+                .setViolationCount(recommended.constraintViolations().size())
+                .setConstraintViolationsJson(
+                        JsonUtils.toJsonString(recommended.constraintViolations()))
+                .setRationaleJson(JsonUtils.toJsonString(rationale))
+                .setSolverType("ROBUST_LEXICOGRAPHIC_V1")
+                .setStatus("PROPOSED").setVersion(1L)
+                .setRecommendedAt(now).setCreatedAt(now).setUpdatedAt(now);
+        require(mapper.insertPlanScenarioRecommendation(row) == 1,
+                "failed to persist supply-plan scenario recommendation");
+        return outcome("supply_planning.plan_scenario.recommended",
+                "supply_plan_scenario_recommendation", recommendationId, 1L, "PROPOSED",
+                payload("recommendation_id", recommendationId, "plan_id", plan.getPlanId(),
+                        "recommended_scenario_id", recommended.scenarioId(),
+                        "candidate_scenario_ids", sortedIds,
+                        "candidate_set_sha256", candidateSetSha256,
+                        "policy_sha256", input.getPolicySha256(),
+                        "target_service_level_floor_basis_points",
+                        input.getTargetServiceLevelFloorBasisPoints(),
+                        "max_projected_cost_minor", input.getMaxProjectedCostMinor(),
+                        "demand_stress_basis_points", input.getDemandStressBasisPoints(),
+                        "supply_availability_basis_points",
+                        input.getSupplyAvailabilityBasisPoints(),
+                        "worst_case_service_level_basis_points",
+                        recommended.stressed().projectedServiceLevelBasisPoints(),
+                        "projected_shortage_quantity",
+                        recommended.stressed().projectedShortageQuantity(),
+                        "projected_cost_minor", recommended.stressed().projectedCostMinor(),
+                        "sensitivity_basis_points", recommended.sensitivityBasisPoints(),
+                        "constraint_violations", recommended.constraintViolations(),
+                        "solver_type", row.getSolverType(), "ranked_assessments", rationale,
+                        "current_status", "PROPOSED", "execution_authorized", false));
+    }
+
+    private static Map<String, Object> assessmentPayload(
+            SupplyPlanningCalculations.ScenarioAssessment assessment) {
+        return payload("scenario_id", assessment.scenarioId(),
+                "baseline_service_level_basis_points",
+                assessment.baseline().projectedServiceLevelBasisPoints(),
+                "worst_case_service_level_basis_points",
+                assessment.stressed().projectedServiceLevelBasisPoints(),
+                "projected_shortage_quantity",
+                assessment.stressed().projectedShortageQuantity(),
+                "projected_cost_minor", assessment.stressed().projectedCostMinor(),
+                "sensitivity_basis_points", assessment.sensitivityBasisPoints(),
+                "constraint_violations", assessment.constraintViolations());
     }
 
     private Outcome approveSupplyPlan(Long tenantId, SupplyPlanningCommand command, LocalDateTime now) {

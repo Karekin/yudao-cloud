@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.cloudmold.listing.dal.mysql;
 
 import cn.iocoder.yudao.module.cloudmold.listing.service.query.ListingPageItem;
+import cn.iocoder.yudao.module.cloudmold.listing.service.query.SkuPublicationItem;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -98,4 +99,30 @@ public interface ListingQueryMapper {
                                             @Param("status") String status,
                                             @Param("offset") long offset,
                                             @Param("limit") int limit);
+
+    @Select("""
+            SELECT h.listing_id,
+                   h.listing_no,
+                   h.channel_code,
+                   h.status AS listing_status,
+                   o.enabled AS offer_enabled,
+                   CASE WHEN h.status='PUBLISHED'
+                          AND (h.publish_start_at IS NULL OR h.publish_start_at <= UTC_TIMESTAMP(6))
+                          AND (h.publish_end_at IS NULL OR h.publish_end_at > UTC_TIMESTAMP(6))
+                        THEN TRUE ELSE FALSE END AS currently_published,
+                   h.publish_start_at,
+                   h.publish_end_at,
+                   o.price_minor,
+                   o.currency_code
+            FROM cloudmold_listing_header h
+            JOIN cloudmold_listing_offer o
+              ON o.tenant_id=h.tenant_id
+             AND o.listing_id=h.listing_id
+             AND o.revision=h.revision
+            WHERE h.tenant_id=#{tenantId}
+              AND o.canonical_sku_id=#{canonicalSkuId}
+            ORDER BY h.updated_at DESC,h.listing_id DESC
+            """)
+    List<SkuPublicationItem> selectSkuPublications(@Param("tenantId") Long tenantId,
+                                                   @Param("canonicalSkuId") String canonicalSkuId);
 }

@@ -6,6 +6,7 @@ public interface MissionRuntimeApi {
     AgentControlResult checkpoint(AgentCheckpointCommand command, Long actorUserId);
     AgentControlResult waitFor(AgentWaitCommand command, Long actorUserId);
     AgentControlResult matchEvent(MissionEventCommand command);
+    AgentControlResult observeMetric(MissionMetricObservationCommand command);
     AgentControlResult fireTimer(String timerId);
     AgentControlResult resolveCompletedWorkOrder(String workOrderId);
 }

@@ -415,28 +415,36 @@ public interface QualityMapper {
                                           @Param("limit") int limit);
 
     @Select("""
-            SELECT canonical_sku_id,
+            SELECT t.canonical_sku_id,
                    CASE
                        WHEN EXISTS (
                            SELECT 1
                            FROM cloudmold_quality_recall_action recall_action
-                           WHERE recall_action.tenant_id=cloudmold_inspection_task.tenant_id
-                             AND recall_action.inspection_task_id=cloudmold_inspection_task.task_id
+                           WHERE recall_action.tenant_id=t.tenant_id
+                             AND recall_action.inspection_task_id=t.task_id
                              AND recall_action.status IN ('OPEN','ACKNOWLEDGED')
                        ) THEN 'RECALLED'
-                       WHEN COALESCE(ground_truth_decision,secondary_decision,decision)='PASS' THEN 'VERIFIED'
-                       WHEN COALESCE(ground_truth_decision,secondary_decision,decision)='FAIL' THEN 'REJECTED'
+                       WHEN COALESCE(t.ground_truth_decision,t.secondary_decision,t.decision)='PASS' THEN 'VERIFIED'
+                       WHEN COALESCE(t.ground_truth_decision,t.secondary_decision,t.decision)='FAIL' THEN 'REJECTED'
                        ELSE 'UNVERIFIED'
                    END AS status,
-                   task_id AS inspection_task_id,
-                   COALESCE(ground_truth_decision,secondary_decision,decision) AS decision,
-                   COALESCE(ground_truth_evidence_ref,secondary_evidence_ref,evidence_ref) AS evidence_token,
-                   COALESCE(adjudicated_at,rechecked_at,decided_at,completed_at) AS inspected_at,
-                   version AS aggregate_version
-            FROM cloudmold_inspection_task
-            WHERE tenant_id=#{tenantId} AND canonical_sku_id=#{canonicalSkuId}
-              AND status IN ('DECIDED','COMPLETED')
-            ORDER BY COALESCE(adjudicated_at,rechecked_at,decided_at,completed_at) DESC,task_id DESC
+                   t.task_id AS inspection_task_id,
+                   t.status AS inspection_status,
+                   COALESCE(t.ground_truth_decision,t.secondary_decision,t.decision) AS decision,
+                   COALESCE(t.ground_truth_evidence_ref,t.secondary_evidence_ref,t.evidence_ref) AS evidence_token,
+                   COALESCE(t.adjudicated_at,t.rechecked_at,t.decided_at,t.completed_at) AS inspected_at,
+                   t.completed_at,
+                   t.standard_id,
+                   s.standard_code,
+                   t.standard_version,
+                   t.standard_version_id,
+                   t.version AS aggregate_version
+            FROM cloudmold_inspection_task t
+            LEFT JOIN cloudmold_quality_standard s
+              ON s.tenant_id=t.tenant_id AND s.standard_id=t.standard_id
+            WHERE t.tenant_id=#{tenantId} AND t.canonical_sku_id=#{canonicalSkuId}
+              AND t.status IN ('DECIDED','COMPLETED')
+            ORDER BY COALESCE(t.adjudicated_at,t.rechecked_at,t.decided_at,t.completed_at) DESC,t.task_id DESC
             LIMIT 1
             """)
     cn.iocoder.yudao.module.cloudmold.quality.api.QualityConsumerEvidenceView selectLatestConsumerEvidence(

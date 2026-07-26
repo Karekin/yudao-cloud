@@ -506,6 +506,22 @@ public interface AgentControlStoreMapper {
             """)
     List<ApprovalWorkflowStartCandidate> selectApprovalWorkflowStartCandidates(@Param("limit") int limit);
 
+    @TenantIgnore
+    @Select("""
+            SELECT b.approval_id,b.tenant_id,b.work_order_id,b.status AS observed_status,
+                   b.terminal_operator_user_id,a.version AS approval_version,w.version AS work_order_version
+            FROM cloudmold_agent_approval_workflow_binding b
+            JOIN cloudmold_agent_approval a
+              ON a.tenant_id=b.tenant_id AND a.approval_id=b.approval_id
+            JOIN cloudmold_agent_work_order w
+              ON w.tenant_id=b.tenant_id AND w.work_order_id=b.work_order_id
+            WHERE b.status IN ('BPM_APPROVED_PENDING_ATTESTATION','BPM_REJECTED')
+              AND a.status='PENDING'
+            ORDER BY b.terminal_at,b.tenant_id,b.approval_id
+            LIMIT #{limit}
+            """)
+    List<ApprovalWorkflowDecisionCandidate> selectApprovalWorkflowDecisionCandidates(@Param("limit") int limit);
+
     @Update("""
             UPDATE cloudmold_agent_approval_workflow_binding
             SET status='STARTING',approver_user_id=#{approverUserId},
@@ -918,6 +934,47 @@ public interface AgentControlStoreMapper {
                           @Param("payloadSha256") String payloadSha256,@Param("now") LocalDateTime now);
 
     @Insert("""
+            INSERT INTO cloudmold_agent_metric_subscription
+              (subscription_id,tenant_id,mission_id,work_order_id,metric_id,metric_version,dimension_hash,
+               comparison_operator,threshold_value,unit_code,max_age_seconds,status,matched_observation_id,
+               matched_value,matched_evidence_sha256,matched_at,version,created_at,updated_at)
+            VALUES (#{subscriptionId},#{tenantId},#{missionId},#{workOrderId},#{metricId},#{metricVersion},
+                    #{dimensionHash},#{comparisonOperator},#{thresholdValue},#{unitCode},#{maxAgeSeconds},
+                    #{status},#{matchedObservationId},#{matchedValue},#{matchedEvidenceSha256},#{matchedAt},
+                    #{version},#{createdAt},#{updatedAt})
+            """)
+    int insertMetricSubscription(MetricSubscription value);
+
+    @Select("""
+            SELECT * FROM cloudmold_agent_metric_subscription
+            WHERE tenant_id=#{tenantId} AND status='ACTIVE' AND metric_id=#{metricId}
+              AND metric_version=#{metricVersion} AND dimension_hash=#{dimensionHash} AND unit_code=#{unitCode}
+            ORDER BY subscription_id FOR UPDATE
+            """)
+    List<MetricSubscription> selectMatchingMetricSubscriptions(
+            @Param("tenantId") Long tenantId,
+            @Param("metricId") String metricId,
+            @Param("metricVersion") String metricVersion,
+            @Param("dimensionHash") String dimensionHash,
+            @Param("unitCode") String unitCode);
+
+    @Update("""
+            UPDATE cloudmold_agent_metric_subscription
+            SET status='MATCHED',matched_observation_id=#{observationId},matched_value=#{value},
+                matched_evidence_sha256=#{evidenceSha256},matched_at=#{now},version=version+1,updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND subscription_id=#{subscriptionId} AND version=#{expectedVersion}
+              AND status='ACTIVE'
+            """)
+    int matchMetricSubscription(
+            @Param("tenantId") Long tenantId,
+            @Param("subscriptionId") String subscriptionId,
+            @Param("expectedVersion") Long expectedVersion,
+            @Param("observationId") String observationId,
+            @Param("value") java.math.BigDecimal value,
+            @Param("evidenceSha256") String evidenceSha256,
+            @Param("now") LocalDateTime now);
+
+    @Insert("""
             INSERT INTO cloudmold_agent_mission_timer
               (timer_id,tenant_id,mission_id,work_order_id,timer_type,due_at,generation,status,fired_at,version,
                created_at,updated_at)
@@ -938,7 +995,7 @@ public interface AgentControlStoreMapper {
 
     @TenantIgnore
     @Select("""
-            SELECT DISTINCT w.* FROM cloudmold_agent_work_order w
+            SELECT w.* FROM cloudmold_agent_work_order w
             JOIN cloudmold_agent_run_lease l
               ON l.tenant_id=w.tenant_id AND l.work_order_id=w.work_order_id
             WHERE w.status='IN_PROGRESS' AND w.active_run_id=l.run_id
@@ -991,6 +1048,22 @@ public interface AgentControlStoreMapper {
             """)
     String selectAgentEventInboxPayloadForUpdate(@Param("tenantId") Long tenantId,
                                                   @Param("eventId") String eventId);
+
+    @Insert("""
+            INSERT IGNORE INTO cloudmold_agent_metric_observation_inbox
+              (tenant_id,observation_id,metric_id,metric_version,dimension_hash,metric_value,unit_code,
+               source_query_id,evidence_sha256,observation_sha256,observed_at,received_at)
+            VALUES (#{tenantId},#{observationId},#{metricId},#{metricVersion},#{dimensionHash},#{value},
+                    #{unitCode},#{sourceQueryId},#{evidenceSha256},#{observationSha256},#{observedAt},#{receivedAt})
+            """)
+    int insertMetricObservation(MetricObservation value);
+
+    @Select("""
+            SELECT observation_sha256 FROM cloudmold_agent_metric_observation_inbox
+            WHERE tenant_id=#{tenantId} AND observation_id=#{observationId} FOR UPDATE
+            """)
+    String selectMetricObservationHashForUpdate(@Param("tenantId") Long tenantId,
+                                                 @Param("observationId") String observationId);
 
     @Select("""
             SELECT COUNT(*) FROM cloudmold_agent_work_order

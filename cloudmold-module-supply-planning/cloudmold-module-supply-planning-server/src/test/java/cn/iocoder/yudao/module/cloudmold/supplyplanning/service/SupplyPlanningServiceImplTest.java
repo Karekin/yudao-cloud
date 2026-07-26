@@ -234,6 +234,52 @@ class SupplyPlanningServiceImplTest {
     }
 
     @Test
+    void persistsGovernedRobustRecommendationWithoutSelectingOrExecutingIt() {
+        when(mapper.selectSupplyPlanForUpdate(17L, "plan-01")).thenReturn(new SupplyPlan()
+                .setPlanId("plan-01").setTenantId(17L).setPlanCode("PLAN-01")
+                .setBudgetAmountMinor(20_000L).setStatus("DRAFT").setVersion(1L));
+        PlanScenario fragile = scenario("scenario-fragile", "FRAGILE",
+                "20", "10", "100", "100", "a".repeat(64));
+        PlanScenario robust = scenario("scenario-robust", "ROBUST",
+                "60", "20", "100", "100", "b".repeat(64));
+        when(mapper.selectPlanScenariosForRecommendation(
+                eq(17L), eq("plan-01"), anyList()))
+                .thenReturn(List.of(fragile, robust));
+        when(mapper.insertPlanScenarioRecommendation(any())).thenReturn(1);
+
+        SupplyPlanningResult result = execute(
+                base(SupplyPlanningOperation.RECOMMEND_PLAN_SCENARIO)
+                        .scenarioRecommendation(
+                                SupplyPlanningCommand.ScenarioRecommendationDefinition.builder()
+                                        .recommendationId("robust-recommendation-01")
+                                        .planId("plan-01").expectedPlanVersion(1L)
+                                        .candidateScenarioIds(List.of(
+                                                "scenario-robust", "scenario-fragile"))
+                                        .targetServiceLevelFloorBasisPoints(9_000)
+                                        .maxProjectedCostMinor(10_000L)
+                                        .demandStressBasisPoints(12_000)
+                                        .supplyAvailabilityBasisPoints(8_000)
+                                        .policySha256("c".repeat(64)).build())
+                        .build());
+
+        assertThat(result.getAggregateType())
+                .isEqualTo("supply_plan_scenario_recommendation");
+        assertThat(result.getStatus()).isEqualTo("PROPOSED");
+        verify(mapper).insertPlanScenarioRecommendation(argThat(row ->
+                row.getRecommendedScenarioId().equals("scenario-robust")
+                        && row.getSolverType().equals("ROBUST_LEXICOGRAPHIC_V1")
+                        && row.getCandidateSetSha256().matches("[0-9a-f]{64}")
+                        && row.getStatus().equals("PROPOSED")
+                        && row.getVersion().equals(1L)));
+        verify(mapper, never()).selectPlanScenario(
+                anyLong(), anyString(), anyLong(), anyString(), any());
+        verifyNoInteractions(replenishmentExecutionPort);
+        verify(outbox).append(argThat(event ->
+                event.getEventType().equals("supply_planning.plan_scenario.recommended")
+                        && event.getAggregateId().equals("robust-recommendation-01")));
+    }
+
+    @Test
     void rejectsCommandsWithoutAnAttestedActorEnvelope() {
         assertThatThrownBy(() -> service.execute(
                 forecastCommand(LocalDate.of(2026, 8, 1))))
@@ -301,6 +347,23 @@ class SupplyPlanningServiceImplTest {
 
     private SupplyPlanningResult execute(SupplyPlanningCommand command) {
         return service.execute(command, ACTOR);
+    }
+
+    private static PlanScenario scenario(String scenarioId, String scenarioCode,
+                                         String onHand, String inbound, String capacity,
+                                         String unitCost, String parametersSha256) {
+        return new PlanScenario().setScenarioId(scenarioId).setTenantId(17L)
+                .setPlanId("plan-01").setScenarioCode(scenarioCode)
+                .setCanonicalSkuId("sku-01").setWarehouseId("warehouse-01")
+                .setForecastQuantity(new BigDecimal("100"))
+                .setSafetyStockQuantity(new BigDecimal("10"))
+                .setOnHandQuantity(new BigDecimal(onHand))
+                .setInboundQuantity(new BigDecimal(inbound))
+                .setCapacityQuantity(new BigDecimal(capacity))
+                .setMinimumOrderQuantity(new BigDecimal("10"))
+                .setUnitCostMinor(Long.parseLong(unitCost)).setUomCode("EA")
+                .setParametersSha256(parametersSha256)
+                .setStatus("EVALUATED").setVersion(1L);
     }
 
     private static SupplyPlanningCommand.SupplyPlanningCommandBuilder base(

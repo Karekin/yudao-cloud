@@ -220,8 +220,24 @@ LEFT JOIN cloudmold_agent_event_subscription e
   ON e.tenant_id=w.tenant_id AND e.work_order_id=w.work_order_id AND e.status='ACTIVE'
 LEFT JOIN cloudmold_agent_mission_timer t
   ON t.tenant_id=w.tenant_id AND t.work_order_id=w.work_order_id AND t.status='SCHEDULED'
+LEFT JOIN cloudmold_agent_metric_subscription ms
+  ON ms.tenant_id=w.tenant_id AND ms.work_order_id=w.work_order_id AND ms.status='ACTIVE'
 WHERE (w.status='WAITING_EVENT' AND e.subscription_id IS NULL)
+   OR (w.status='WAITING_METRIC' AND ms.subscription_id IS NULL)
    OR (w.status='WAITING_TIMER' AND t.timer_id IS NULL)
+UNION ALL
+SELECT 'agent_control_metric_match_without_observation', COUNT(*)
+FROM cloudmold_agent_metric_subscription subscription
+LEFT JOIN cloudmold_agent_metric_observation_inbox observation
+  ON observation.tenant_id=subscription.tenant_id
+ AND observation.observation_id=subscription.matched_observation_id
+WHERE subscription.status='MATCHED'
+  AND (observation.observation_id IS NULL
+       OR observation.metric_id<>subscription.metric_id
+       OR observation.metric_version<>subscription.metric_version
+       OR observation.dimension_hash<>subscription.dimension_hash
+       OR observation.unit_code<>subscription.unit_code
+       OR observation.evidence_sha256<>subscription.matched_evidence_sha256)
 UNION ALL
 SELECT 'agent_control_active_lease_for_non_running_work', COUNT(*)
 FROM cloudmold_agent_run_lease l

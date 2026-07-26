@@ -152,6 +152,15 @@ public class AppCommerceFacadeController {
         return success(supportService.getAfterSale(afterSaleId));
     }
 
+    @PostMapping("/after-sales/{afterSaleId}/return-handover")
+    @Operation(summary = "当前会员提交退货承运商与运单号")
+    public CommonResult<AfterSaleView> handOverReturn(
+            @PathVariable String afterSaleId,
+            @Valid @RequestBody ReturnHandoverReq request) {
+        return success(supportService.handOverReturn(request.idempotencyKey, afterSaleId,
+                request.expectedVersion, request.carrierCode, request.waybillNo));
+    }
+
     @GetMapping("/after-sales")
     public CommonResult<AppAfterSalePageView> afterSales(
             @RequestParam(defaultValue = "1") @Min(1) int pageNo,
@@ -261,6 +270,14 @@ public class AppCommerceFacadeController {
         @NotNull @DecimalMin("0.000001") private BigDecimal quantity;
         @NotBlank @Pattern(regexp = "^RETURN_AND_REFUND$") private String afterSaleType;
         @NotBlank @Pattern(regexp = "^SIZE_NOT_FIT$") private String reasonCode;
+    }
+
+    @Data
+    public static class ReturnHandoverReq {
+        @NotBlank @Size(min = 8, max = 128) private String idempotencyKey;
+        @NotNull @Positive private Long expectedVersion;
+        @NotBlank @Pattern(regexp = "^[A-Za-z0-9_-]{2,32}$") private String carrierCode;
+        @NotBlank @Pattern(regexp = "^[A-Za-z0-9_-]{4,64}$") private String waybillNo;
     }
 
     @Data
