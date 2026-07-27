@@ -59,7 +59,13 @@ public class ManagedSkillTaskQueryService {
                     "只读核验商品、商家、刊登、订单、支付、履约、售后及仓网终态。"),
             "skill.cloudmold.commerce.full-chain-hsf.v1",
             new WorkflowPresentation("商品售后自治全链路",
-                    "依次编排商品建档、旧系统投影、商家仓网、售后 Saga 与终态核验。")
+                    "依次编排商品建档、旧系统投影、商家仓网、售后 Saga 与终态核验。"),
+            "skill.cloudmold.commerce.product-to-listing.v1",
+            new WorkflowPresentation("自动铺品",
+                    "串联规范商品建档、商家店铺准备、商品刊登审核发布与终态回读；缺少真实渠道回执时明确标记待渠道确认。"),
+            "skill.cloudmold.supply-planning.prepare.v1",
+            new WorkflowPresentation("补货单准备",
+                    "将已批准的补货建议转换为真实采购或调拨草稿，并明确后续等待的供应商或仓储事件。")
     );
 
     private final SkillTaskMapper mapper;

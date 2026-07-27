@@ -38,4 +38,16 @@ public interface ListingOperationMapper extends BaseMapperX<ListingOperationDO> 
     int markSucceeded(@Param("operationId") Long operationId, @Param("tenantId") Long tenantId,
                       @Param("listingId") String listingId, @Param("resultJson") String resultJson,
                       @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT operation_id,tenant_id,idempotency_key,command_type,request_hash,attempt_token,status,
+                   listing_id,result_json,created_at,updated_at
+            FROM cloudmold_listing_operation
+            WHERE tenant_id=#{tenantId} AND listing_id=#{listingId} AND status=10
+              AND command_type IN ('CHANNEL_PUBLISH_CONFIRMED','CHANNEL_PUBLISH_FAILED')
+            ORDER BY operation_id DESC
+            LIMIT 1
+            """)
+    ListingOperationDO selectLatestChannelPublishReceipt(@Param("tenantId") Long tenantId,
+                                                         @Param("listingId") String listingId);
 }

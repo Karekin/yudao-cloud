@@ -28,6 +28,7 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             "skill.cloudmold.catalog.inspect-active-sku.v1", "在售 SKU 查询",
             "skill.cloudmold.inventory.stockout-diagnosis.v1", "尺码缺断码诊断",
             "skill.cloudmold.commerce.catalog-matrix.v1", "商品款色码建档",
+            "skill.cloudmold.commerce.product-to-listing.v1", "自动铺品",
             "skill.cloudmold.commerce.aftersale-saga.v1", "售后退款全链路",
             "skill.cloudmold.commerce.legacy-projection-plan.v1", "旧系统投影预检",
             "skill.cloudmold.commerce.reuse-ready-master.v1", "商家与仓网主数据准备",
@@ -42,6 +43,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             "按 SPU 检查各尺码可售库存，识别缺货与低库存风险，不修改业务数据。",
             "skill.cloudmold.commerce.catalog-matrix.v1",
             "建立款式、SPU 与 6 个 SKU，并完成商品生命周期激活。",
+            "skill.cloudmold.commerce.product-to-listing.v1",
+            "串联规范商品建档、商家店铺准备、商品刊登审核发布与终态回读，缺少渠道回执时明确标记待渠道确认。",
             "skill.cloudmold.commerce.aftersale-saga.v1",
             "贯通发布、库存、下单支付、履约、退货质检、退款和库存恢复。",
             "skill.cloudmold.commerce.legacy-projection-plan.v1",
@@ -76,6 +79,7 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("listing_business", "业务审核刊登"),
             Map.entry("listing_risk", "风险审核刊登"),
             Map.entry("listing_publish", "发布商品刊登"),
+            Map.entry("listing_terminal_readback", "回读刊登终态"),
             Map.entry("inventory_receive", "商品入库"),
             Map.entry("order_place", "创建订单"),
             Map.entry("inventory_reserve", "预占库存"),
@@ -141,6 +145,7 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             case "skill.cloudmold.catalog.inspect-active-sku.v1" -> activeSku(task, steps);
             case "skill.cloudmold.inventory.stockout-diagnosis.v1" -> stockout(task, steps);
             case "skill.cloudmold.commerce.catalog-matrix.v1" -> catalog(task, steps);
+            case "skill.cloudmold.commerce.product-to-listing.v1" -> productToListing(task, steps);
             case "skill.cloudmold.commerce.aftersale-saga.v1" -> aftersale(task, steps);
             case "skill.cloudmold.commerce.legacy-projection-plan.v1" -> projection(task, steps);
             case "skill.cloudmold.commerce.reuse-ready-master.v1" -> masterData(task, steps);
@@ -226,6 +231,10 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                     + " 已变更为 " + statusLabel(text(result, "currentStatus"));
         }
         if (text(result, "listingNo") != null) {
+            if (text(result, "channelPublicationStatus") != null) {
+                return "商品刊登 " + text(result, "listingNo") + "："
+                        + listingPublicationStatusLabel(text(result, "channelPublicationStatus"));
+            }
             return "商品刊登 " + text(result, "listingNo") + "：" + statusLabel(text(result, "currentStatus"));
         }
         if (text(result, "orderNo") != null) {
@@ -387,6 +396,61 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                 task);
     }
 
+    private ManagedSkillTaskBusinessOutcomeView productToListing(Task task, List<Step> steps) {
+        JsonNode catalog = result(steps, "wait_catalog");
+        JsonNode firstCatalog = catalog.at("/outputs/define_1");
+        JsonNode listing = result(steps, "listing_terminal_readback");
+        JsonNode merchant = result(steps, "wait_master").at("/outputs/merchant_approve");
+        JsonNode definitions = json(task.getInputJson()).path("catalog").path("definitions");
+        String spuCode = valueOr(text(firstCatalog, "spuCode"), text(definitions.path(0), "spuCode"));
+        int skuCount = definitions.isArray() ? definitions.size() : countPrefix(steps, "define_");
+        String listingNo = valueOr(text(listing, "listingNo"), text(result(steps, "listing_publish"), "listingNo"));
+        String headline = switch (text(listing, "overallResultCode")) {
+            case "PENDING_CONFIRMATION" ->
+                    "新品 " + valueOr(spuCode, "SPU") + " 已完成规范刊登，待渠道确认";
+            case "PUBLISHED_CONFIRMED" ->
+                    "新品 " + valueOr(spuCode, "SPU") + " 已完成铺品并收到渠道确认";
+            case "CONFIRMED_PUBLISHED" ->
+                    "新品 " + valueOr(spuCode, "SPU") + " 已完成铺品并收到渠道确认";
+            case "CHANNEL_PUBLISH_FAILED" ->
+                    "新品 " + valueOr(spuCode, "SPU") + " 渠道发布失败";
+            default -> "新品 " + valueOr(spuCode, "SPU") + " 已完成铺品执行";
+        };
+        String summary = switch (text(listing, "overallResultCode")) {
+            case "PENDING_CONFIRMATION" ->
+                    "规范商品建档、商家店铺准备和刊登审核发布均已完成，刊登 "
+                            + valueOr(listingNo, "目标刊登") + " 当前仅有规范侧已发布证据，尚未收到真实渠道终态回读。";
+            case "PUBLISHED_CONFIRMED", "CONFIRMED_PUBLISHED" ->
+                    "规范商品建档、商家店铺准备和刊登审核发布均已完成，渠道终态已确认。";
+            case "CHANNEL_PUBLISH_FAILED" ->
+                    "规范商品建档、商家店铺准备和刊登审核发布均已完成，但真实渠道回执返回失败："
+                            + valueOr(text(listing, "failureMessage"), valueOr(text(listing, "failureCode"), "未知错误")) + "。";
+            default ->
+                    "规范商品建档、商家店铺准备和刊登发布链路已执行完成，终态以当前可读取证据为准。";
+        };
+        List<ManagedSkillTaskOutcomeObjectView> objects = new ArrayList<>();
+        objects.add(object("SPU", "新品 SPU", text(firstCatalog, "canonicalSpuId"),
+                spuCode, "ACTIVE"));
+        objects.add(object("LISTING", "商品刊登", text(listing, "listingId"),
+                listingNo, valueOr(text(listing, "currentStatus"), text(listing, "channelPublicationStatus"))));
+        if (text(merchant, "merchantId") != null) {
+            objects.add(object("MERCHANT", "商家", text(merchant, "merchantId"),
+                    text(merchant, "merchantCode"), text(merchant, "merchantStatus")));
+        }
+        if (text(merchant, "shopId") != null) {
+            objects.add(object("SHOP", "店铺", text(merchant, "shopId"),
+                    text(merchant, "shopCode"), text(merchant, "shopStatus")));
+        }
+        return outcome("PRODUCT_TO_LISTING",
+                headline,
+                summary,
+                List.of(metric("SKU", Integer.toString(skuCount)),
+                        metric("刊登", valueOr(listingNo, "已创建")),
+                        metric("渠道状态", listingPublicationStatusLabel(text(listing, "channelPublicationStatus")))),
+                objects,
+                task);
+    }
+
     private ManagedSkillTaskBusinessOutcomeView projection(Task task, List<Step> steps) {
         int skuCount = countPrefix(steps, "plan_");
         int projectionCount = steps.stream().filter(step -> step.getStepCode().startsWith("plan_"))
@@ -456,6 +520,20 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
         return outcome("GENERIC", name + "已完成",
                 "任务共完成 " + succeededCount(steps) + " 个步骤，业务结果已通过终态校验。",
                 List.of(metric("成功步骤", Integer.toString(succeededCount(steps)))), List.of(), task);
+    }
+
+    private static String listingPublicationStatusLabel(String status) {
+        if (!StringUtils.hasText(status)) {
+            return "待核验";
+        }
+        return switch (status) {
+            case "PENDING_CONFIRMATION" -> "待渠道确认";
+            case "CONFIRMED", "CONFIRMED_PUBLISHED" -> "渠道已确认";
+            case "CHANNEL_PUBLISH_FAILED" -> "渠道发布失败";
+            case "NOT_PUBLISHED" -> "未上架";
+            case "NOT_READY" -> "未满足上架条件";
+            default -> status;
+        };
     }
 
     private ManagedSkillTaskBusinessOutcomeView nonSuccess(Task task, List<Step> steps) {

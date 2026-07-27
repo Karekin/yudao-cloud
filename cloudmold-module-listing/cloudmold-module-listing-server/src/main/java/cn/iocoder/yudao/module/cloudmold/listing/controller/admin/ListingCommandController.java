@@ -26,11 +26,27 @@ public class ListingCommandController {
         return success(listingCommandApi.execute(command));
     }
 
+    @PostMapping("/channel-publish-receipt")
+    @Operation(summary = "Record an idempotent real channel publish receipt for a canonical Listing")
+    @PreAuthorize("@ss.hasPermission('cloudmold:listing:command')")
+    public CommonResult<ListingChannelPublishReceiptResult> recordChannelPublishReceipt(
+            @RequestBody ListingChannelPublishReceiptCommand command) {
+        return success(listingCommandApi.recordChannelPublishReceipt(command));
+    }
+
     @PostMapping("/offer/validate")
     @Operation(summary = "Validate the exact published Listing offer and CNY price snapshot")
     @PreAuthorize("@ss.hasPermission('cloudmold:listing:offer:query')")
     public CommonResult<PublishedListingOfferView> requirePublishedOffer(
             @RequestBody PublishedOfferValidationCommand command) {
         return success(listingQueryApi.requirePublishedOffer(command));
+    }
+
+    @PostMapping("/terminal-readback")
+    @Operation(summary = "Read the governed terminal listing state without inventing channel confirmation")
+    @PreAuthorize("@ss.hasPermission('cloudmold:listing:offer:query')")
+    public CommonResult<ListingTerminalReadbackView> getListingTerminalReadback(
+            @RequestBody ListingTerminalReadbackCommand command) {
+        return success(listingQueryApi.getListingTerminalReadback(command));
     }
 }

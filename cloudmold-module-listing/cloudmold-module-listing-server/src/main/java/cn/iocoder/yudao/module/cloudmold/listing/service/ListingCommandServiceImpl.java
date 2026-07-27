@@ -26,6 +26,8 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
     static final int OPERATION_SUCCEEDED = 10;
     private static final String CURRENCY_CNY = "CNY";
     private static final String LISTING_OPERATOR_ROLE = "OWNER";
+    private static final String CHANNEL_PUBLISH_CONFIRMED = "CHANNEL_PUBLISH_CONFIRMED";
+    private static final String CHANNEL_PUBLISH_FAILED = "CHANNEL_PUBLISH_FAILED";
     private static final Set<String> FIRST_SLICE_CHANNELS = Set.of(
             "INTERNAL_COMPANY", "YSHOPPING_INTERNAL", "YSHOPPING");
 
@@ -91,6 +93,72 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
         require(Objects.equals(offer.getCurrencyCode(), command.getCurrencyCode()),
                 "order currency does not match published listing offer");
         return offer;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ListingChannelPublishReceiptResult recordChannelPublishReceipt(ListingChannelPublishReceiptCommand command) {
+        validateReceipt(command);
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        ListingHeaderDO header = headerMapper.selectForUpdate(tenantId, command.getListingId());
+        require(header != null, "canonical listing does not exist");
+        require(Objects.equals(header.getVersion(), command.getExpectedVersion()), "canonical listing version conflict");
+        require("PUBLISHED".equals(header.getStatus()), "channel publish receipt requires canonical listing PUBLISHED");
+
+        String commandType = command.getOutcome() == ListingChannelPublishReceiptOutcome.CONFIRMED_PUBLISHED
+                ? CHANNEL_PUBLISH_CONFIRMED : CHANNEL_PUBLISH_FAILED;
+        String requestHash = fingerprintReceipt(tenantId, header, command);
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        String attemptToken = UUID.randomUUID().toString();
+        operationMapper.insertOrResolve(tenantId, command.getIdempotencyKey(), commandType, requestHash,
+                attemptToken, now);
+        Long operationId = operationMapper.selectLastInsertId();
+        require(operationId != null && operationId > 0, "failed to resolve listing receipt operation");
+        ListingOperationDO operation = operationMapper.selectForUpdate(operationId, tenantId);
+        require(operation != null, "listing receipt operation disappeared");
+        if (!attemptToken.equals(operation.getAttemptToken())) {
+            require(Objects.equals(operation.getRequestHash(), requestHash),
+                    "idempotency key conflicts with different listing receipt payload");
+            require(operation.getStatus() == OPERATION_SUCCEEDED && operation.getResultJson() != null,
+                    "existing listing receipt operation is not complete");
+            ListingChannelPublishReceiptResult replay = JsonUtils.parseObject(operation.getResultJson(),
+                    ListingChannelPublishReceiptResult.class);
+            replay.setDuplicate(true);
+            return replay;
+        }
+
+        ListingChannelPublishReceiptResult result = ListingChannelPublishReceiptResult.builder()
+                .operationId(operationId)
+                .listingId(header.getListingId())
+                .listingNo(header.getListingNo())
+                .aggregateVersion(header.getVersion())
+                .outcome(command.getOutcome())
+                .channelListingId(command.getChannelListingId())
+                .channelStatus(command.getChannelStatus())
+                .confirmedAt(command.getConfirmedAt())
+                .evidenceRef(command.getEvidenceRef())
+                .failureCode(command.getFailureCode())
+                .failureMessage(command.getFailureMessage())
+                .retryable(command.getRetryable())
+                .duplicate(false)
+                .build();
+        require(operationMapper.markSucceeded(operationId, tenantId, header.getListingId(),
+                JsonUtils.toJsonString(result), now) == 1, "listing receipt operation completion conflict");
+        appendChannelReceiptEvent(tenantId, header, command);
+        return result;
+    }
+
+    @Override
+    public ListingTerminalReadbackView getListingTerminalReadback(ListingTerminalReadbackCommand command) {
+        require(command != null, "listing terminal readback command is required");
+        requireText(command.getListingId(), "listingId", 36);
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        ListingHeaderDO header = headerMapper.selectTenantListing(tenantId, command.getListingId());
+        require(header != null, "canonical listing does not exist");
+        List<ListingOfferDO> offers = offerMapper.selectByListingRevision(tenantId, header.getListingId(), header.getRevision());
+        require(!offers.isEmpty(), "canonical listing revision has no offers");
+        return terminalReadback(header, offers,
+                operationMapper.selectLatestChannelPublishReceipt(tenantId, header.getListingId()));
     }
 
     private ListingCommandResult createDraft(Long tenantId, Long operationId, ListingCommand command,
@@ -334,6 +402,32 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
                 .destination("lakehouse").build());
     }
 
+    private void appendChannelReceiptEvent(Long tenantId, ListingHeaderDO header,
+                                           ListingChannelPublishReceiptCommand command) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("listing_id", header.getListingId());
+        payload.put("listing_no", header.getListingNo());
+        payload.put("aggregate_version", header.getVersion());
+        payload.put("channel_code", header.getChannelCode());
+        payload.put("outcome", command.getOutcome().name());
+        payload.put("channel_listing_id", command.getChannelListingId());
+        payload.put("channel_status", command.getChannelStatus());
+        payload.put("confirmed_at", command.getConfirmedAt());
+        payload.put("evidence_ref", command.getEvidenceRef());
+        payload.put("failure_code", command.getFailureCode());
+        payload.put("failure_message", command.getFailureMessage());
+        payload.put("retryable", command.getRetryable());
+        String eventType = command.getOutcome() == ListingChannelPublishReceiptOutcome.CONFIRMED_PUBLISHED
+                ? "listing.channel-publish.confirmed" : "listing.channel-publish.failed";
+        outboxAppender.append(AppendDomainEventCommand.builder().eventType(eventType).schemaVersion(1)
+                .sourceSystem("cloudmold-listing").tenantId(tenantId).aggregateType("listing")
+                .aggregateId(header.getListingId()).aggregateVersion(header.getVersion()).eventSequence((short) 3)
+                .occurredAt(command.getOccurredAt()).correlationId(command.getCorrelationId())
+                .causationId(command.getCausationId()).idempotencyKey(command.getIdempotencyKey())
+                .payload(payload).headers(Map.of("operation", command.getOutcome().name()))
+                .destination("lakehouse").build());
+    }
+
     private static Map<String, Object> eventOffer(ListingOfferDO offer) {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("listing_offer_id", offer.getListingOfferId()); value.put("canonical_sku_id", offer.getCanonicalSkuId());
@@ -351,6 +445,87 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
                 .completionPassed(header.getCompletionPassed()).businessApproved(header.getBusinessApproved())
                 .riskApproved(header.getRiskApproved()).offers(offers.stream().map(ListingCommandServiceImpl::view).toList())
                 .duplicate(duplicate).build();
+    }
+
+    private static ListingTerminalReadbackView terminalReadback(ListingHeaderDO header, List<ListingOfferDO> offers,
+                                                                ListingOperationDO receiptOperation) {
+        int enabledOfferCount = (int) offers.stream().filter(offer -> Boolean.TRUE.equals(offer.getEnabled())).count();
+        String currentStatus = header.getStatus();
+        String channelPublicationStatus;
+        String overallResultCode;
+        String summary;
+        String channelListingId = null;
+        String channelStatus = null;
+        String failureCode = null;
+        String failureMessage = null;
+        Boolean retryable = null;
+        Instant confirmedAt = null;
+        String evidenceRef = null;
+        boolean channelFactPresent = false;
+        ListingChannelPublishReceiptResult receipt = terminalReceipt(receiptOperation);
+        if (receipt != null && Objects.equals(receipt.getAggregateVersion(), header.getVersion())) {
+            channelFactPresent = true;
+            evidenceRef = receipt.getEvidenceRef();
+            if (receipt.getOutcome() == ListingChannelPublishReceiptOutcome.CONFIRMED_PUBLISHED) {
+                channelPublicationStatus = "CONFIRMED_PUBLISHED";
+                overallResultCode = "CONFIRMED_PUBLISHED";
+                summary = "规范刊登已发布，并收到真实渠道上架确认";
+                channelListingId = receipt.getChannelListingId();
+                channelStatus = receipt.getChannelStatus();
+                confirmedAt = receipt.getConfirmedAt();
+            } else {
+                channelPublicationStatus = "CHANNEL_PUBLISH_FAILED";
+                overallResultCode = "CHANNEL_PUBLISH_FAILED";
+                summary = "已收到真实渠道发布失败回执";
+                failureCode = receipt.getFailureCode();
+                failureMessage = receipt.getFailureMessage();
+                retryable = receipt.getRetryable();
+            }
+        } else if ("PUBLISHED".equals(currentStatus)) {
+            channelPublicationStatus = "PENDING_CONFIRMATION";
+            overallResultCode = "PENDING_CONFIRMATION";
+            summary = "规范刊登已发布，待渠道确认终态回读";
+        } else if (Set.of("UNPUBLISHED", "SUSPENDED", "ARCHIVED").contains(currentStatus)) {
+            channelPublicationStatus = "NOT_PUBLISHED";
+            overallResultCode = "LISTING_NOT_PUBLISHED";
+            summary = "规范刊登当前未处于对外上架状态";
+        } else {
+            channelPublicationStatus = "NOT_READY";
+            overallResultCode = "LISTING_NOT_READY";
+            summary = "规范刊登尚未完成上架前置审核";
+        }
+        return ListingTerminalReadbackView.builder()
+                .listingId(header.getListingId())
+                .listingNo(header.getListingNo())
+                .merchantId(header.getMerchantId())
+                .shopId(header.getShopId())
+                .channelCode(header.getChannelCode())
+                .canonicalSpuId(header.getCanonicalSpuId())
+                .currentStatus(currentStatus)
+                .revision(header.getRevision())
+                .aggregateVersion(header.getVersion())
+                .offerCount(offers.size())
+                .enabledOfferCount(enabledOfferCount)
+                .channelFactPresent(channelFactPresent)
+                .channelPublicationStatus(channelPublicationStatus)
+                .overallResultCode(overallResultCode)
+                .channelListingId(channelListingId)
+                .channelStatus(channelStatus)
+                .failureCode(failureCode)
+                .failureMessage(failureMessage)
+                .retryable(retryable)
+                .confirmedAt(confirmedAt)
+                .evidenceRef(evidenceRef)
+                .evidenceSource(channelFactPresent ? "REAL_CHANNEL_RECEIPT" : "CANONICAL_LISTING_ONLY")
+                .summary(summary)
+                .build();
+    }
+
+    private static ListingChannelPublishReceiptResult terminalReceipt(ListingOperationDO operation) {
+        if (operation == null || operation.getResultJson() == null || operation.getResultJson().isBlank()) {
+            return null;
+        }
+        return JsonUtils.parseObject(operation.getResultJson(), ListingChannelPublishReceiptResult.class);
     }
 
     private static ListingOfferView view(ListingOfferDO offer) {
@@ -392,6 +567,36 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
         }
     }
 
+    private static void validateReceipt(ListingChannelPublishReceiptCommand command) {
+        require(command != null, "listing channel publish receipt command is required");
+        requireText(command.getIdempotencyKey(), "idempotencyKey", 128);
+        require(command.getIdempotencyKey().length() >= 8, "idempotencyKey is too short");
+        requireText(command.getListingId(), "listingId", 36);
+        require(command.getExpectedVersion() != null && command.getExpectedVersion() > 0,
+                "expectedVersion must be positive");
+        require(command.getOutcome() != null, "outcome is required");
+        require(command.getOccurredAt() != null, "occurredAt is required");
+        requireUuid(command.getCorrelationId(), "correlationId");
+        if (command.getCausationId() != null) requireUuid(command.getCausationId(), "causationId");
+        if (command.getOutcome() == ListingChannelPublishReceiptOutcome.CONFIRMED_PUBLISHED) {
+            requireText(command.getChannelListingId(), "channelListingId", 128);
+            requireText(command.getChannelStatus(), "channelStatus", 64);
+            require(command.getConfirmedAt() != null, "confirmedAt is required");
+            requireText(command.getEvidenceRef(), "evidenceRef", 256);
+            require(command.getFailureCode() == null && command.getFailureMessage() == null
+                            && command.getRetryable() == null,
+                    "confirmed receipt does not accept failure fields");
+            return;
+        }
+        requireText(command.getFailureCode(), "failureCode", 64);
+        requireText(command.getFailureMessage(), "failureMessage", 512);
+        require(command.getRetryable() != null, "retryable is required");
+        if (command.getEvidenceRef() != null) requireText(command.getEvidenceRef(), "evidenceRef", 256);
+        require(command.getChannelListingId() == null && command.getChannelStatus() == null
+                        && command.getConfirmedAt() == null,
+                "failed receipt does not accept confirmed publish fields");
+    }
+
     private static String fingerprint(Long tenantId, ListingCommand command) {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("tenant_id", tenantId); value.put("operation", command.getOperation());
@@ -404,6 +609,24 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
         value.put("publisher_ref", command.getPublisherRef()); value.put("publish_start_at", command.getPublishStartAt());
         value.put("publish_end_at", command.getPublishEndAt()); value.put("offers", command.getOffers());
         value.put("reason", command.getReason()); value.put("occurred_at", command.getOccurredAt());
+        return DigestUtil.sha256Hex(JsonUtils.toJsonString(value));
+    }
+
+    private static String fingerprintReceipt(Long tenantId, ListingHeaderDO header,
+                                             ListingChannelPublishReceiptCommand command) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("tenant_id", tenantId);
+        value.put("listing_id", header.getListingId());
+        value.put("listing_version", header.getVersion());
+        value.put("outcome", command.getOutcome());
+        value.put("channel_listing_id", command.getChannelListingId());
+        value.put("channel_status", command.getChannelStatus());
+        value.put("confirmed_at", command.getConfirmedAt());
+        value.put("evidence_ref", command.getEvidenceRef());
+        value.put("failure_code", command.getFailureCode());
+        value.put("failure_message", command.getFailureMessage());
+        value.put("retryable", command.getRetryable());
+        value.put("occurred_at", command.getOccurredAt());
         return DigestUtil.sha256Hex(JsonUtils.toJsonString(value));
     }
 

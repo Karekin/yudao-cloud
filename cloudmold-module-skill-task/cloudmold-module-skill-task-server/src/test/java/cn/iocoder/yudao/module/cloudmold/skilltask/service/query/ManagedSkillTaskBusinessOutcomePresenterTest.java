@@ -60,6 +60,46 @@ class ManagedSkillTaskBusinessOutcomePresenterTest {
     }
 
     @Test
+    void shouldDescribeProductToListingAsPendingChannelConfirmationWhenNoChannelFactExists() {
+        ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
+                task("skill.cloudmold.commerce.product-to-listing.v1", """
+                        {"catalog":{"definitions":[
+                          {"spuCode":"YS-100","skuCode":"YS-100-BLACK-S"},
+                          {"spuCode":"YS-100","skuCode":"YS-100-BLACK-M"}
+                        ]}}
+                        """),
+                List.of(
+                        step("wait_catalog", """
+                                {"status":"SUCCEEDED","outputs":{"define_1":{
+                                  "canonicalSpuId":"spu-id","spuCode":"YS-100","canonicalSkuId":"sku-1"}}}
+                                """),
+                        step("wait_master", """
+                                {"status":"SUCCEEDED","outputs":{"merchant_approve":{
+                                  "merchantId":"merchant-id","merchantStatus":"ACTIVE",
+                                  "shopId":"shop-id","shopStatus":"ACTIVE"}}}
+                                """),
+                        step("listing_terminal_readback", """
+                                {"listingId":"listing-id","listingNo":"L-100","currentStatus":"PUBLISHED",
+                                 "channelPublicationStatus":"PENDING_CONFIRMATION",
+                                 "overallResultCode":"PENDING_CONFIRMATION"}
+                                """)));
+
+        assertThat(outcome.getHeadline()).isEqualTo("新品 YS-100 已完成规范刊登，待渠道确认");
+        assertThat(outcome.getSummary()).contains("尚未收到真实渠道终态回读");
+        assertThat(outcome.getMetrics()).extracting("label", "value")
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("SKU", "2"),
+                        org.assertj.core.groups.Tuple.tuple("刊登", "L-100"),
+                        org.assertj.core.groups.Tuple.tuple("渠道状态", "待渠道确认"));
+        assertThat(outcome.getBusinessObjects()).extracting("objectType", "businessId")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("SPU", "spu-id"),
+                        org.assertj.core.groups.Tuple.tuple("LISTING", "listing-id"),
+                        org.assertj.core.groups.Tuple.tuple("MERCHANT", "merchant-id"),
+                        org.assertj.core.groups.Tuple.tuple("SHOP", "shop-id"));
+    }
+
+    @Test
     void shouldDescribeProjectionMasterDataAndReadback() {
         ManagedSkillTaskBusinessOutcomeView projection = presenter.present(
                 task("skill.cloudmold.commerce.legacy-projection-plan.v1"),
@@ -152,12 +192,16 @@ class ManagedSkillTaskBusinessOutcomePresenterTest {
     }
 
     private static Task task(String skillId) {
+        return task(skillId, "{}");
+    }
+
+    private static Task task(String skillId, String inputJson) {
         Task task = new Task();
         task.setTaskId("task-1");
         task.setSkillId(skillId);
         task.setStatus("SUCCEEDED");
         task.setTerminalResultSha256("e".repeat(64));
-        task.setInputJson("{}");
+        task.setInputJson(inputJson);
         return task;
     }
 

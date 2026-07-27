@@ -164,6 +164,7 @@ class SkillTaskDefinitionRegistryTest {
         assertThat(definition.getSteps()).hasSize(10);
         assertThat(workspaceRegistry.all()).extracting(SkillTaskDefinition::getSkillId)
                 .contains("skill.cloudmold.commerce.catalog-matrix.v1",
+                        "skill.cloudmold.commerce.product-to-listing.v1",
                         "skill.cloudmold.commerce.aftersale-saga.v1",
                         "skill.cloudmold.commerce.terminal-readback.v1");
     }

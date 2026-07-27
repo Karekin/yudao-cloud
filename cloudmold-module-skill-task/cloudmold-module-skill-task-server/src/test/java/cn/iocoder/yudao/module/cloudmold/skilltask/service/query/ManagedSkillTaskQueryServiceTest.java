@@ -90,6 +90,28 @@ class ManagedSkillTaskQueryServiceTest {
     }
 
     @Test
+    void shouldDescribeNewBusinessWorkflowsWithTruthfulCompletionBoundary() {
+        SkillTaskDefinition productToListing = definition(
+                "skill.cloudmold.commerce.product-to-listing.v1", "1.0.0", "R3");
+        SkillTaskDefinition replenishmentPrepare = definition(
+                "skill.cloudmold.supply-planning.prepare.v1", "1.0.0", "R2");
+        when(registry.all()).thenReturn(List.of(productToListing, replenishmentPrepare));
+
+        List<ManagedSkillTaskWorkflowView> workflows = service.listManagedWorkflows();
+
+        assertThat(workflows).extracting(
+                        ManagedSkillTaskWorkflowView::getDisplayName,
+                        ManagedSkillTaskWorkflowView::getDescription)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                "自动铺品",
+                                "串联规范商品建档、商家店铺准备、商品刊登审核发布与终态回读；缺少真实渠道回执时明确标记待渠道确认。"),
+                        org.assertj.core.groups.Tuple.tuple(
+                                "补货单准备",
+                                "将已批准的补货建议转换为真实采购或调拨草稿，并明确后续等待的供应商或仓储事件。"));
+    }
+
+    @Test
     void shouldSanitizeManagedRunDetailWhileLinkingDirectChildTasks() {
         Task parent = task("task-parent", "run-parent", "skill.parent", "1.2.0", "R3", "RUNNING", "submit-child");
         parent.setInputSha256("i".repeat(64));
@@ -281,6 +303,18 @@ class ManagedSkillTaskQueryServiceTest {
         task.setAttemptCount(1);
         task.setMaxAttempts(4);
         return task;
+    }
+
+    private static SkillTaskDefinition definition(String skillId, String version, String riskLevel) {
+        return SkillTaskDefinition.builder()
+                .skillId(skillId)
+                .skillVersion(version)
+                .riskLevel(riskLevel)
+                .maxAttempts(3)
+                .definitionSha256("d".repeat(64))
+                .definitionClosureSha256("c".repeat(64))
+                .steps(List.of())
+                .build();
     }
 
     private static Step succeededStep(String taskId, String stepCode, int stepOrder, String resultJson) {

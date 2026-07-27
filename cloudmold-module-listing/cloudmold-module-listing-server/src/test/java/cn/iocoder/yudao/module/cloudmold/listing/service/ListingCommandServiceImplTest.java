@@ -41,20 +41,42 @@ class ListingCommandServiceImplTest {
     private final AtomicReference<ListingHeaderDO> storedHeader = new AtomicReference<>();
     private final List<ListingOfferDO> storedOffers = new ArrayList<>();
     private final AtomicReference<String> currentAttempt = new AtomicReference<>();
+    private final AtomicReference<String> currentCommandType = new AtomicReference<>();
+    private final Map<String, ListingOperationDO> latestReceiptByListing = new HashMap<>();
 
     @BeforeEach
     void setUp() {
         TenantContextHolder.setTenantId(1L);
         when(operationMapper.selectLastInsertId()).thenReturn(11L);
         when(operationMapper.insertOrResolve(anyLong(), anyString(), anyString(), anyString(), anyString(), any()))
-                .thenAnswer(invocation -> { currentAttempt.set(invocation.getArgument(4)); return 1; });
+                .thenAnswer(invocation -> {
+                    currentCommandType.set(invocation.getArgument(2));
+                    currentAttempt.set(invocation.getArgument(4));
+                    return 1;
+                });
         when(operationMapper.selectForUpdate(11L, 1L)).thenAnswer(ignored -> new ListingOperationDO()
                 .setOperationId(11L).setTenantId(1L).setAttemptToken(currentAttempt.get()).setStatus(0));
-        when(operationMapper.markSucceeded(anyLong(), anyLong(), anyString(), anyString(), any())).thenReturn(1);
+        when(operationMapper.markSucceeded(anyLong(), anyLong(), anyString(), anyString(), any())).thenAnswer(invocation -> {
+            String listingId = invocation.getArgument(2);
+            String resultJson = invocation.getArgument(3);
+            if (listingId != null && currentCommandType.get() != null
+                    && currentCommandType.get().startsWith("CHANNEL_PUBLISH_")) {
+                latestReceiptByListing.put(listingId, new ListingOperationDO()
+                        .setListingId(listingId)
+                        .setCommandType(currentCommandType.get())
+                        .setStatus(10)
+                        .setResultJson(resultJson));
+            }
+            return 1;
+        });
         when(headerMapper.insert(any(ListingHeaderDO.class))).thenAnswer(invocation -> {
             storedHeader.set(invocation.getArgument(0)); return 1;
         });
         when(headerMapper.selectForUpdate(eq(1L), anyString())).thenAnswer(ignored -> storedHeader.get());
+        when(headerMapper.selectTenantListing(eq(1L), anyString())).thenAnswer(invocation -> {
+            ListingHeaderDO header = storedHeader.get();
+            return header != null && Objects.equals(header.getListingId(), invocation.getArgument(1)) ? header : null;
+        });
         when(headerMapper.transition(anyLong(), anyString(), anyLong(), anyString(), anyString(), anyInt(),
                 anyBoolean(), anyBoolean(), anyBoolean(), nullable(String.class), any())).thenReturn(1);
         when(offerMapper.insert(any(ListingOfferDO.class))).thenAnswer(invocation -> {
@@ -66,6 +88,8 @@ class ListingCommandServiceImplTest {
         });
         when(historyMapper.insert(any(ListingStatusHistoryDO.class))).thenReturn(1);
         when(reviewMapper.insert(any(ListingReviewDecisionDO.class))).thenReturn(1);
+        when(operationMapper.selectLatestChannelPublishReceipt(eq(1L), anyString()))
+                .thenAnswer(invocation -> latestReceiptByListing.get(invocation.getArgument(1)));
         when(catalogApi.getActiveSku(anyString())).thenAnswer(invocation -> {
             CatalogSkuProjectionView view = new CatalogSkuProjectionView();
             view.setCanonicalSpuId("spu-1"); view.setCanonicalSkuId(invocation.getArgument(0)); view.setCatalogStatus("ACTIVE");
@@ -303,6 +327,109 @@ class ListingCommandServiceImplTest {
                 "merchant-1".equals(reference.getMerchantId()) && "shop-1".equals(reference.getShopId())));
     }
 
+    @Test
+    void shouldExposePublishedListingAsPendingChannelConfirmationWhenNoChannelFactExists() {
+        ListingHeaderDO header = publishedHeader();
+        storedHeader.set(header);
+        when(headerMapper.selectTenantListing(1L, header.getListingId())).thenReturn(header);
+        storedOffers.add(listingOffer(header.getListingId(), 1, "sku-1", 9900L));
+        storedOffers.add(listingOffer(header.getListingId(), 1, "sku-2", 10900L).setListingOfferId("offer-2"));
+
+        ListingTerminalReadbackView readback = service.getListingTerminalReadback(
+                ListingTerminalReadbackCommand.builder().listingId(header.getListingId()).build());
+
+        assertThat(readback.getListingNo()).isEqualTo("CML1");
+        assertThat(readback.getCurrentStatus()).isEqualTo("PUBLISHED");
+        assertThat(readback.getOfferCount()).isEqualTo(2);
+        assertThat(readback.getEnabledOfferCount()).isEqualTo(2);
+        assertThat(readback.getChannelFactPresent()).isFalse();
+        assertThat(readback.getChannelPublicationStatus()).isEqualTo("PENDING_CONFIRMATION");
+        assertThat(readback.getOverallResultCode()).isEqualTo("PENDING_CONFIRMATION");
+        assertThat(readback.getEvidenceSource()).isEqualTo("CANONICAL_LISTING_ONLY");
+        assertThat(readback.getSummary()).isEqualTo("规范刊登已发布，待渠道确认终态回读");
+    }
+
+    @Test
+    void shouldConfirmPublishedListingOnlyAfterRealChannelReceiptArrives() {
+        ListingHeaderDO header = publishedHeader();
+        storedHeader.set(header);
+        storedOffers.add(listingOffer(header.getListingId(), 1, "sku-1", 9900L));
+
+        ListingChannelPublishReceiptResult receipt = service.recordChannelPublishReceipt(
+                receiptCommand(header.getListingId(), header.getVersion()));
+        ListingTerminalReadbackView readback = service.getListingTerminalReadback(
+                ListingTerminalReadbackCommand.builder().listingId(header.getListingId()).build());
+
+        assertThat(receipt.getOutcome()).isEqualTo(ListingChannelPublishReceiptOutcome.CONFIRMED_PUBLISHED);
+        assertThat(readback.getChannelFactPresent()).isTrue();
+        assertThat(readback.getOverallResultCode()).isEqualTo("CONFIRMED_PUBLISHED");
+        assertThat(readback.getChannelPublicationStatus()).isEqualTo("CONFIRMED_PUBLISHED");
+        assertThat(readback.getChannelListingId()).isEqualTo("channel-listing-1");
+        assertThat(readback.getConfirmedAt()).isEqualTo(Instant.parse("2026-07-27T10:01:00Z"));
+        assertThat(readback.getEvidenceRef()).isEqualTo("channel-evidence-1");
+        assertThat(readback.getEvidenceSource()).isEqualTo("REAL_CHANNEL_RECEIPT");
+    }
+
+    @Test
+    void shouldExposeChannelPublishFailureAsTerminalFailure() {
+        ListingHeaderDO header = publishedHeader();
+        storedHeader.set(header);
+        storedOffers.add(listingOffer(header.getListingId(), 1, "sku-1", 9900L));
+
+        ListingChannelPublishReceiptResult receipt = service.recordChannelPublishReceipt(
+                failedReceiptCommand(header.getListingId(), header.getVersion()));
+        ListingTerminalReadbackView readback = service.getListingTerminalReadback(
+                ListingTerminalReadbackCommand.builder().listingId(header.getListingId()).build());
+
+        assertThat(receipt.getOutcome()).isEqualTo(ListingChannelPublishReceiptOutcome.CHANNEL_PUBLISH_FAILED);
+        assertThat(readback.getChannelFactPresent()).isTrue();
+        assertThat(readback.getOverallResultCode()).isEqualTo("CHANNEL_PUBLISH_FAILED");
+        assertThat(readback.getFailureCode()).isEqualTo("CHANNEL_TIMEOUT");
+        assertThat(readback.getFailureMessage()).isEqualTo("channel publish callback timed out");
+        assertThat(readback.getRetryable()).isTrue();
+        assertThat(readback.getEvidenceRef()).isEqualTo("channel-failure-evidence-1");
+    }
+
+    @Test
+    void shouldReplayDuplicateChannelReceiptAndKeepFactsIsolatedByListing() {
+        ListingHeaderDO headerOne = publishedHeader();
+        ListingHeaderDO headerTwo = publishedHeader().setListingId("listing-2").setListingNo("CML2");
+        storedHeader.set(headerOne);
+        storedOffers.add(listingOffer(headerOne.getListingId(), 1, "sku-1", 9900L));
+        latestReceiptByListing.put(headerTwo.getListingId(), new ListingOperationDO()
+                .setListingId(headerTwo.getListingId())
+                .setCommandType("CHANNEL_PUBLISH_CONFIRMED")
+                .setStatus(10)
+                .setResultJson(JsonUtils.toJsonString(ListingChannelPublishReceiptResult.builder()
+                        .operationId(22L).listingId(headerTwo.getListingId()).listingNo(headerTwo.getListingNo())
+                        .aggregateVersion(headerTwo.getVersion())
+                        .outcome(ListingChannelPublishReceiptOutcome.CONFIRMED_PUBLISHED)
+                        .channelListingId("channel-listing-2").channelStatus("ONLINE")
+                        .confirmedAt(Instant.parse("2026-07-27T10:02:00Z")).evidenceRef("evidence-2")
+                        .duplicate(false).build())));
+
+        ListingChannelPublishReceiptCommand command = receiptCommand(headerOne.getListingId(), headerOne.getVersion());
+        ListingChannelPublishReceiptResult first = service.recordChannelPublishReceipt(command);
+        String requestHash = captureReceiptRequestHash(command, first);
+
+        when(operationMapper.selectForUpdate(11L, 1L)).thenReturn(new ListingOperationDO().setOperationId(11L)
+                .setTenantId(1L).setAttemptToken("existing").setRequestHash(requestHash).setStatus(10)
+                .setResultJson(JsonUtils.toJsonString(first)));
+
+        ListingChannelPublishReceiptResult replay = service.recordChannelPublishReceipt(command);
+        ListingTerminalReadbackView one = service.getListingTerminalReadback(
+                ListingTerminalReadbackCommand.builder().listingId(headerOne.getListingId()).build());
+        storedHeader.set(headerTwo);
+        storedOffers.clear();
+        storedOffers.add(listingOffer(headerTwo.getListingId(), 1, "sku-2", 10900L));
+        ListingTerminalReadbackView two = service.getListingTerminalReadback(
+                ListingTerminalReadbackCommand.builder().listingId(headerTwo.getListingId()).build());
+
+        assertThat(replay.getDuplicate()).isTrue();
+        assertThat(one.getChannelListingId()).isEqualTo("channel-listing-1");
+        assertThat(two.getChannelListingId()).isEqualTo("channel-listing-2");
+    }
+
     private String captureRequestHash(ListingCommand command) {
         AtomicReference<String> hash = new AtomicReference<>();
         when(operationMapper.insertOrResolve(anyLong(), anyString(), anyString(), anyString(), anyString(), any()))
@@ -311,6 +438,22 @@ class ListingCommandServiceImplTest {
                 .setOperationId(11L).setTenantId(1L).setAttemptToken("conflict").setRequestHash(hash.get())
                 .setStatus(10).setResultJson("{}"));
         service.execute(command);
+        return hash.get();
+    }
+
+    private String captureReceiptRequestHash(ListingChannelPublishReceiptCommand command,
+                                             ListingChannelPublishReceiptResult result) {
+        AtomicReference<String> hash = new AtomicReference<>();
+        when(operationMapper.insertOrResolve(anyLong(), anyString(), anyString(), anyString(), anyString(), any()))
+                .thenAnswer(invocation -> {
+                    currentCommandType.set(invocation.getArgument(2));
+                    hash.set(invocation.getArgument(3));
+                    return 0;
+                });
+        when(operationMapper.selectForUpdate(11L, 1L)).thenAnswer(ignored -> new ListingOperationDO()
+                .setOperationId(11L).setTenantId(1L).setAttemptToken("conflict").setRequestHash(hash.get())
+                .setStatus(10).setResultJson(JsonUtils.toJsonString(result)));
+        service.recordChannelPublishReceipt(command);
         return hash.get();
     }
 
@@ -350,5 +493,35 @@ class ListingCommandServiceImplTest {
         return new ListingOfferDO().setListingOfferId("offer-1").setTenantId(1L).setListingId(listingId)
                 .setRevision(revision).setCanonicalSkuId(skuId).setPriceMinor(priceMinor).setCurrencyCode("CNY")
                 .setEnabled(true);
+    }
+
+    private static ListingChannelPublishReceiptCommand receiptCommand(String listingId, long version) {
+        return ListingChannelPublishReceiptCommand.builder()
+                .idempotencyKey("channel-receipt-success-1")
+                .listingId(listingId)
+                .expectedVersion(version)
+                .outcome(ListingChannelPublishReceiptOutcome.CONFIRMED_PUBLISHED)
+                .channelListingId("channel-listing-1")
+                .channelStatus("ONLINE")
+                .confirmedAt(Instant.parse("2026-07-27T10:01:00Z"))
+                .evidenceRef("channel-evidence-1")
+                .correlationId("6f9619ff-8b86-d011-b42d-00cf4fc964ff")
+                .occurredAt(Instant.parse("2026-07-27T10:01:01Z"))
+                .build();
+    }
+
+    private static ListingChannelPublishReceiptCommand failedReceiptCommand(String listingId, long version) {
+        return ListingChannelPublishReceiptCommand.builder()
+                .idempotencyKey("channel-receipt-failure-1")
+                .listingId(listingId)
+                .expectedVersion(version)
+                .outcome(ListingChannelPublishReceiptOutcome.CHANNEL_PUBLISH_FAILED)
+                .failureCode("CHANNEL_TIMEOUT")
+                .failureMessage("channel publish callback timed out")
+                .retryable(true)
+                .evidenceRef("channel-failure-evidence-1")
+                .correlationId("6f9619ff-8b86-d011-b42d-00cf4fc964fe")
+                .occurredAt(Instant.parse("2026-07-27T10:05:01Z"))
+                .build();
     }
 }
