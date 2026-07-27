@@ -345,6 +345,8 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
         require(mapper.transitionWorkOrder(tenantId, workOrder.getWorkOrderId(), workOrder.getVersion(),
                 "WAITING_APPROVAL", workOrderStatus, null, null, now) == 1,
                 "approved work order transition conflict");
+        emitApprovalOutcomeNotification(tenantId, workOrder, approval, approvalStatus, workOrderStatus,
+                operatorUserId, input.getReasonCode(), now);
         return new Outcome("role_approval", approval.getApprovalId(), approval.getVersion() + 1, approvalStatus,
                 "agent_control.approval.decided");
     }
@@ -438,6 +440,14 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
 
     @Override
     @Transactional(readOnly = true)
+    public AgentApprovalDetailView getApprovalDetail(String approvalId) {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        return requireNonNull(mapper.selectApprovalDetail(tenantId, requireRef(approvalId, "approvalId")),
+                "approval not found");
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public AgentControlResult getBusinessResult(String resultId) {
         Long tenantId = TenantContextHolder.getRequiredTenantId();
         BusinessResult row = requireNonNull(mapper.selectBusinessResult(tenantId, requireRef(resultId, "resultId")),
@@ -511,6 +521,28 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
         validateJson(value, "businessContextJson");
         requireNoTechnicalProtocolTokens(value,
                 "businessContextJson must not contain technical execution parameters");
+    }
+
+    private void emitApprovalOutcomeNotification(Long tenantId, WorkOrder workOrder, Approval approval,
+                                                 String approvalStatus, String workOrderStatus,
+                                                 Long operatorUserId, String reasonCode,
+                                                 LocalDateTime now) {
+        String notificationType = "READY".equals(workOrderStatus)
+                ? "WORK_ORDER_READY"
+                : "WORK_ORDER_CANCELLED";
+        String eventType = "READY".equals(workOrderStatus)
+                ? "agent_control.work_order.ready"
+                : "agent_control.work_order.cancelled";
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("approvalId", approval.getApprovalId());
+        payload.put("approvalStatus", approvalStatus);
+        payload.put("decisionByUserId", operatorUserId);
+        payload.put("notificationType", notificationType);
+        payload.put("reasonCode", reasonCode);
+        payload.put("workOrderStatus", workOrderStatus);
+        require(mapper.insertAgentOutbox(UUID.randomUUID().toString(), tenantId, "role_work_order",
+                workOrder.getWorkOrderId(), eventType, JsonUtils.toJsonString(payload), now) == 1,
+                "failed to persist Agent Control approval notification");
     }
 
     private void requireRoleCode(String value) {

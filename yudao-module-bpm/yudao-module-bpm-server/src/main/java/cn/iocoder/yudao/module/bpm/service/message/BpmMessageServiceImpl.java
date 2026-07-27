@@ -7,6 +7,8 @@ import cn.iocoder.yudao.module.bpm.service.message.dto.BpmMessageSendWhenProcess
 import cn.iocoder.yudao.module.bpm.service.message.dto.BpmMessageSendWhenProcessInstanceRejectReqDTO;
 import cn.iocoder.yudao.module.bpm.service.message.dto.BpmMessageSendWhenTaskCreatedReqDTO;
 import cn.iocoder.yudao.module.bpm.service.message.dto.BpmMessageSendWhenTaskTimeoutReqDTO;
+import cn.iocoder.yudao.module.system.api.notify.NotifyMessageSendApi;
+import cn.iocoder.yudao.module.system.api.notify.dto.NotifySendSingleToUserReqDTO;
 import cn.iocoder.yudao.module.system.api.sms.SmsSendApi;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,8 @@ public class BpmMessageServiceImpl implements BpmMessageService {
 
     @Resource
     private SmsSendApi smsSendApi;
+    @Resource
+    private NotifyMessageSendApi notifyMessageSendApi;
 
     @Resource
     private WebProperties webProperties;
@@ -58,6 +62,16 @@ public class BpmMessageServiceImpl implements BpmMessageService {
         templateParams.put("taskName", reqDTO.getTaskName());
         templateParams.put("startUserNickname", reqDTO.getStartUserNickname());
         templateParams.put("detailUrl", getProcessInstanceDetailUrl(reqDTO.getProcessInstanceId()));
+        // 待办本身是审批权威；站内信负责让审批人及时发现待办。通知失败不能阻断任务创建。
+        try {
+            notifyMessageSendApi.sendSingleMessageToAdmin(new NotifySendSingleToUserReqDTO()
+                    .setUserId(reqDTO.getAssigneeUserId())
+                    .setTemplateCode(BpmMessageEnum.TASK_ASSIGNED.getSmsTemplateCode())
+                    .setTemplateParams(templateParams)).checkError();
+        } catch (RuntimeException exception) {
+            log.warn("[sendMessageWhenTaskAssigned][站内信发送失败，审批待办仍可办理 assigneeUserId={} processInstanceId={}]",
+                    reqDTO.getAssigneeUserId(), reqDTO.getProcessInstanceId(), exception);
+        }
         smsSendApi.sendSingleSmsToAdmin(BpmMessageConvert.INSTANCE.convert(reqDTO.getAssigneeUserId(),
                 BpmMessageEnum.TASK_ASSIGNED.getSmsTemplateCode(), templateParams)).checkError();
     }

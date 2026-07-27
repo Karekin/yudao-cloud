@@ -80,6 +80,7 @@
         <lombok.version>1.18.46</lombok.version>
         <spring.boot.version>3.5.15</spring.boot.version>
         <dubbo.version>3.3.6</dubbo.version>
+        <temporal.version>1.37.0</temporal.version>
         <mapstruct.version>1.6.3</mapstruct.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- Keep upstream BPM runnable by default. The CloudMold monolith

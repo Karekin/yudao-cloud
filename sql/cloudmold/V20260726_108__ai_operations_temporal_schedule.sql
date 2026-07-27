@@ -1,0 +1,43 @@
+CREATE TABLE IF NOT EXISTS cloudmold_ai_ops_temporal_schedule (
+    tenant_id BIGINT NOT NULL,
+    schedule_id VARCHAR(191) NOT NULL,
+    display_name VARCHAR(128) NOT NULL,
+    description VARCHAR(500) NOT NULL,
+    skill_id VARCHAR(191) NOT NULL,
+    skill_version VARCHAR(64) NOT NULL,
+    input_json MEDIUMTEXT NOT NULL,
+    interval_seconds BIGINT NOT NULL,
+    time_zone VARCHAR(64) NOT NULL,
+    overlap_policy VARCHAR(32) NOT NULL,
+    operator_user_id BIGINT NOT NULL,
+    operator_user_type INT NOT NULL,
+    role_code VARCHAR(64) NULL,
+    action_code VARCHAR(128) NULL,
+    status VARCHAR(32) NOT NULL,
+    temporal_namespace VARCHAR(128) NOT NULL,
+    temporal_task_queue VARCHAR(128) NOT NULL,
+    version BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (tenant_id, schedule_id),
+    KEY idx_ai_ops_temporal_schedule_status (tenant_id, status, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS cloudmold_ai_ops_temporal_run_binding (
+    tenant_id BIGINT NOT NULL,
+    temporal_run_id VARCHAR(64) NOT NULL,
+    temporal_workflow_id VARCHAR(191) NOT NULL,
+    schedule_id VARCHAR(191) NOT NULL,
+    work_order_id VARCHAR(64) NULL,
+    approval_id VARCHAR(64) NULL,
+    managed_run_id VARCHAR(64) NULL,
+    skill_task_id VARCHAR(64) NULL,
+    status VARCHAR(32) NOT NULL,
+    error_code VARCHAR(128) NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (tenant_id, temporal_run_id),
+    UNIQUE KEY uk_ai_ops_temporal_work_order (tenant_id, work_order_id),
+    KEY idx_ai_ops_temporal_run_schedule (tenant_id, schedule_id, created_at),
+    KEY idx_ai_ops_temporal_run_status (tenant_id, status, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

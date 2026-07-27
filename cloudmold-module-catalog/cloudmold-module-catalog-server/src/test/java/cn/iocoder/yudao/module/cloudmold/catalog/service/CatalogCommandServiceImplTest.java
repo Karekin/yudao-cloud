@@ -290,6 +290,44 @@ class CatalogCommandServiceImplTest {
     }
 
     @Test
+    void shouldTreatAlreadyAppliedLifecycleTargetAsSemanticReplay() {
+        prepareNewOperation();
+        when(lifecycleMapper.selectStyleForUpdate(1L, "11111111-1111-4111-8111-111111111111"))
+                .thenReturn(style().setStyleId("11111111-1111-4111-8111-111111111111")
+                        .setStatus(10).setVersion(2L));
+        when(operationMapper.markSucceeded(eq(101L), eq(1L), anyString(), any())).thenReturn(1);
+
+        CatalogLifecycleResult result = service.changeStatus(lifecycle(CatalogEntityType.STYLE,
+                "11111111-1111-4111-8111-111111111111", CatalogLifecycleAction.ACTIVATE, 1L));
+
+        assertThat(result.getPreviousStatus()).isEqualTo("ACTIVE");
+        assertThat(result.getCurrentStatus()).isEqualTo("ACTIVE");
+        assertThat(result.getAggregateVersion()).isEqualTo(2L);
+        assertThat(result.getDuplicate()).isTrue();
+        verify(lifecycleMapper, never()).updateStyle(anyLong(), anyString(), anyInt(), anyInt(), anyLong(), any());
+        verifyNoInteractions(outboxAppender);
+    }
+
+    @Test
+    void shouldTreatCompletedSpuMilestoneAsSemanticReplay() {
+        prepareNewOperation();
+        when(lifecycleMapper.selectSpuForUpdate(1L, "22222222-2222-4222-8222-222222222222"))
+                .thenReturn(spu().setSpuId("22222222-2222-4222-8222-222222222222")
+                        .setStatus(30).setVersion(4L));
+        when(operationMapper.markSucceeded(eq(101L), eq(1L), anyString(), any())).thenReturn(1);
+
+        CatalogLifecycleResult result = service.changeStatus(lifecycle(CatalogEntityType.SPU,
+                "22222222-2222-4222-8222-222222222222", CatalogLifecycleAction.SUBMIT, 1L));
+
+        assertThat(result.getPreviousStatus()).isEqualTo("ACTIVE");
+        assertThat(result.getCurrentStatus()).isEqualTo("ACTIVE");
+        assertThat(result.getAggregateVersion()).isEqualTo(4L);
+        assertThat(result.getDuplicate()).isTrue();
+        verify(lifecycleMapper, never()).updateSpu(anyLong(), anyString(), anyInt(), anyInt(), anyLong(), any());
+        verifyNoInteractions(outboxAppender);
+    }
+
+    @Test
     void shouldRejectStyleDeactivationWhileActiveSpuStillReferenceIt() {
         prepareNewOperation();
         when(lifecycleMapper.selectStyleForUpdate(1L, "11111111-1111-4111-8111-111111111111"))

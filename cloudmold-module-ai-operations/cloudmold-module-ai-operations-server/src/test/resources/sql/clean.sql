@@ -1,0 +1,7 @@
+DELETE FROM cloudmold_ai_ops_status_history;
+DELETE FROM cloudmold_ai_ops_outcome_feedback;
+DELETE FROM cloudmold_ai_ops_invocation_attempt;
+DELETE FROM cloudmold_ai_ops_workflow_run;
+DELETE FROM cloudmold_ai_ops_workflow_version;
+DELETE FROM cloudmold_ai_ops_workflow_definition;
+DELETE FROM cloudmold_ai_ops_application;

@@ -49,6 +49,8 @@ class AgentControlServiceImplTest {
         when(mapper.markOperationSucceeded(anyLong(), eq(17L), anyString(), anyString(), anyString(), any()))
                 .thenReturn(1);
         when(mapper.insertAuditEvent(any())).thenReturn(1);
+        when(mapper.insertAgentOutbox(any(), eq(17L), anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(1);
         when(mapper.selectRole(eq(17L), anyString())).thenAnswer(invocation -> activeRole(invocation.getArgument(1)));
         when(mapper.selectEffectiveActorRoleGrant(eq(17L), anyLong(), anyString(), any()))
                 .thenAnswer(invocation -> new ActorRoleGrant().setTenantId(17L)
@@ -112,6 +114,26 @@ class AgentControlServiceImplTest {
     }
 
     @Test
+    void returnsTheFrozenBusinessContextForOneApproval() {
+        AgentApprovalDetailView detail = AgentApprovalDetailView.builder()
+                .approvalId("approval-detail-1")
+                .workOrderId("wo-detail-1")
+                .title("创建并启用新品")
+                .roleCode("merchandising")
+                .actionCode("auto-listing-hourly-v2")
+                .riskLevel("R2")
+                .businessContextJson("{\"definitions\":[{\"spuCode\":\"YS-001\"}]}")
+                .build();
+        when(mapper.selectApprovalDetail(17L, "approval-detail-1")).thenReturn(detail);
+
+        AgentApprovalDetailView result = service.getApprovalDetail("approval-detail-1");
+
+        assertThat(result).isSameAs(detail);
+        assertThat(result.getBusinessContextJson()).contains("\"spuCode\":\"YS-001\"");
+        verify(mapper).selectApprovalDetail(17L, "approval-detail-1");
+    }
+
+    @Test
     void requiresDifferentAuthenticatedUserBeforeApprovalBoundWorkCanStart() {
         WorkOrder row = new WorkOrder().setWorkOrderId("wo-risk-1").setTenantId(17L)
                 .setRoleCode("buyer").setActionCode("purchase.commit")
@@ -153,6 +175,50 @@ class AgentControlServiceImplTest {
         verify(mapper, never()).selectEffectiveActorRoleGrant(eq(17L), eq(200L), eq("buyer"), any());
         verify(mapper).insertAuditEvent(argThat(event -> event.getActorUserId().equals(200L)
                 && event.getEventType().equals("agent_control.approval.decided")));
+        verify(mapper).insertAgentOutbox(anyString(), eq(17L), eq("role_work_order"), eq("wo-risk-1"),
+                eq("agent_control.work_order.ready"),
+                argThat(payload -> payload.contains("\"notificationType\":\"WORK_ORDER_READY\"")
+                        && payload.contains("\"approvalId\":\"approval-1\"")), any());
+    }
+
+    @Test
+    void rejectedApprovalCancelsTheWorkOrderAndEmitsNotification() {
+        WorkOrder row = new WorkOrder().setWorkOrderId("wo-risk-reject").setTenantId(17L)
+                .setRoleCode("buyer").setActionCode("purchase.commit")
+                .setRequesterUserId(100L).setApprovalId("approval-reject").setStatus("WAITING_APPROVAL")
+                .setVersion(2L);
+        RoleActionPolicy approvalPolicy = policy("buyer", "purchase.commit", true);
+        freeze(row, approvalPolicy, "{}");
+        workOrder.set(row);
+        Approval approvalRow = new Approval().setApprovalId("approval-reject").setTenantId(17L)
+                .setWorkOrderId("wo-risk-reject").setActionCode("purchase.commit").setRequesterUserId(100L)
+                .setScopeHash(scopeHash(row)).setStatus("PENDING").setVersion(1L);
+        approval.set(approvalRow);
+        when(mapper.selectActionPolicy(17L, "buyer", "purchase.commit")).thenReturn(approvalPolicy);
+        when(mapper.decideApproval(eq(17L), eq("approval-reject"), eq(1L), eq("REJECTED"), eq(200L),
+                eq("OUTSIDE_POLICY"), any()))
+                .thenAnswer(invocation -> {
+                    approvalRow.setStatus("REJECTED").setApproverUserId(200L).setVersion(2L);
+                    return 1;
+                });
+        when(mapper.transitionWorkOrder(eq(17L), eq("wo-risk-reject"), eq(2L), eq("WAITING_APPROVAL"),
+                eq("CANCELLED"), isNull(), isNull(), any()))
+                .thenAnswer(invocation -> {
+                    row.setStatus("CANCELLED").setVersion(3L);
+                    return 1;
+                });
+
+        AgentControlResult decided = service.execute(base(AgentControlOperation.DECIDE_APPROVAL, "approval-reject-1")
+                .approval(AgentControlCommand.ApprovalDefinition.builder().approvalId("approval-reject")
+                        .decision("REJECT").reasonCode("OUTSIDE_POLICY").approvalExpectedVersion(1L)
+                        .workOrderExpectedVersion(2L).build()).build(), 200L);
+
+        assertThat(decided.getStatus()).isEqualTo("REJECTED");
+        assertThat(row.getStatus()).isEqualTo("CANCELLED");
+        verify(mapper).insertAgentOutbox(anyString(), eq(17L), eq("role_work_order"), eq("wo-risk-reject"),
+                eq("agent_control.work_order.cancelled"),
+                argThat(payload -> payload.contains("\"notificationType\":\"WORK_ORDER_CANCELLED\"")
+                        && payload.contains("\"approvalId\":\"approval-reject\"")), any());
     }
 
     @Test

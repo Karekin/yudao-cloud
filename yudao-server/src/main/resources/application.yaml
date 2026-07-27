@@ -25,6 +25,29 @@ spring:
 # deployment profile; yudao-server keeps them on its classpath for discovery
 # but must never try to export duplicate providers.
 cloudmold:
+  ai-operations:
+    temporal:
+      enabled: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_ENABLED:false}
+      target: ${CLOUDMOLD_TEMPORAL_TARGET:127.0.0.1:7233}
+      namespace: ${CLOUDMOLD_TEMPORAL_NAMESPACE:default}
+      task-queue: ${CLOUDMOLD_TEMPORAL_TASK_QUEUE:cloudmold-ai-operations}
+      activity-timeout-seconds: ${CLOUDMOLD_TEMPORAL_ACTIVITY_TIMEOUT_SECONDS:60}
+      seed:
+        enabled: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_ENABLED:false}
+        tenant-ids: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_TENANTS:[]}
+        operator-user-id: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_OPERATOR_ID:1}
+        operator-user-type: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_OPERATOR_TYPE:1}
+        schedule-id: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_SCHEDULE_ID:auto-shelf-hourly}
+        display-name: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_DISPLAY_NAME:自动铺品（每小时）}
+        description: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_DESCRIPTION:基于 Temporal 的每小时自动铺品执行}
+        skill-id: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_SKILL_ID:skill.cloudmold.commerce.catalog-matrix.v1}
+        skill-version: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_SKILL_VERSION:1.0.0}
+        input-json: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_INPUT_JSON:{}}
+        interval-seconds: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_INTERVAL_SECONDS:3600}
+        time-zone: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_TIME_ZONE:Asia/Shanghai}
+        role-code: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_ROLE_CODE:}
+        action-code: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_ACTION_CODE:}
+        paused: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_PAUSED:false}
   rpc:
     external-service-interfaces:
       - cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskCommandApi
@@ -308,7 +331,7 @@ yudao:
     base-package: cn.iocoder.yudao
   web:
     admin-ui:
-      url: http://dashboard.yudao.iocoder.cn # Admin 管理后台 UI 的地址
+      url: ${YUDAO_WEB_ADMIN_UI_URL:http://dashboard.yudao.iocoder.cn} # Admin 管理后台 UI 的地址
   xss:
     enable: false
     exclude-urls: # 如下两个 url，仅仅是为了演示，去掉配置也没关系

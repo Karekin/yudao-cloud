@@ -22,8 +22,13 @@ public class AgentBusinessCardView implements Serializable {
     private String roleCode;
     private String fromRoleCode;
     private String actionCode;
+    private String scopeHash;
     private String status;
+    private String workflowStatus;
     private String riskLevel;
+    private Long requesterUserId;
+    private Long approverUserId;
+    private String processInstanceId;
     private String outcomeCode;
     private String summary;
     private Instant occurredAt;

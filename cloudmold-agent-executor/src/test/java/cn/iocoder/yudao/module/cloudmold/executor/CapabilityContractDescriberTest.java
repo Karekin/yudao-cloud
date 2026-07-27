@@ -54,4 +54,23 @@ class CapabilityContractDescriberTest {
         assertThat(contract.resultSchema().path("properties").path("promiseKey").path("type").asText())
                 .isEqualTo("string");
     }
+
+    @Test
+    void shouldExposeDeliverySnapshotFieldsForListingOrderPlacement() {
+        CloudMoldCapabilityCatalog catalog = new CloudMoldCapabilityCatalog(
+                new cn.iocoder.yudao.module.cloudmold.rpc.CloudMoldRpcProperties());
+        CapabilityContractDescriber describer = new CapabilityContractDescriber(catalog, objectMapper);
+
+        CapabilityContract contract = describer.describe(
+                "capability.cloudmold.order.order-command.execute.v1");
+
+        ObjectNode commandProperties = (ObjectNode) contract.argumentsSchema()
+                .path("properties").path("command").path("properties");
+        assertThat(commandProperties.path("addressRef").path("type").asText())
+                .isEqualTo("string");
+        assertThat(commandProperties.path("addressSnapshotVersion").path("type").asText())
+                .isEqualTo("integer");
+        assertThat(commandProperties.path("destinationRegionCode").path("type").asText())
+                .isEqualTo("string");
+    }
 }

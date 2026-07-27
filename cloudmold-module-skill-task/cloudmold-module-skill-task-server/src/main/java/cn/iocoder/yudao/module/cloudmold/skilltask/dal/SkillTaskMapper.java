@@ -215,6 +215,85 @@ public interface SkillTaskMapper {
     List<Task> selectChildren(@Param("tenantId") Long tenantId, @Param("parentTaskId") String parentTaskId);
 
     @Select("""
+            <script>
+            SELECT COUNT(*)
+            FROM cloudmold_skill_task_instance
+            WHERE tenant_id=#{tenantId}
+            <if test="taskId != null">AND task_id=#{taskId}</if>
+            <if test="runId != null">AND run_id=#{runId}</if>
+            <if test="skillId != null">AND skill_id=#{skillId}</if>
+            <if test="status != null">AND status=#{status}</if>
+            <if test="riskLevel != null">AND risk_level=#{riskLevel}</if>
+            </script>
+            """)
+    long countManagedRunPage(@Param("tenantId") Long tenantId, @Param("taskId") String taskId,
+                             @Param("runId") String runId, @Param("skillId") String skillId,
+                             @Param("status") String status, @Param("riskLevel") String riskLevel);
+
+    @Select("""
+            <script>
+            SELECT tenant_id,
+                   task_id,
+                   run_id,
+                   skill_id,
+                   skill_version,
+                   input_json,
+                   input_sha256,
+                   definition_sha256,
+                   definition_closure_sha256,
+                   terminal_result_sha256,
+                   risk_level,
+                   parent_task_id,
+                   parent_step_code,
+                   status,
+                   current_step_code,
+                   attempt_count,
+                   max_attempts,
+                   last_error_code,
+                   version,
+                   started_at,
+                   completed_at,
+                   created_at,
+                   updated_at
+            FROM cloudmold_skill_task_instance
+            WHERE tenant_id=#{tenantId}
+            <if test="taskId != null">AND task_id=#{taskId}</if>
+            <if test="runId != null">AND run_id=#{runId}</if>
+            <if test="skillId != null">AND skill_id=#{skillId}</if>
+            <if test="status != null">AND status=#{status}</if>
+            <if test="riskLevel != null">AND risk_level=#{riskLevel}</if>
+            ORDER BY created_at DESC, task_id DESC
+            LIMIT #{limit} OFFSET #{offset}
+            </script>
+            """)
+    List<Task> selectManagedRunPage(@Param("tenantId") Long tenantId,
+                                    @Param("taskId") String taskId,
+                                    @Param("runId") String runId,
+                                    @Param("skillId") String skillId,
+                                    @Param("status") String status,
+                                    @Param("riskLevel") String riskLevel,
+                                    @Param("offset") long offset,
+                                    @Param("limit") int limit);
+
+    @Select("""
+            <script>
+            SELECT tenant_id, task_id, step_code, step_order, step_kind, capability_id, operation_type,
+                   child_skill_id, child_skill_version, child_task_id, request_json, result_json,
+                   request_sha256, result_sha256, status, attempt_count, last_error_code,
+                   started_at, completed_at, created_at, updated_at
+            FROM cloudmold_skill_task_step
+            WHERE tenant_id=#{tenantId}
+              AND task_id IN
+              <foreach collection="taskIds" item="taskId" open="(" separator="," close=")">
+                #{taskId}
+              </foreach>
+            ORDER BY task_id, step_order
+            </script>
+            """)
+    List<Step> selectStepsForTasks(@Param("tenantId") Long tenantId,
+                                   @Param("taskIds") List<String> taskIds);
+
+    @Select("""
             SELECT * FROM cloudmold_skill_task_step
             WHERE tenant_id=#{tenantId} AND task_id=#{taskId} AND step_code=#{stepCode}
             """)

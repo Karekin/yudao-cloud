@@ -159,7 +159,7 @@ class SkillTaskDefinitionRegistryTest {
         workspaceRegistry.reload();
 
         SkillTaskDefinition definition = workspaceRegistry.require(
-                "skill.cloudmold.commerce.full-chain-hsf.v1", "1.2.0");
+                "skill.cloudmold.commerce.full-chain-hsf.v1", "1.2.1");
         assertThat(definition.getRiskLevel()).isEqualTo("R3");
         assertThat(definition.getSteps()).hasSize(10);
         assertThat(workspaceRegistry.all()).extracting(SkillTaskDefinition::getSkillId)

@@ -8,6 +8,7 @@ import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentContro
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +34,7 @@ public class AgentApprovalWorkflowService implements AgentApprovalWorkflowRegist
     private final AgentApprovalWorkflowProperties properties;
     private final Clock clock;
 
+    @Autowired
     public AgentApprovalWorkflowService(AgentControlStoreMapper mapper, AgentApprovalWorkflowAdapter adapter,
                                         AgentApprovalWorkflowProperties properties) {
         this(mapper, adapter, properties, Clock.systemUTC());

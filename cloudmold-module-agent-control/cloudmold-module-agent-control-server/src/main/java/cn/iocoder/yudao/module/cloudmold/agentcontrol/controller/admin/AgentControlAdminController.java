@@ -71,6 +71,13 @@ public class AgentControlAdminController {
         return success(queryApi.getApproval(approvalId));
     }
 
+    @GetMapping("/approvals/{approvalId}/detail")
+    @Operation(summary = "查询 Agent 审批冻结的业务事项与影响范围")
+    @PreAuthorize("@ss.hasPermission('cloudmold:agent-control:query')")
+    public CommonResult<AgentApprovalDetailView> getApprovalDetail(@PathVariable String approvalId) {
+        return success(queryApi.getApprovalDetail(approvalId));
+    }
+
     @GetMapping("/business-results/{resultId}")
     @PreAuthorize("@ss.hasPermission('cloudmold:agent-control:query')")
     public CommonResult<AgentControlResult> getBusinessResult(@PathVariable String resultId) {

@@ -2,9 +2,12 @@
 <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
              xmlns:flowable="http://flowable.org/bpmn"
+             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
              targetNamespace="https://cloudmold.cn/bpmn/agent-approval">
   <process id="cloudmold-agent-approval-v1"
-           name="CloudMold Agent Approval v1"
+           name="Agent 高风险动作审批"
            isExecutable="true">
     <documentation>CloudMold fixed approval flow for explicit, pre-granted human approvers.</documentation>
 
@@ -27,4 +30,38 @@
 
     <endEvent id="approved_end" name="审批结束"/>
   </process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_cloudmold_agent_approval_v1">
+    <bpmndi:BPMNPlane id="BPMNPlane_cloudmold_agent_approval_v1"
+                      bpmnElement="cloudmold-agent-approval-v1">
+      <bpmndi:BPMNShape id="BPMNShape_start_event"
+                        bpmnElement="start_event">
+        <dc:Bounds x="160" y="182" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="142" y="225" width="72" height="22"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BPMNShape_approval_review"
+                        bpmnElement="approval_review">
+        <dc:Bounds x="280" y="160" width="140" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BPMNShape_approved_end"
+                        bpmnElement="approved_end">
+        <dc:Bounds x="510" y="182" width="36" height="36"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="492" y="225" width="72" height="22"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_start_to_review"
+                       bpmnElement="flow_start_to_review">
+        <di:waypoint x="196" y="200"/>
+        <di:waypoint x="280" y="200"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_review_to_end"
+                       bpmnElement="flow_review_to_end">
+        <di:waypoint x="420" y="200"/>
+        <di:waypoint x="510" y="200"/>
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </definitions>

@@ -10,6 +10,11 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskStepView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskSubmitCommand;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskTerminalProofView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskView;
+import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskDetailView;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskRunPageRequest;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskRunView;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskMissionLeaseFencePort;
@@ -23,6 +28,7 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Step;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Task;
 import cn.iocoder.yudao.module.cloudmold.skilltask.definition.SkillTaskDefinition;
 import cn.iocoder.yudao.module.cloudmold.skilltask.definition.SkillTaskDefinitionRegistry;
+import cn.iocoder.yudao.module.cloudmold.skilltask.service.query.ManagedSkillTaskQueryService;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -46,25 +52,29 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
     private final SkillTaskMapper mapper;
     private final SkillTaskDefinitionRegistry definitions;
     private final SkillTaskJson json;
+    private final ManagedSkillTaskQueryService managedSkillTaskQueryService;
     private final SkillTaskApprovalVerifier approvalVerifier;
     private final SkillTaskMissionLeaseFencePort missionLeaseFenceApi;
     private final Clock clock;
 
     @Autowired
     public SkillTaskApiService(SkillTaskMapper mapper, SkillTaskDefinitionRegistry definitions,
-                               SkillTaskJson json, SkillTaskApprovalVerifier approvalVerifier,
+                               SkillTaskJson json, ManagedSkillTaskQueryService managedSkillTaskQueryService,
+                               SkillTaskApprovalVerifier approvalVerifier,
                                Optional<SkillTaskMissionLeaseFencePort> missionLeaseFenceApi, Clock clock) {
         this.mapper = mapper;
         this.definitions = definitions;
         this.json = json;
+        this.managedSkillTaskQueryService = managedSkillTaskQueryService;
         this.approvalVerifier = approvalVerifier;
         this.missionLeaseFenceApi = missionLeaseFenceApi.orElse(null);
         this.clock = clock;
     }
 
     public SkillTaskApiService(SkillTaskMapper mapper, SkillTaskDefinitionRegistry definitions,
-                               SkillTaskJson json, SkillTaskApprovalVerifier approvalVerifier, Clock clock) {
-        this(mapper, definitions, json, approvalVerifier, Optional.empty(), clock);
+                               SkillTaskJson json, ManagedSkillTaskQueryService managedSkillTaskQueryService,
+                               SkillTaskApprovalVerifier approvalVerifier, Clock clock) {
+        this(mapper, definitions, json, managedSkillTaskQueryService, approvalVerifier, Optional.empty(), clock);
     }
 
     @Override
@@ -202,6 +212,22 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
                 .riskLevel(task.getRiskLevel()).status(task.getStatus())
                 .terminalResultSha256(task.getTerminalResultSha256()).taskVersion(task.getVersion())
                 .completedAt(toInstant(task.getCompletedAt())).build();
+    }
+
+    @Override
+    public List<ManagedSkillTaskWorkflowView> listManagedWorkflows() {
+        return managedSkillTaskQueryService.listManagedWorkflows();
+    }
+
+    @Override
+    public PageResult<ManagedSkillTaskRunView> pageManagedRuns(ManagedSkillTaskRunPageRequest request) {
+        Objects.requireNonNull(request, "request");
+        return managedSkillTaskQueryService.getManagedRunPage(request);
+    }
+
+    @Override
+    public ManagedSkillTaskDetailView getManagedRun(String taskId) {
+        return managedSkillTaskQueryService.getManagedRun(taskId);
     }
 
     /**

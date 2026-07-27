@@ -17,6 +17,7 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.PermitCo
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Task;
 import cn.iocoder.yudao.module.cloudmold.skilltask.definition.SkillTaskDefinition;
 import cn.iocoder.yudao.module.cloudmold.skilltask.definition.SkillTaskDefinitionRegistry;
+import cn.iocoder.yudao.module.cloudmold.skilltask.service.query.ManagedSkillTaskQueryService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -46,11 +47,12 @@ class SkillTaskApiServiceTest {
     private final SkillTaskMapper mapper = mock(SkillTaskMapper.class);
     private final SkillTaskDefinitionRegistry definitions = mock(SkillTaskDefinitionRegistry.class);
     private final SkillTaskJson json = new SkillTaskJson(new ObjectMapper(), new SkillTaskProperties());
+    private final ManagedSkillTaskQueryService managedSkillTaskQueryService = mock(ManagedSkillTaskQueryService.class);
     private final SkillTaskApprovalVerifier approvalVerifier = mock(SkillTaskApprovalVerifier.class);
     private final SkillTaskMissionLeaseFencePort missionLeaseFenceApi = mock(SkillTaskMissionLeaseFencePort.class);
     private final Clock clock = Clock.fixed(Instant.parse("2026-07-18T12:00:00Z"), ZoneOffset.UTC);
     private final SkillTaskApiService service = new SkillTaskApiService(mapper, definitions, json,
-            approvalVerifier, Optional.of(missionLeaseFenceApi), clock);
+            managedSkillTaskQueryService, approvalVerifier, Optional.of(missionLeaseFenceApi), clock);
 
     @AfterEach
     void clearContext() {

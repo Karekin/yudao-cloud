@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql;
 
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.ActorRoleGrantView;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentApprovalDetailView;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentBusinessCardView;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.*;
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
@@ -11,6 +12,28 @@ import java.util.List;
 
 @Mapper
 public interface AgentControlStoreMapper {
+
+    @Select("""
+            SELECT a.approval_id,a.work_order_id,w.title,w.role_code,w.action_code,w.risk_level,
+                   a.requester_user_id,b.approver_user_id,a.scope_hash,a.status,
+                   CASE
+                     WHEN a.status='APPROVED' AND b.status='BPM_APPROVED_PENDING_ATTESTATION'
+                       THEN 'APPROVED_ATTESTED'
+                     WHEN a.status='REJECTED' AND b.status='BPM_REJECTED'
+                       THEN 'REJECTED_ATTESTED'
+                     ELSE b.status
+                   END AS workflow_status,
+                   b.process_instance_id,a.reason_code,w.skill_id,w.skill_version,
+                   w.business_context_json,a.requested_at
+            FROM cloudmold_agent_approval a
+            JOIN cloudmold_agent_work_order w
+              ON w.tenant_id=a.tenant_id AND w.work_order_id=a.work_order_id
+            LEFT JOIN cloudmold_agent_approval_workflow_binding b
+              ON b.tenant_id=a.tenant_id AND b.approval_id=a.approval_id
+            WHERE a.tenant_id=#{tenantId} AND a.approval_id=#{approvalId}
+            """)
+    AgentApprovalDetailView selectApprovalDetail(@Param("tenantId") Long tenantId,
+                                                 @Param("approvalId") String approvalId);
 
     @Select("""
             SELECT id AS purchase_in_id,tenant_id,no AS purchase_in_no,status,supplier_id,order_id,total_count,
@@ -50,19 +73,31 @@ public interface AgentControlStoreMapper {
     @Select("""
             <script>
             SELECT card_type,card_id,mission_id,work_order_id,title,role_code,from_role_code,action_code,
-                   status,risk_level,outcome_code,summary,occurred_at
+                   scope_hash,status,workflow_status,risk_level,requester_user_id,approver_user_id,
+                   process_instance_id,outcome_code,summary,occurred_at
             FROM (
               SELECT 'APPROVAL' AS card_type,a.approval_id AS card_id,w.mission_id,w.work_order_id,w.title,
-                     w.role_code,NULL AS from_role_code,w.action_code,a.status,w.risk_level,
+                     w.role_code,NULL AS from_role_code,w.action_code,a.scope_hash,a.status,
+                     CASE
+                       WHEN a.status='APPROVED' AND b.status='BPM_APPROVED_PENDING_ATTESTATION'
+                         THEN 'APPROVED_ATTESTED'
+                       WHEN a.status='REJECTED' AND b.status='BPM_REJECTED'
+                         THEN 'REJECTED_ATTESTED'
+                       ELSE b.status
+                     END AS workflow_status,w.risk_level,a.requester_user_id,
+                     b.approver_user_id,b.process_instance_id,
                      NULL AS outcome_code,a.reason_code AS summary,a.requested_at AS occurred_at
               FROM cloudmold_agent_approval a
               JOIN cloudmold_agent_work_order w
                 ON w.tenant_id=a.tenant_id AND w.work_order_id=a.work_order_id
+              LEFT JOIN cloudmold_agent_approval_workflow_binding b
+                ON b.tenant_id=a.tenant_id AND b.approval_id=a.approval_id
               WHERE a.tenant_id=#{tenantId}
               UNION ALL
               SELECT 'HANDOFF',h.handoff_id,w.mission_id,
                      COALESCE(h.target_work_order_id,h.work_order_id),w.title,h.to_role_code,
-                     h.from_role_code,h.to_action_code,h.status,w.risk_level,NULL,h.summary,h.requested_at
+                     h.from_role_code,h.to_action_code,NULL,h.status,NULL,w.risk_level,
+                     NULL,NULL,NULL,NULL,h.summary,h.requested_at
               FROM cloudmold_agent_role_handoff h
               JOIN cloudmold_agent_work_order w
                 ON w.tenant_id=h.tenant_id
@@ -70,7 +105,7 @@ public interface AgentControlStoreMapper {
               WHERE h.tenant_id=#{tenantId}
               UNION ALL
               SELECT 'RESULT',r.result_id,w.mission_id,w.work_order_id,w.title,w.role_code,NULL,w.action_code,
-                     w.status,w.risk_level,r.outcome_code,r.summary,r.recorded_at
+                     NULL,w.status,NULL,w.risk_level,NULL,NULL,NULL,r.outcome_code,r.summary,r.recorded_at
               FROM cloudmold_agent_business_result r
               JOIN cloudmold_agent_work_order w
                 ON w.tenant_id=r.tenant_id AND w.work_order_id=r.work_order_id
@@ -499,7 +534,7 @@ public interface AgentControlStoreMapper {
             FROM cloudmold_agent_approval_workflow_binding b
             JOIN cloudmold_agent_approval_authority_grant g
               ON g.tenant_id=b.tenant_id AND g.approval_id=b.approval_id
-             AND g.status='ACTIVE' AND g.valid_from<=CURRENT_TIMESTAMP(6) AND g.valid_until>CURRENT_TIMESTAMP(6)
+             AND g.status='ACTIVE' AND g.valid_from<=UTC_TIMESTAMP(6) AND g.valid_until>UTC_TIMESTAMP(6)
             WHERE b.status='START_REQUESTED' AND b.requester_user_id<>g.approver_user_id
             ORDER BY requested_at,tenant_id,approval_id,g.approver_user_id
             LIMIT #{limit}

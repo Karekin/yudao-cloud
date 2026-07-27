@@ -236,6 +236,17 @@ public class CatalogCommandServiceImpl implements CatalogCommandApi {
         }
 
         LifecycleEntity entity = loadForUpdate(tenantId, command.entityType(), command.entityId());
+        if (actionAlreadySatisfied(command.entityType(), command.action(), entity.status())) {
+            CatalogLifecycleResult replay = CatalogLifecycleResult.builder()
+                    .operationId(operationId).entityType(command.entityType()).entityId(entity.id())
+                    .businessCode(entity.businessCode())
+                    .previousStatus(statusName(command.entityType(), entity.status()))
+                    .currentStatus(statusName(command.entityType(), entity.status()))
+                    .aggregateVersion(entity.version()).duplicate(true).build();
+            require(operationMapper.markSucceeded(operationId, tenantId, JsonUtils.toJsonString(replay), now) == 1,
+                    "Catalog lifecycle operation completion conflict");
+            return replay;
+        }
         require(entity.version().equals(command.expectedVersion()), "Catalog expectedVersion conflict");
         int targetStatus = targetStatus(command.entityType(), entity.status(), command.action());
         validateLifecyclePreconditions(tenantId, command, entity, targetStatus);
@@ -402,6 +413,27 @@ public class CatalogCommandServiceImpl implements CatalogCommandApi {
         }
         throw new IllegalArgumentException("illegal Catalog lifecycle transition: " + type + " "
                 + statusName(type, current) + " -> " + action);
+    }
+
+    private static boolean actionAlreadySatisfied(CatalogEntityType type, CatalogLifecycleAction action,
+                                                  int currentStatus) {
+        if (type == CatalogEntityType.SPU) {
+            return switch (action) {
+                case SUBMIT -> Set.of(10, 20, 30, 40).contains(currentStatus);
+                case APPROVE -> Set.of(20, 30, 40).contains(currentStatus);
+                case REJECT -> currentStatus == 50;
+                case RESET_DRAFT -> currentStatus == 0;
+                case ACTIVATE -> currentStatus == 30;
+                case DEACTIVATE -> currentStatus == 40;
+                case ARCHIVE -> currentStatus == 90;
+            };
+        }
+        return switch (action) {
+            case ACTIVATE -> currentStatus == 10;
+            case DEACTIVATE -> currentStatus == 20;
+            case ARCHIVE -> currentStatus == 90;
+            default -> false;
+        };
     }
 
     private static String statusName(CatalogEntityType type, int status) {

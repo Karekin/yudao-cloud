@@ -7,6 +7,7 @@ public interface AgentControlQueryApi {
     AgentControlResult getWorkOrder(String workOrderId);
     AgentControlResult getHandoff(String handoffId);
     AgentControlResult getApproval(String approvalId);
+    AgentApprovalDetailView getApprovalDetail(String approvalId);
     AgentControlResult getBusinessResult(String resultId);
     List<AgentBusinessCardView> listBusinessCards(String roleCode, String cardType, String status, Integer limit);
 

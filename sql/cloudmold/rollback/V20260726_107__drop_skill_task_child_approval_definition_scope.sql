@@ -1,0 +1,3 @@
+ALTER TABLE cloudmold_skill_task_instance
+  DROP CONSTRAINT chk_skill_task_approval_scope_definition_closure_sha,
+  DROP COLUMN approval_scope_definition_closure_sha256;

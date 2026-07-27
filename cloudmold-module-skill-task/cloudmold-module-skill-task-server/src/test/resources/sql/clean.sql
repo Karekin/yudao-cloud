@@ -1,0 +1,2 @@
+DELETE FROM cloudmold_skill_task_step;
+DELETE FROM cloudmold_skill_task_instance;
