@@ -1,0 +1,14 @@
+ALTER TABLE cloudmold_replenishment_conversion
+    DROP CHECK ck_replenishment_conversion_next_waiting_event_label,
+    DROP CHECK ck_replenishment_conversion_next_waiting_event_code,
+    DROP CHECK ck_replenishment_conversion_document_status,
+    DROP CHECK ck_replenishment_conversion_external_document_id,
+    DROP CHECK ck_replenishment_conversion_document_type,
+    DROP CHECK ck_replenishment_conversion_source_system,
+    DROP COLUMN next_waiting_event_label,
+    DROP COLUMN next_waiting_event_code,
+    DROP COLUMN document_status,
+    DROP COLUMN external_document_no,
+    DROP COLUMN external_document_id,
+    DROP COLUMN document_type,
+    DROP COLUMN source_system;

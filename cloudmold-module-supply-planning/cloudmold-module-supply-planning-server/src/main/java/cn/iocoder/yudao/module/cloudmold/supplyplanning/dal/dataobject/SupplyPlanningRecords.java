@@ -211,6 +211,13 @@ public final class SupplyPlanningRecords {
         private String recommendationId;
         private String targetType;
         private String targetReference;
+        private String sourceSystem;
+        private String documentType;
+        private String externalDocumentId;
+        private String externalDocumentNo;
+        private String documentStatus;
+        private String nextWaitingEventCode;
+        private String nextWaitingEventLabel;
         private BigDecimal requestedQuantity;
         private String uomCode;
         private String status;

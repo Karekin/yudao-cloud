@@ -2,6 +2,8 @@ package cn.iocoder.yudao.module.cloudmold.supplyplanning.controller.admin;
 
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.ReplenishmentBusinessStageView;
+import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.ReplenishmentExecutionView;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningCommand;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningCommandApi;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningResult;
@@ -44,5 +46,21 @@ public class SupplyPlanningAdminController {
     public CommonResult<PageResult<SupplyPlanningWorkItem>> getPage(
             @Valid SupplyPlanningPageReqVO request) {
         return success(queryService.getPage(request));
+    }
+
+    @GetMapping("/replenishment/{recommendationId}/execution")
+    @Operation(summary = "查询补货转换结果与下一等待事件")
+    @PreAuthorize("@ss.hasPermission('cloudmold:supply-planning:query')")
+    public CommonResult<ReplenishmentExecutionView> getReplenishmentExecution(
+            @PathVariable("recommendationId") String recommendationId) {
+        return success(queryService.requireReplenishmentExecution(recommendationId));
+    }
+
+    @GetMapping("/replenishment/{recommendationId}/business-stage")
+    @Operation(summary = "查询补货业务阶段聚合状态")
+    @PreAuthorize("@ss.hasPermission('cloudmold:supply-planning:query')")
+    public CommonResult<ReplenishmentBusinessStageView> getReplenishmentBusinessStage(
+            @PathVariable("recommendationId") String recommendationId) {
+        return success(queryService.requireReplenishmentBusinessStage(recommendationId));
     }
 }

@@ -39,6 +39,8 @@ public interface ReplenishmentExecutionPort {
             String documentType,
             String externalDocumentId,
             String externalDocumentNo,
-            String status) {
+            String status,
+            String nextWaitingEventCode,
+            String nextWaitingEventLabel) {
     }
 }

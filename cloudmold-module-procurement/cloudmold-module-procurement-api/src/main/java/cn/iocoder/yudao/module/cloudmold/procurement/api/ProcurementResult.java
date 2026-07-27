@@ -1,4 +1,4 @@
-package cn.iocoder.yudao.module.cloudmold.supplyplanning.api;
+package cn.iocoder.yudao.module.cloudmold.procurement.api;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -9,22 +9,18 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class SupplyPlanningResult {
+public class ProcurementResult {
     private Long operationId;
     private boolean duplicate;
     private String aggregateType;
     private String aggregateId;
     private Long aggregateVersion;
     private String status;
-    private String businessObjectType;
-    private String businessObjectId;
-    private String businessObjectNo;
-    private String businessStatus;
+    private String orderCode;
+    private String sourceBusinessRef;
     private String projectionSourceSystem;
     private String projectionDocumentType;
     private String projectionExternalDocumentId;
     private String projectionExternalDocumentNo;
     private String projectionDocumentStatus;
-    private String nextWaitingEventCode;
-    private String nextWaitingEventLabel;
 }

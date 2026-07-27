@@ -5,15 +5,15 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>cn.iocoder.cloud</groupId>
-        <artifactId>cloudmold-module-supply-planning</artifactId>
+        <artifactId>cloudmold-module-procurement</artifactId>
         <version>${revision}</version>
     </parent>
-    <artifactId>cloudmold-module-supply-planning-server</artifactId>
+    <artifactId>cloudmold-module-procurement-server</artifactId>
     <name>${project.artifactId}</name>
     <dependencies>
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
-            <artifactId>cloudmold-module-supply-planning-api</artifactId>
+            <artifactId>cloudmold-module-procurement-api</artifactId>
             <version>${revision}</version>
         </dependency>
         <dependency>
@@ -24,16 +24,6 @@
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
             <artifactId>cloudmold-module-identity-api</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>cn.iocoder.cloud</groupId>
-            <artifactId>cloudmold-module-procurement-api</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>cn.iocoder.cloud</groupId>
-            <artifactId>cloudmold-integration-yudao-api</artifactId>
             <version>${revision}</version>
         </dependency>
         <dependency>

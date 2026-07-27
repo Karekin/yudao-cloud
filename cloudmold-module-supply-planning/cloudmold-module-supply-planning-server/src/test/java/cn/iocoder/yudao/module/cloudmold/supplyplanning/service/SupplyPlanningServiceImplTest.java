@@ -2,6 +2,8 @@ package cn.iocoder.yudao.module.cloudmold.supplyplanning.service;
 
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommandApi;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementResult;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.*;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.dataobject.SupplyPlanningRecords.*;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.mysql.SupplyPlanningMapper;
@@ -25,8 +27,10 @@ class SupplyPlanningServiceImplTest {
             mock(SupplyPlanningActorPrincipalPort.class);
     private final ReplenishmentExecutionPort replenishmentExecutionPort =
             mock(ReplenishmentExecutionPort.class);
+    private final ProcurementCommandApi procurementCommandApi =
+            mock(ProcurementCommandApi.class);
     private final SupplyPlanningServiceImpl service = new SupplyPlanningServiceImpl(
-            mapper, outbox, actorPrincipalPort, replenishmentExecutionPort);
+            mapper, outbox, actorPrincipalPort, replenishmentExecutionPort, procurementCommandApi);
     private final AtomicReference<String> requestHash = new AtomicReference<>();
     private final AtomicReference<String> attemptToken = new AtomicReference<>();
 
@@ -160,7 +164,21 @@ class SupplyPlanningServiceImplTest {
                         .setStatus("APPROVED").setVersion(2L));
         when(replenishmentExecutionPort.createDraft(any())).thenReturn(
                 new ReplenishmentExecutionPort.ExecutionResult(
-                        "YUDAO_ERP", "PURCHASE_ORDER", "781", "PO-20260725-01", "PREPARE"));
+                        "YUDAO_ERP", "PURCHASE_ORDER", "781", "PO-20260725-01", "PREPARE",
+                        "SUPPLIER_CONFIRMATION", "等待供应商确认采购单"));
+        when(procurementCommandApi.execute(any(), eq(ACTOR))).thenReturn(
+                ProcurementResult.builder()
+                        .aggregateType("procurement_order")
+                        .aggregateId("procurement-order:conversion-01")
+                        .aggregateVersion(1L)
+                        .status("CREATED")
+                        .orderCode("PO-CM-CONVERSION01")
+                        .projectionSourceSystem("YUDAO_ERP")
+                        .projectionDocumentType("PURCHASE_ORDER")
+                        .projectionExternalDocumentId("781")
+                        .projectionExternalDocumentNo("PO-20260725-01")
+                        .projectionDocumentStatus("PREPARE")
+                        .build());
         when(mapper.insertReplenishmentConversion(any())).thenReturn(1);
         when(mapper.convertReplenishment(eq(17L), eq("recommendation-01"), eq(2L), any()))
                 .thenReturn(1);
@@ -179,12 +197,34 @@ class SupplyPlanningServiceImplTest {
                 .build());
 
         assertThat(result.getStatus()).isEqualTo("CONVERTED");
+        assertThat(result.getBusinessObjectType()).isEqualTo("procurement_order");
+        assertThat(result.getBusinessObjectId()).isEqualTo("procurement-order:conversion-01");
+        assertThat(result.getBusinessObjectNo()).isEqualTo("PO-CM-CONVERSION01");
+        assertThat(result.getBusinessStatus()).isEqualTo("CREATED");
+        assertThat(result.getProjectionSourceSystem()).isEqualTo("YUDAO_ERP");
+        assertThat(result.getProjectionDocumentType()).isEqualTo("PURCHASE_ORDER");
+        assertThat(result.getProjectionExternalDocumentId()).isEqualTo("781");
+        assertThat(result.getProjectionExternalDocumentNo()).isEqualTo("PO-20260725-01");
+        assertThat(result.getProjectionDocumentStatus()).isEqualTo("PREPARE");
+        assertThat(result.getNextWaitingEventCode()).isEqualTo("SUPPLIER_CONFIRMATION");
+        assertThat(result.getNextWaitingEventLabel()).isEqualTo("等待供应商确认采购单");
         verify(replenishmentExecutionPort).createDraft(argThat(command ->
                 command.targetType().equals("PURCHASE_REQUEST")
                         && command.quantity().compareTo(new BigDecimal("30")) == 0
                         && command.mappingEvidenceSha256().equals("c".repeat(64))));
+        verify(procurementCommandApi).execute(argThat(command ->
+                command.getOperation() == cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementOperation.CREATE_PURCHASE_ORDER
+                        && command.getPurchaseOrder().getSourceBusinessRef().equals("recommendation-01")
+                        && command.getPurchaseOrder().getProjection().getExternalDocumentId().equals("781")),
+                eq(ACTOR));
         verify(mapper).insertReplenishmentConversion(argThat(row ->
                 row.getTargetReference().equals("YUDAO_ERP:PURCHASE_ORDER:781")
+                        && row.getSourceSystem().equals("YUDAO_ERP")
+                        && row.getDocumentType().equals("PURCHASE_ORDER")
+                        && row.getExternalDocumentId().equals("781")
+                        && row.getExternalDocumentNo().equals("PO-20260725-01")
+                        && row.getDocumentStatus().equals("PREPARE")
+                        && row.getNextWaitingEventCode().equals("SUPPLIER_CONFIRMATION")
                         && row.getStatus().equals("CREATED")));
     }
 
@@ -274,6 +314,7 @@ class SupplyPlanningServiceImplTest {
         verify(mapper, never()).selectPlanScenario(
                 anyLong(), anyString(), anyLong(), anyString(), any());
         verifyNoInteractions(replenishmentExecutionPort);
+        verifyNoInteractions(procurementCommandApi);
         verify(outbox).append(argThat(event ->
                 event.getEventType().equals("supply_planning.plan_scenario.recommended")
                         && event.getAggregateId().equals("robust-recommendation-01")));

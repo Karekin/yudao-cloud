@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.mysql;
 
+import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.ReplenishmentExecutionView;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.dataobject.SupplyPlanningRecords.*;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.service.query.SupplyPlanningWorkItem;
 import org.apache.ibatis.annotations.*;
@@ -315,13 +316,44 @@ public interface SupplyPlanningMapper {
 
     @Insert("""
             INSERT INTO cloudmold_replenishment_conversion
-              (conversion_id,tenant_id,recommendation_id,target_type,target_reference,requested_quantity,
-               uom_code,status,converted_by_principal_id,version,converted_at,created_at)
+              (conversion_id,tenant_id,recommendation_id,target_type,target_reference,source_system,
+               document_type,external_document_id,external_document_no,document_status,
+               next_waiting_event_code,next_waiting_event_label,requested_quantity,uom_code,status,
+               converted_by_principal_id,version,converted_at,created_at)
             VALUES (#{conversionId},#{tenantId},#{recommendationId},#{targetType},#{targetReference},
+                    #{sourceSystem},#{documentType},#{externalDocumentId},#{externalDocumentNo},
+                    #{documentStatus},#{nextWaitingEventCode},#{nextWaitingEventLabel},
                     #{requestedQuantity},#{uomCode},#{status},#{convertedByPrincipalId},#{version},
                     #{convertedAt},#{createdAt})
             """)
     int insertReplenishmentConversion(ReplenishmentConversion value);
+
+    @Select("""
+            SELECT recommendation.recommendation_id recommendationId,
+                   recommendation.plan_id planId,
+                   recommendation.status recommendationStatus,
+                   conversion.target_type targetType,
+                   conversion.source_system sourceSystem,
+                   conversion.document_type documentType,
+                   conversion.external_document_id externalDocumentId,
+                   conversion.external_document_no externalDocumentNo,
+                   conversion.document_status documentStatus,
+                   conversion.next_waiting_event_code nextWaitingEventCode,
+                   conversion.next_waiting_event_label nextWaitingEventLabel,
+                   conversion.requested_quantity requestedQuantity,
+                   conversion.uom_code uomCode,
+                   recommendation.need_by_date needByDate,
+                   conversion.converted_by_principal_id convertedByPrincipalId,
+                   conversion.converted_at convertedAt
+            FROM cloudmold_replenishment_recommendation recommendation
+            LEFT JOIN cloudmold_replenishment_conversion conversion
+              ON conversion.tenant_id=recommendation.tenant_id
+             AND conversion.recommendation_id=recommendation.recommendation_id
+            WHERE recommendation.tenant_id=#{tenantId}
+              AND recommendation.recommendation_id=#{recommendationId}
+            """)
+    ReplenishmentExecutionView selectReplenishmentExecution(@Param("tenantId") Long tenantId,
+                                                            @Param("recommendationId") String recommendationId);
 
     @Update("""
             UPDATE cloudmold_replenishment_recommendation
@@ -416,6 +448,9 @@ public interface SupplyPlanningMapper {
                 UNION ALL
                 SELECT 'REPLENISHMENT',status FROM cloudmold_replenishment_recommendation WHERE tenant_id=#{tenantId}
                 UNION ALL
+                SELECT 'REPLENISHMENT_CONVERSION',document_status
+                FROM cloudmold_replenishment_conversion WHERE tenant_id=#{tenantId}
+                UNION ALL
                 SELECT 'INVENTORY_ISSUE',status FROM cloudmold_inventory_health_issue WHERE tenant_id=#{tenantId}
                 UNION ALL
                 SELECT 'INVENTORY_SCAN',status FROM cloudmold_inventory_health_scan WHERE tenant_id=#{tenantId}
@@ -455,6 +490,11 @@ public interface SupplyPlanningMapper {
                 UNION ALL
                 SELECT recommendation_id,'REPLENISHMENT',reason_code,plan_id,status,version,need_by_date,updated_at
                 FROM cloudmold_replenishment_recommendation WHERE tenant_id=#{tenantId}
+                UNION ALL
+                SELECT conversion_id,'REPLENISHMENT_CONVERSION',
+                       COALESCE(external_document_no,target_reference),
+                       next_waiting_event_label,document_status,version,DATE(converted_at),converted_at
+                FROM cloudmold_replenishment_conversion WHERE tenant_id=#{tenantId}
                 UNION ALL
                 SELECT issue_id,'INVENTORY_ISSUE',issue_type,source_balance_id,status,version,
                        DATE(opened_at),updated_at

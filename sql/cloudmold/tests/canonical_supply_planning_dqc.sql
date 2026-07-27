@@ -92,7 +92,20 @@ JOIN cloudmold_replenishment_recommendation recommendation
  AND recommendation.recommendation_id=conversion.recommendation_id
 WHERE recommendation.status<>'CONVERTED'
    OR recommendation.suggested_quantity<>conversion.requested_quantity
-   OR recommendation.uom_code<>conversion.uom_code;
+   OR recommendation.uom_code<>conversion.uom_code
+   OR conversion.external_document_id=''
+   OR (
+        conversion.target_type='PURCHASE_REQUEST'
+        AND (conversion.source_system<>'YUDAO_ERP'
+             OR conversion.document_type<>'PURCHASE_ORDER'
+             OR conversion.next_waiting_event_code<>'SUPPLIER_CONFIRMATION')
+      )
+   OR (
+        conversion.target_type='TRANSFER_REQUEST'
+        AND (conversion.source_system<>'YUDAO_WMS'
+             OR conversion.document_type<>'MOVEMENT_ORDER'
+             OR conversion.next_waiting_event_code<>'TRANSFER_OUTBOUND')
+      );
 
 SELECT 'inventory_scan_issue_count_mismatch' AS check_name, COUNT(*) AS violation_count
 FROM cloudmold_inventory_health_scan scan

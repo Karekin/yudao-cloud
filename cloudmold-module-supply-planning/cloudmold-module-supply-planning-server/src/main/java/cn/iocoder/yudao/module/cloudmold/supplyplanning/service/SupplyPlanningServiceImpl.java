@@ -5,6 +5,10 @@ import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventCommand;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommand;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommandApi;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementOperation;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementResult;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.*;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.dataobject.SupplyPlanningRecords.*;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.mysql.SupplyPlanningMapper;
@@ -14,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.*;
 import java.util.*;
 import java.util.regex.Pattern;
@@ -37,6 +42,7 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
     private final OutboxAppender outboxAppender;
     private final SupplyPlanningActorPrincipalPort actorPrincipalPort;
     private final ReplenishmentExecutionPort replenishmentExecutionPort;
+    private final ProcurementCommandApi procurementCommandApi;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -93,6 +99,17 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                 .aggregateId(outcome.aggregateId())
                 .aggregateVersion(outcome.version())
                 .status(outcome.status())
+                .businessObjectType(stringValue(outcome.payload().get("business_object_type")))
+                .businessObjectId(stringValue(outcome.payload().get("business_object_id")))
+                .businessObjectNo(stringValue(outcome.payload().get("business_object_no")))
+                .businessStatus(stringValue(outcome.payload().get("business_status")))
+                .projectionSourceSystem(stringValue(outcome.payload().get("projection_source_system")))
+                .projectionDocumentType(stringValue(outcome.payload().get("projection_document_type")))
+                .projectionExternalDocumentId(stringValue(outcome.payload().get("projection_external_document_id")))
+                .projectionExternalDocumentNo(stringValue(outcome.payload().get("projection_external_document_no")))
+                .projectionDocumentStatus(stringValue(outcome.payload().get("projection_document_status")))
+                .nextWaitingEventCode(stringValue(outcome.payload().get("next_waiting_event_code")))
+                .nextWaitingEventLabel(stringValue(outcome.payload().get("next_waiting_event_label")))
                 .build();
         require(mapper.markOperationSucceeded(operationId, tenantId, outcome.aggregateType(),
                         outcome.aggregateId(), JsonUtils.toJsonString(result), now) == 1,
@@ -647,10 +664,57 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         String targetReference = execution.sourceSystem() + ":"
                 + execution.documentType() + ":" + execution.externalDocumentId();
         requireRef(targetReference, "targetReference", 128);
+        ProcurementResult canonicalPurchaseOrder = null;
+        if ("PURCHASE_REQUEST".equals(targetType)) {
+            canonicalPurchaseOrder = nonNull(procurementCommandApi.execute(
+                            ProcurementCommand.builder()
+                                    .operation(ProcurementOperation.CREATE_PURCHASE_ORDER)
+                                    .idempotencyKey("replenishment-procurement:" + conversionId)
+                                    .runId(command.getRunId())
+                                    .correlationId(command.getCorrelationId())
+                                    .causationId(command.getCausationId())
+                                    .occurredAt(command.getOccurredAt())
+                                    .purchaseOrder(ProcurementCommand.PurchaseOrderDefinition.builder()
+                                            .orderId("procurement-order:" + conversionId)
+                                            .orderCode(canonicalPurchaseOrderCode(conversionId))
+                                            .sourceBusinessType("REPLENISHMENT")
+                                            .sourceBusinessRef(row.getRecommendationId())
+                                            .supplierRef("ERP_SUPPLIER:" + input.getSupplierId())
+                                            .canonicalSkuId(row.getCanonicalSkuId())
+                                            .canonicalWarehouseId(row.getWarehouseId())
+                                            .orderedQuantity(row.getSuggestedQuantity())
+                                            .uomCode(row.getUomCode())
+                                            .unitCostMinor(input.getUnitCostMinor())
+                                            .totalAmountMinor(calculateTotalAmountMinor(
+                                                    row.getSuggestedQuantity(), input.getUnitCostMinor()))
+                                            .currencyCode("CNY")
+                                            .leadTimeDays(calculateLeadTimeDays(command.getOccurredAt(), row.getNeedByDate()))
+                                            .requiredDeliveryDate(row.getNeedByDate())
+                                            .remark("replenishment-conversion:" + conversionId)
+                                            .reasonCode("REPLENISHMENT_APPROVED")
+                                            .projection(ProcurementCommand.ProjectionDefinition.builder()
+                                                    .sourceSystem(execution.sourceSystem())
+                                                    .documentType(execution.documentType())
+                                                    .externalDocumentId(execution.externalDocumentId())
+                                                    .externalDocumentNo(execution.externalDocumentNo())
+                                                    .documentStatus(execution.status())
+                                                    .evidenceSha256(input.getMappingEvidenceSha256())
+                                                    .build())
+                                            .build())
+                                    .build(),
+                            input.getConvertedByPrincipalId()),
+                    "canonical procurement order creation returned no result");
+        }
         ReplenishmentConversion conversion = new ReplenishmentConversion()
                 .setConversionId(conversionId).setTenantId(tenantId)
                 .setRecommendationId(row.getRecommendationId()).setTargetType(targetType)
                 .setTargetReference(targetReference).setRequestedQuantity(row.getSuggestedQuantity())
+                .setSourceSystem(execution.sourceSystem()).setDocumentType(execution.documentType())
+                .setExternalDocumentId(execution.externalDocumentId())
+                .setExternalDocumentNo(execution.externalDocumentNo())
+                .setDocumentStatus(execution.status())
+                .setNextWaitingEventCode(execution.nextWaitingEventCode())
+                .setNextWaitingEventLabel(execution.nextWaitingEventLabel())
                 .setUomCode(row.getUomCode()).setStatus("CREATED")
                 .setConvertedByPrincipalId(input.getConvertedByPrincipalId())
                 .setVersion(1L).setConvertedAt(now).setCreatedAt(now);
@@ -668,6 +732,21 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                         row.getSuggestedQuantity(), "uom_code", row.getUomCode(),
                         "mapping_evidence_sha256", input.getMappingEvidenceSha256(),
                         "external_document_no", execution.externalDocumentNo(),
+                        "business_object_type", "PURCHASE_REQUEST".equals(targetType)
+                                ? canonicalPurchaseOrder.getAggregateType() : execution.documentType(),
+                        "business_object_id", "PURCHASE_REQUEST".equals(targetType)
+                                ? canonicalPurchaseOrder.getAggregateId() : execution.externalDocumentId(),
+                        "business_object_no", "PURCHASE_REQUEST".equals(targetType)
+                                ? canonicalPurchaseOrder.getOrderCode() : execution.externalDocumentNo(),
+                        "business_status", "PURCHASE_REQUEST".equals(targetType)
+                                ? canonicalPurchaseOrder.getStatus() : execution.status(),
+                        "projection_source_system", execution.sourceSystem(),
+                        "projection_document_type", execution.documentType(),
+                        "projection_external_document_id", execution.externalDocumentId(),
+                        "projection_external_document_no", execution.externalDocumentNo(),
+                        "projection_document_status", execution.status(),
+                        "next_waiting_event_code", execution.nextWaitingEventCode(),
+                        "next_waiting_event_label", execution.nextWaitingEventLabel(),
                         "converted_by_principal_id", input.getConvertedByPrincipalId(),
                         "previous_status", "APPROVED", "current_status", "CONVERTED"));
     }
@@ -992,6 +1071,28 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
 
     private static String upper(String value) {
         return value == null ? null : value.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private static String canonicalPurchaseOrderCode(String conversionId) {
+        String compact = conversionId.replace("-", "").toUpperCase(Locale.ROOT);
+        return "PO-CM-" + compact.substring(0, Math.min(12, compact.length()));
+    }
+
+    private static Long calculateTotalAmountMinor(BigDecimal quantity, Long unitCostMinor) {
+        require(quantity != null && unitCostMinor != null, "quantity and unitCostMinor are required");
+        return quantity.multiply(BigDecimal.valueOf(unitCostMinor))
+                .setScale(0, RoundingMode.HALF_UP)
+                .longValueExact();
+    }
+
+    private static Integer calculateLeadTimeDays(Instant occurredAt, LocalDate needByDate) {
+        require(occurredAt != null && needByDate != null, "occurredAt and needByDate are required");
+        long days = Duration.between(occurredAt, needByDate.atStartOfDay().toInstant(ZoneOffset.UTC)).toDays();
+        return (int) Math.max(days, 0L);
+    }
+
+    private static String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
     }
 
     private static <T> T nonNull(T value, String message) {

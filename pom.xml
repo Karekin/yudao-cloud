@@ -50,6 +50,7 @@
         <module>cloudmold-module-ai-operations</module>
         <module>cloudmold-module-operations-intelligence</module>
         <module>cloudmold-module-supply-planning</module>
+        <module>cloudmold-module-procurement</module>
         <module>cloudmold-module-quality</module>
         <module>cloudmold-module-token-platform</module>
         <module>cloudmold-module-risk</module>

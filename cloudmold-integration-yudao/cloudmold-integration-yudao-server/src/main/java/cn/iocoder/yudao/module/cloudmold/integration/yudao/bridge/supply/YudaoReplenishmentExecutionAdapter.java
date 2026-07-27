@@ -120,7 +120,8 @@ public class YudaoReplenishmentExecutionAdapter implements ReplenishmentExecutio
         requireDecimal(item.getTaxPercent(), context.command().taxPercent(),
                 "ERP purchase order tax percent drifted during readback");
         return new ExecutionResult("YUDAO_ERP", "PURCHASE_ORDER",
-                documentId.toString(), order.getNo(), "PREPARE");
+                documentId.toString(), order.getNo(), "PREPARE",
+                "SUPPLIER_CONFIRMATION", "等待供应商确认采购单");
     }
 
     private ExecutionResult createTransferDraft(TransferDraftContext context) {
@@ -166,7 +167,8 @@ public class YudaoReplenishmentExecutionAdapter implements ReplenishmentExecutio
                 unitPrice.multiply(context.command().quantity()).setScale(2, RoundingMode.HALF_UP),
                 "WMS movement order line total drifted during readback");
         return new ExecutionResult("YUDAO_WMS", "MOVEMENT_ORDER",
-                documentId.toString(), order.getNo(), "PREPARE");
+                documentId.toString(), order.getNo(), "PREPARE",
+                "TRANSFER_OUTBOUND", "等待调拨出库");
     }
 
     private PurchaseDraftContext resolvePurchaseDraft(ExecutionCommand command) {
