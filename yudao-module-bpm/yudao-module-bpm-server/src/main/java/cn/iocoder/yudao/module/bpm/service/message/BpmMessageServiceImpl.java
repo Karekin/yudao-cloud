@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.bpm.service.message.dto.BpmMessageSendWhenTaskTim
 import cn.iocoder.yudao.module.system.api.notify.NotifyMessageSendApi;
 import cn.iocoder.yudao.module.system.api.notify.dto.NotifySendSingleToUserReqDTO;
 import cn.iocoder.yudao.module.system.api.sms.SmsSendApi;
+import cn.iocoder.yudao.module.system.api.sms.dto.send.SmsSendSingleToUserReqDTO;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -41,8 +42,9 @@ public class BpmMessageServiceImpl implements BpmMessageService {
         Map<String, Object> templateParams = new HashMap<>();
         templateParams.put("processInstanceName", reqDTO.getProcessInstanceName());
         templateParams.put("detailUrl", getProcessInstanceDetailUrl(reqDTO.getProcessInstanceId()));
-        smsSendApi.sendSingleSmsToAdmin(BpmMessageConvert.INSTANCE.convert(reqDTO.getStartUserId(),
-                BpmMessageEnum.PROCESS_INSTANCE_APPROVE.getSmsTemplateCode(), templateParams)).checkError();
+        sendSmsSafely(BpmMessageConvert.INSTANCE.convert(reqDTO.getStartUserId(),
+                BpmMessageEnum.PROCESS_INSTANCE_APPROVE.getSmsTemplateCode(), templateParams),
+                "PROCESS_INSTANCE_APPROVE", reqDTO.getProcessInstanceId());
     }
 
     @Override
@@ -51,8 +53,9 @@ public class BpmMessageServiceImpl implements BpmMessageService {
         templateParams.put("processInstanceName", reqDTO.getProcessInstanceName());
         templateParams.put("reason", reqDTO.getReason());
         templateParams.put("detailUrl", getProcessInstanceDetailUrl(reqDTO.getProcessInstanceId()));
-        smsSendApi.sendSingleSmsToAdmin(BpmMessageConvert.INSTANCE.convert(reqDTO.getStartUserId(),
-                BpmMessageEnum.PROCESS_INSTANCE_REJECT.getSmsTemplateCode(), templateParams)).checkError();
+        sendSmsSafely(BpmMessageConvert.INSTANCE.convert(reqDTO.getStartUserId(),
+                BpmMessageEnum.PROCESS_INSTANCE_REJECT.getSmsTemplateCode(), templateParams),
+                "PROCESS_INSTANCE_REJECT", reqDTO.getProcessInstanceId());
     }
 
     @Override
@@ -72,8 +75,9 @@ public class BpmMessageServiceImpl implements BpmMessageService {
             log.warn("[sendMessageWhenTaskAssigned][站内信发送失败，审批待办仍可办理 assigneeUserId={} processInstanceId={}]",
                     reqDTO.getAssigneeUserId(), reqDTO.getProcessInstanceId(), exception);
         }
-        smsSendApi.sendSingleSmsToAdmin(BpmMessageConvert.INSTANCE.convert(reqDTO.getAssigneeUserId(),
-                BpmMessageEnum.TASK_ASSIGNED.getSmsTemplateCode(), templateParams)).checkError();
+        sendSmsSafely(BpmMessageConvert.INSTANCE.convert(reqDTO.getAssigneeUserId(),
+                BpmMessageEnum.TASK_ASSIGNED.getSmsTemplateCode(), templateParams),
+                "TASK_ASSIGNED", reqDTO.getProcessInstanceId());
     }
 
     @Override
@@ -82,8 +86,19 @@ public class BpmMessageServiceImpl implements BpmMessageService {
         templateParams.put("processInstanceName", reqDTO.getProcessInstanceName());
         templateParams.put("taskName", reqDTO.getTaskName());
         templateParams.put("detailUrl", getProcessInstanceDetailUrl(reqDTO.getProcessInstanceId()));
-        smsSendApi.sendSingleSmsToAdmin(BpmMessageConvert.INSTANCE.convert(reqDTO.getAssigneeUserId(),
-                BpmMessageEnum.TASK_TIMEOUT.getSmsTemplateCode(), templateParams)).checkError();
+        sendSmsSafely(BpmMessageConvert.INSTANCE.convert(reqDTO.getAssigneeUserId(),
+                BpmMessageEnum.TASK_TIMEOUT.getSmsTemplateCode(), templateParams),
+                "TASK_TIMEOUT", reqDTO.getProcessInstanceId());
+    }
+
+    private void sendSmsSafely(SmsSendSingleToUserReqDTO request, String event, String processInstanceId) {
+        try {
+            smsSendApi.sendSingleSmsToAdmin(request).checkError();
+        } catch (RuntimeException exception) {
+            // 通知是旁路能力，不能回滚审批状态或阻断 Agent 的 Temporal 续跑。
+            log.warn("[sendSmsSafely][BPM 短信发送失败，业务事务继续 event={} processInstanceId={} userId={}]",
+                    event, processInstanceId, request.getUserId(), exception);
+        }
     }
 
     private String getProcessInstanceDetailUrl(String taskId) {
