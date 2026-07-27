@@ -12,4 +12,22 @@ public interface TemporalManagedRunActivities {
 
     TemporalManagedRunState reject(TemporalManagedRunRequest request,
                                    TemporalManagedRunState prepared);
+
+    TemporalManagedRunState pause(TemporalManagedRunRequest request,
+                                  TemporalManagedRunState current,
+                                  String reason);
+
+    TemporalManagedRunState resume(TemporalManagedRunRequest request,
+                                   TemporalManagedRunState current,
+                                   String reason);
+
+    TemporalManagedRunState cancel(TemporalManagedRunRequest request,
+                                   TemporalManagedRunState current,
+                                   String reason);
+
+    TemporalManagedRunState timeout(TemporalManagedRunRequest request,
+                                    TemporalManagedRunState current);
+
+    TemporalManagedRunState refreshSkillTask(TemporalManagedRunRequest request,
+                                             TemporalManagedRunState current);
 }

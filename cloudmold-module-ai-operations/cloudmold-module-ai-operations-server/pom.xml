@@ -54,6 +54,12 @@
             <artifactId>temporal-sdk</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.temporal</groupId>
+            <artifactId>temporal-testing</artifactId>
+            <version>${temporal.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>cn.iocoder.cloud</groupId>
             <artifactId>yudao-spring-boot-starter-test</artifactId>
             <scope>test</scope>

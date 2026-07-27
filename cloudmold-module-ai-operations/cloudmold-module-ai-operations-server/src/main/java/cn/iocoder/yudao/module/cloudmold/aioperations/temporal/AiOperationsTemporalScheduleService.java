@@ -8,6 +8,7 @@ import cn.iocoder.yudao.module.cloudmold.aioperations.controller.admin.vo.Tempor
 import cn.iocoder.yudao.module.cloudmold.aioperations.service.command.AiOperationsManagedRunQueryServiceFacade;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowView;
 import io.temporal.api.enums.v1.ScheduleOverlapPolicy;
+import io.temporal.api.enums.v1.WorkflowIdReusePolicy;
 import io.temporal.client.WorkflowOptions;
 import io.temporal.client.schedules.Schedule;
 import io.temporal.client.schedules.ScheduleActionStartWorkflow;
@@ -64,7 +65,17 @@ public class AiOperationsTemporalScheduleService {
                 .setWorkflowType(TemporalManagedRunWorkflow.class)
                 .setArguments(workflowRequest)
                 .setOptions(WorkflowOptions.newBuilder()
-                        .setWorkflowId(scheduleId + "-workflow")
+                        .setWorkflowId(TemporalManagedWorkflowIds.scheduleWorkflowId(workflowRequest))
+                        .setRequestId(TemporalManagedWorkflowIds.scheduleRequestId(workflowRequest))
+                        .setWorkflowIdReusePolicy(WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE)
+                        .setMemo(java.util.Map.of(
+                                "tenantId", tenantId,
+                                "scheduleId", scheduleId,
+                                "skillId", request.getSkillId(),
+                                "skillVersion", request.getSkillVersion()))
+                        .setSearchAttributes(TemporalManagedSearchAttributes.from(workflowRequest,
+                                TemporalManagedRunState.builder()
+                                        .status("QUEUED").phase("PREPARE").build()))
                         .setTaskQueue(properties.getTaskQueue())
                         .setWorkflowRunTimeout(Duration.ofDays(7))
                         .build())

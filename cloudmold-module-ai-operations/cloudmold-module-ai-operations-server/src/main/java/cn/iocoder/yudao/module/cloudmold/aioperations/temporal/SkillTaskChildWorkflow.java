@@ -6,13 +6,10 @@ import io.temporal.workflow.WorkflowInterface;
 import io.temporal.workflow.WorkflowMethod;
 
 @WorkflowInterface
-public interface TemporalManagedRunWorkflow {
+public interface SkillTaskChildWorkflow {
 
     @WorkflowMethod
-    TemporalManagedRunState run(TemporalManagedRunRequest request);
-
-    @SignalMethod
-    void approvalDecision(String decision);
+    TemporalManagedRunState run(TemporalManagedRunRequest request, TemporalManagedRunState state);
 
     @SignalMethod
     void pause(String reason);

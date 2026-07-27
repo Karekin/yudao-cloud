@@ -1,6 +1,5 @@
 package cn.iocoder.yudao.module.cloudmold.aioperations.temporal;
 
-import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.framework.tenant.core.util.TenantUtils;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentControlCommand;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentControlCommandApi;
@@ -15,6 +14,9 @@ import cn.iocoder.yudao.module.cloudmold.aioperations.controller.admin.vo.Manage
 import cn.iocoder.yudao.module.cloudmold.aioperations.service.command.AiOperationsManagedRunCommandService;
 import cn.iocoder.yudao.module.cloudmold.aioperations.service.command.AiOperationsManagedRunQueryServiceFacade;
 import cn.iocoder.yudao.module.cloudmold.aioperations.service.command.ManagedSkillTaskTriggerResult;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskQueryApi;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskTerminalProofView;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowView;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -35,6 +37,7 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
     private final AgentControlCommandApi agentCommands;
     private final AgentControlQueryApi agentQueries;
     private final AgentAuthorityGovernanceApi authorityGovernance;
+    private final SkillTaskQueryApi skillTaskQueries;
     private final AiOperationsTemporalMapper mapper;
 
     @Override
@@ -46,22 +49,33 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
     public TemporalManagedRunState resumeApproved(TemporalManagedRunRequest request,
                                                   TemporalManagedRunState prepared) {
         return TenantUtils.execute(request.getTenantId(), () -> {
-            AgentControlResult workOrder = agentQueries.getWorkOrder(prepared.getWorkOrderId());
-            require("READY".equals(workOrder.getStatus()), "BPM approval did not leave the work order READY");
             ManagedSkillTaskTriggerReqVO trigger = triggerRequest(request, prepared.getTemporalRunId());
-            ManagedSkillTaskTriggerReqVO.ApprovalContext approval =
-                    new ManagedSkillTaskTriggerReqVO.ApprovalContext();
-            approval.setWorkOrderId(prepared.getWorkOrderId());
-            approval.setApprovalId(prepared.getApprovalId());
-            approval.setWorkOrderExpectedVersion(workOrder.getAggregateVersion());
-            approval.setValidForSeconds(300L);
-            trigger.setApproval(approval);
+            if (prepared.getWorkOrderId() != null) {
+                AgentControlResult workOrder = agentQueries.getWorkOrder(prepared.getWorkOrderId());
+                require("READY".equals(workOrder.getStatus()), "BPM approval did not leave the work order READY");
+                ManagedSkillTaskTriggerReqVO.ApprovalContext approval =
+                        new ManagedSkillTaskTriggerReqVO.ApprovalContext();
+                approval.setWorkOrderId(prepared.getWorkOrderId());
+                approval.setApprovalId(prepared.getApprovalId());
+                approval.setWorkOrderExpectedVersion(workOrder.getAggregateVersion());
+                approval.setValidForSeconds(300L);
+                trigger.setApproval(approval);
+            }
             ManagedSkillTaskTriggerResult result = managedRuns.triggerAs(
                     trigger, prepared.getExecutionUserId(), request.getOperatorUserType());
-            mapper.updateRunBinding(request.getTenantId(), prepared.getTemporalRunId(), "SUBMITTED",
+            mapper.updateRunBinding(request.getTenantId(), prepared.getTemporalRunId(), "RUNNING",
                     null, result.getRunId(), result.getTaskId(), now());
-            return prepared.toBuilder().status("SUBMITTED").managedRunId(result.getRunId())
-                    .taskId(result.getTaskId()).build();
+            return prepared.toBuilder().status("RUNNING").phase("SKILL_TASK")
+                    .waitingOn("SKILL_TASK_RESULT").approvalDecision("APPROVE")
+                    .managedRunId(result.getRunId()).taskId(result.getTaskId())
+                    .businessResult(TemporalManagedBusinessResult.builder()
+                            .outcomeCode("SKILL_TASK_SUBMITTED")
+                            .summary("SkillTask 已提交，等待真实业务终态回读")
+                            .domainObjectType("SKILL_TASK")
+                            .domainObjectId(result.getTaskId())
+                            .evidenceRef(result.getRunId())
+                            .build())
+                    .build();
         });
     }
 
@@ -71,7 +85,133 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
         return TenantUtils.execute(request.getTenantId(), () -> {
             mapper.updateRunBinding(request.getTenantId(), prepared.getTemporalRunId(), "REJECTED",
                     "BPM_REJECTED", null, null, now());
-            return prepared.toBuilder().status("REJECTED").errorCode("BPM_REJECTED").build();
+            return prepared.toBuilder().status("REJECTED").phase("COMPLETED")
+                    .approvalDecision("REJECT").waitingOn(null)
+                    .errorCode("BPM_REJECTED")
+                    .businessResult(TemporalManagedBusinessResult.builder()
+                            .outcomeCode("APPROVAL_REJECTED")
+                            .summary("运营主体未放行该高风险动作")
+                            .domainObjectType("APPROVAL")
+                            .domainObjectId(prepared.getApprovalId())
+                            .evidenceRef(prepared.getWorkOrderId())
+                            .build())
+                    .build();
+        });
+    }
+
+    @Override
+    public TemporalManagedRunState pause(TemporalManagedRunRequest request,
+                                         TemporalManagedRunState current,
+                                         String reason) {
+        return TenantUtils.execute(request.getTenantId(), () -> {
+            mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), "PAUSED",
+                    "MANUAL_PAUSE", current.getManagedRunId(), current.getTaskId(), now());
+            return current.toBuilder().status("PAUSED").phase("MANUAL_CONTROL")
+                    .waitingOn("RESUME_OR_CANCEL")
+                    .resumableStatus(current.getStatus())
+                    .pauseReason(reason)
+                    .errorCode("MANUAL_PAUSE")
+                    .build();
+        });
+    }
+
+    @Override
+    public TemporalManagedRunState resume(TemporalManagedRunRequest request,
+                                          TemporalManagedRunState current,
+                                          String reason) {
+        return TenantUtils.execute(request.getTenantId(), () -> {
+            String resumedStatus = current.getResumableStatus() == null ? "WAITING_APPROVAL"
+                    : current.getResumableStatus();
+            mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), resumedStatus,
+                    null, current.getManagedRunId(), current.getTaskId(), now());
+            return current.toBuilder().status(resumedStatus)
+                    .phase("WAITING_APPROVAL".equals(resumedStatus) ? "APPROVAL_GATE" : current.getPhase())
+                    .waitingOn("WAITING_APPROVAL".equals(resumedStatus) ? "BPM_APPROVAL" : current.getWaitingOn())
+                    .pauseReason(reason)
+                    .errorCode(null)
+                    .build();
+        });
+    }
+
+    @Override
+    public TemporalManagedRunState cancel(TemporalManagedRunRequest request,
+                                          TemporalManagedRunState current,
+                                          String reason) {
+        return TenantUtils.execute(request.getTenantId(), () -> {
+            mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), "CANCELLED",
+                    "MANUAL_CANCELLED", current.getManagedRunId(), current.getTaskId(), now());
+            return current.toBuilder().status("CANCELLED").phase("COMPLETED")
+                    .waitingOn(null).cancelReason(reason).errorCode("MANUAL_CANCELLED")
+                    .businessResult(TemporalManagedBusinessResult.builder()
+                            .outcomeCode("MANUAL_CANCELLED")
+                            .summary("运行在提交 SkillTask 前被人工取消")
+                            .domainObjectType("WORK_ORDER")
+                            .domainObjectId(current.getWorkOrderId())
+                            .evidenceRef(current.getTemporalRunId())
+                            .build())
+                    .build();
+        });
+    }
+
+    @Override
+    public TemporalManagedRunState timeout(TemporalManagedRunRequest request,
+                                           TemporalManagedRunState current) {
+        return TenantUtils.execute(request.getTenantId(), () -> {
+            mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), "TIMED_OUT",
+                    "APPROVAL_TIMEOUT", current.getManagedRunId(), current.getTaskId(), now());
+            return current.toBuilder().status("TIMED_OUT").phase("COMPLETED")
+                    .waitingOn(null).errorCode("APPROVAL_TIMEOUT")
+                    .businessResult(TemporalManagedBusinessResult.builder()
+                            .outcomeCode("APPROVAL_TIMEOUT")
+                            .summary("审批在有效期内未放行，运行进入超时终态")
+                            .domainObjectType("APPROVAL")
+                            .domainObjectId(current.getApprovalId())
+                            .evidenceRef(current.getWorkOrderId())
+                            .build())
+                    .build();
+        });
+    }
+
+    @Override
+    public TemporalManagedRunState refreshSkillTask(TemporalManagedRunRequest request,
+                                                    TemporalManagedRunState current) {
+        return TenantUtils.execute(request.getTenantId(), () -> {
+            SkillTaskView task = skillTaskQueries.get(current.getTaskId());
+            if (task == null || task.getStatus() == null) {
+                return current;
+            }
+            String status = task.getStatus();
+            if ("QUEUED".equals(status) || "RUNNING".equals(status) || "WAITING".equals(status)) {
+                return current.toBuilder().status("RUNNING").phase("SKILL_TASK")
+                        .waitingOn("SKILL_TASK_RESULT")
+                        .businessResult(TemporalManagedBusinessResult.builder()
+                                .outcomeCode("SKILL_TASK_RUNNING")
+                                .summary("SkillTask 正在执行，等待终态")
+                                .domainObjectType("SKILL_TASK")
+                                .domainObjectId(task.getTaskId())
+                                .evidenceRef(task.getRunId())
+                                .build())
+                        .build();
+            }
+            SkillTaskTerminalProofView proof = skillTaskQueries.getTerminalProof(current.getTaskId());
+            String runStatus = "SUCCEEDED".equals(status) ? "SUCCEEDED" : "NEEDS_REVIEW";
+            String errorCode = "SUCCEEDED".equals(status) ? null : status;
+            mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), runStatus,
+                    errorCode, current.getManagedRunId(), current.getTaskId(), now());
+            return current.toBuilder().status(runStatus).phase("COMPLETED")
+                    .waitingOn(null)
+                    .errorCode(errorCode)
+                    .businessResult(TemporalManagedBusinessResult.builder()
+                            .outcomeCode("SUCCEEDED".equals(status) ? "SKILL_TASK_SUCCEEDED"
+                                    : "SKILL_TASK_NEEDS_REVIEW")
+                            .summary("SUCCEEDED".equals(status)
+                                    ? "SkillTask 已完成并返回终态证明"
+                                    : "SkillTask 未自动闭环，已关闭到人工复核")
+                            .domainObjectType("SKILL_TASK")
+                            .domainObjectId(task.getTaskId())
+                            .evidenceRef(proof == null ? task.getRunId() : proof.getTerminalResultSha256())
+                            .build())
+                    .build();
         });
     }
 
@@ -81,13 +221,19 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
                 request.getSkillId(), request.getSkillVersion(),
                 request.getOperatorUserId(), request.getOperatorUserType());
         if (!Boolean.TRUE.equals(workflow.getApprovalRequired())) {
-            ManagedSkillTaskTriggerResult result = managedRuns.triggerAs(
-                    triggerRequest(request, temporalRunId),
-                    request.getOperatorUserId(), request.getOperatorUserType());
             TemporalManagedRunState state = TemporalManagedRunState.builder()
-                    .status("SUBMITTED").temporalWorkflowId(workflowId).temporalRunId(temporalRunId)
+                    .status("READY_FOR_SUBMISSION").phase("SKILL_TASK")
+                    .waitingOn("SKILL_TASK_SUBMISSION")
+                    .temporalWorkflowId(workflowId).temporalRunId(temporalRunId)
                     .executionUserId(request.getOperatorUserId())
-                    .managedRunId(result.getRunId()).taskId(result.getTaskId()).build();
+                    .businessResult(TemporalManagedBusinessResult.builder()
+                            .outcomeCode("READY_FOR_SUBMISSION")
+                            .summary("无需审批，等待 SkillTask 子工作流提交")
+                            .domainObjectType("TEMPORAL_WORKFLOW")
+                            .domainObjectId(temporalRunId)
+                            .evidenceRef(workflowId)
+                            .build())
+                    .build();
             persist(request, state);
             return state;
         }
@@ -95,9 +241,8 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
                 "Approval-bound schedule is missing role/action policy identity");
         TemporalApprovalPolicyRecord approvalPolicy = requireApprovalPolicy(request.getTenantId());
         Long executionUserId = approvalPolicy.getRequesterUserId();
-        String suffix = DigestUtil.sha256Hex(temporalRunId).substring(0, 24);
-        String workOrderId = "twr-" + suffix;
-        String approvalId = "tap-" + suffix;
+        String workOrderId = TemporalManagedWorkflowIds.workOrderId(temporalRunId);
+        String approvalId = TemporalManagedWorkflowIds.approvalId(temporalRunId);
         AgentControlResult workOrder = agentCommands.execute(AgentControlCommand.builder()
                 .operation(AgentControlOperation.CREATE_WORK_ORDER)
                 .idempotencyKey("temporal:create-work-order:" + temporalRunId)
@@ -131,7 +276,7 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
                 .idempotencyKey("temporal:grant-approver:" + temporalRunId)
                 .occurredAt(Instant.now())
                 .approvalGrant(AgentAuthorityCommand.ApprovalGrantDefinition.builder()
-                        .grantId("tag-" + suffix)
+                        .grantId("tag-" + TemporalManagedWorkflowIds.stableSuffix(temporalRunId))
                         .approverUserId(approvalPolicy.getApproverUserId())
                         .approvalId(approvalId)
                         .roleCode(approvalCard.getRoleCode())
@@ -143,18 +288,27 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
                         .build())
                 .build(), approvalPolicy.getGovernanceUserId());
         TemporalManagedRunState state = TemporalManagedRunState.builder()
-                .status("WAITING_APPROVAL").temporalWorkflowId(workflowId)
+                .status("WAITING_APPROVAL").phase("APPROVAL_GATE")
+                .waitingOn("BPM_APPROVAL").resumableStatus("WAITING_APPROVAL")
+                .temporalWorkflowId(workflowId)
                 .temporalRunId(temporalRunId).executionUserId(executionUserId)
-                .workOrderId(workOrderId).approvalId(approvalId).build();
+                .workOrderId(workOrderId).approvalId(approvalId)
+                .businessResult(TemporalManagedBusinessResult.builder()
+                        .outcomeCode("WAITING_APPROVAL")
+                        .summary("高风险动作已生成工单并等待运营主体审批")
+                        .domainObjectType("APPROVAL")
+                        .domainObjectId(approvalId)
+                        .evidenceRef(workOrderId)
+                        .build())
+                .build();
         persist(request, state);
         return state;
     }
 
     private ManagedSkillTaskTriggerReqVO triggerRequest(TemporalManagedRunRequest request, String temporalRunId) {
         ManagedSkillTaskTriggerReqVO trigger = new ManagedSkillTaskTriggerReqVO();
-        String suffix = DigestUtil.sha256Hex(temporalRunId).substring(0, 24);
-        trigger.setRunId("tsr-" + suffix);
-        trigger.setClientRequestKey("temporal/" + request.getScheduleId() + "/" + suffix);
+        trigger.setRunId(TemporalManagedWorkflowIds.managedRunId(temporalRunId));
+        trigger.setClientRequestKey(TemporalManagedWorkflowIds.clientRequestKey(request, temporalRunId));
         trigger.setSkillId(request.getSkillId());
         trigger.setSkillVersion(request.getSkillVersion());
         trigger.setInputJson(request.getInputJson());

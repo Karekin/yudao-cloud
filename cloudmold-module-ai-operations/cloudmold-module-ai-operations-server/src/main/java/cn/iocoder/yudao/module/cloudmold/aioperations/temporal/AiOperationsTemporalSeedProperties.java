@@ -1,12 +1,14 @@
 package cn.iocoder.yudao.module.cloudmold.aioperations.temporal;
 
-import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.ArrayList;
 import java.util.List;
 
-@Data
+@Getter
+@Setter
 @ConfigurationProperties(prefix = "cloudmold.ai-operations.temporal.seed")
 public class AiOperationsTemporalSeedProperties {
 
@@ -18,7 +20,7 @@ public class AiOperationsTemporalSeedProperties {
     /**
      * 需要补齐/创建定时流的租户列表。
      */
-    private List<Long> tenantIds = new ArrayList<>();
+    private List<String> tenantIdsRaw = new ArrayList<>();
 
     /**
      * 系统用户（后台系统管理员）编号。
@@ -48,7 +50,7 @@ public class AiOperationsTemporalSeedProperties {
     /**
      * 自动铺品工作流定义。
      */
-    private String skillId = "skill.cloudmold.commerce.catalog-matrix.v1";
+    private String skillId = "skill.cloudmold.commerce.product-to-listing.v1";
 
     /**
      * 自动铺品工作流版本。
@@ -73,15 +75,73 @@ public class AiOperationsTemporalSeedProperties {
     /**
      * 若定时规则需要 BPM 审批，补齐角色与动作编码；非审批可留空。
      */
-    private String roleCode;
+    private String roleCode = "merchandising";
 
     /**
      * 若定时规则需要 BPM 审批，补齐角色与动作编码；非审批可留空。
      */
-    private String actionCode;
+    private String actionCode = "catalog.publish";
 
     /**
      * 是否创建为暂停态。
      */
     private boolean paused = false;
+
+    public List<Long> getTenantIds() {
+        List<Long> tenantIds = new ArrayList<>();
+        for (String token : tenantIdsRaw) {
+            if (token == null) {
+                continue;
+            }
+            String normalized = token.trim();
+            if (normalized.isEmpty() || "[]".equals(normalized)) {
+                continue;
+            }
+            tenantIds.add(Long.valueOf(normalized));
+        }
+        return tenantIds;
+    }
+
+    public void setTenantIds(List<String> tenantIds) {
+        this.tenantIdsRaw = normalizeTenantIds(tenantIds);
+    }
+
+    public void setTenantIds(String tenantIds) {
+        this.tenantIdsRaw = normalizeTenantIds(tokenizeTenantIds(tenantIds));
+    }
+
+    private static List<String> tokenizeTenantIds(String raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        String normalized = raw.trim();
+        if (normalized.isEmpty() || "[]".equals(normalized)) {
+            return List.of();
+        }
+        if (normalized.startsWith("[") && normalized.endsWith("]")) {
+            normalized = normalized.substring(1, normalized.length() - 1).trim();
+            if (normalized.isEmpty()) {
+                return List.of();
+            }
+        }
+        return List.of(normalized.split(","));
+    }
+
+    private static List<String> normalizeTenantIds(List<String> tenantIds) {
+        if (tenantIds == null || tenantIds.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<String> normalized = new ArrayList<>();
+        for (String tenantId : tenantIds) {
+            if (tenantId == null) {
+                continue;
+            }
+            String token = tenantId.trim();
+            if (token.isEmpty() || "[]".equals(token)) {
+                continue;
+            }
+            normalized.add(token);
+        }
+        return normalized;
+    }
 }

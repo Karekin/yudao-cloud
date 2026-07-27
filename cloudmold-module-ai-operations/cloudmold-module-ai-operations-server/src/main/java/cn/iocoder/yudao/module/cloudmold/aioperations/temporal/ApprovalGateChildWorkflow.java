@@ -6,10 +6,10 @@ import io.temporal.workflow.WorkflowInterface;
 import io.temporal.workflow.WorkflowMethod;
 
 @WorkflowInterface
-public interface TemporalManagedRunWorkflow {
+public interface ApprovalGateChildWorkflow {
 
     @WorkflowMethod
-    TemporalManagedRunState run(TemporalManagedRunRequest request);
+    TemporalManagedRunState run(TemporalManagedRunRequest request, TemporalManagedRunState state);
 
     @SignalMethod
     void approvalDecision(String decision);

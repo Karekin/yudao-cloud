@@ -45,6 +45,8 @@ public class AiOperationsTemporalConfiguration {
         WorkerFactory factory = WorkerFactory.newInstance(client);
         Worker worker = factory.newWorker(properties.getTaskQueue());
         worker.registerWorkflowImplementationTypes(TemporalManagedRunWorkflowImpl.class);
+        worker.registerWorkflowImplementationTypes(ApprovalGateChildWorkflowImpl.class);
+        worker.registerWorkflowImplementationTypes(SkillTaskChildWorkflowImpl.class);
         worker.registerActivitiesImplementations(activities);
         return factory;
     }
