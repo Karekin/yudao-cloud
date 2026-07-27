@@ -450,4 +450,35 @@ public interface QualityMapper {
     cn.iocoder.yudao.module.cloudmold.quality.api.QualityConsumerEvidenceView selectLatestConsumerEvidence(
             @Param("tenantId") Long tenantId,
             @Param("canonicalSkuId") String canonicalSkuId);
+
+    @Select("""
+            SELECT task_id,tenant_id,standard_id,standard_version,standard_version_id,subject_type,subject_ref,
+                   canonical_sku_id,lot_id,warehouse_id,priority,status,authenticator_principal_id,decision,
+                   defect_code,evidence_ref,recheck_reason_code,secondary_authenticator_principal_id,
+                   secondary_decision,secondary_defect_code,secondary_evidence_ref,adjudicator_principal_id,
+                   ground_truth_decision,ground_truth_defect_code,ground_truth_evidence_ref,version,assigned_at,
+                   started_at,decided_at,rechecked_at,adjudicated_at,completed_at,created_at,updated_at
+            FROM cloudmold_inspection_task
+            WHERE tenant_id=#{tenantId} AND task_id=#{taskId}
+            """)
+    InspectionTask selectInspectionTask(@Param("tenantId") Long tenantId, @Param("taskId") String taskId);
+
+    @Select("""
+            SELECT capa_id,tenant_id,inspection_task_id,root_cause_code,owner_principal_id,due_date,status,
+                   effectiveness_evidence_ref,version,opened_at,resolved_at,created_at,updated_at
+            FROM cloudmold_quality_capa
+            WHERE tenant_id=#{tenantId} AND inspection_task_id=#{taskId}
+            ORDER BY opened_at,capa_id
+            """)
+    List<Capa> selectCapasByInspectionTask(@Param("tenantId") Long tenantId, @Param("taskId") String taskId);
+
+    @Select("""
+            SELECT recall_action_id,tenant_id,inspection_task_id,canonical_sku_id,lot_id,warehouse_id,reason_code,
+                   status,owner_principal_id,resolution_code,version,opened_at,acknowledged_at,resolved_at,
+                   created_at,updated_at
+            FROM cloudmold_quality_recall_action
+            WHERE tenant_id=#{tenantId} AND recall_action_id=#{recallActionId}
+            """)
+    RecallAction selectRecallAction(@Param("tenantId") Long tenantId,
+                                    @Param("recallActionId") String recallActionId);
 }

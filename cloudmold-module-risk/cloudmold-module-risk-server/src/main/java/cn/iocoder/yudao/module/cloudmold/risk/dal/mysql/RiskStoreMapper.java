@@ -384,6 +384,16 @@ public interface RiskStoreMapper {
             """)
     int insertLossEntry(LossEntry value);
 
+    @Select("""
+            SELECT loss_entry_id,tenant_id,order_id,payment_id,dispute_id,decision_id,entry_type,
+                   signed_amount_minor,currency_code,external_ref,occurred_at,created_at
+            FROM cloudmold_risk_loss_entry
+            WHERE tenant_id=#{tenantId} AND dispute_id=#{disputeId}
+            ORDER BY occurred_at,loss_entry_id
+            """)
+    List<LossEntry> selectLossEntriesByDispute(@Param("tenantId") Long tenantId,
+                                               @Param("disputeId") String disputeId);
+
     @Insert("""
             INSERT INTO cloudmold_risk_status_history
               (tenant_id,aggregate_type,aggregate_id,aggregate_version,previous_status,current_status,operation_id,

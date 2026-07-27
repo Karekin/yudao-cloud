@@ -5,6 +5,7 @@ import cn.iocoder.yudao.module.cloudmold.merchant.dal.dataobject.*;
 import org.apache.ibatis.annotations.*;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface MerchantDepositStoreMapper {
@@ -119,4 +120,15 @@ public interface MerchantDepositStoreMapper {
                     #{reasonCode},#{evidenceRef},#{occurredAt},#{createdAt})
             """)
     int insertLedgerEntry(MerchantDepositLedgerEntryDO value);
+
+    @Select("""
+            SELECT account_id,tenant_id,merchant_id,currency,required_amount_minor,held_amount_minor,
+                   frozen_amount_minor,paid_amount_minor,deducted_amount_minor,coverage_status,enforcement_status,
+                   policy_version,version,created_at,updated_at
+            FROM cloudmold_merchant_deposit_account
+            WHERE tenant_id=#{tenantId} AND merchant_id=#{merchantId}
+            ORDER BY currency,account_id
+            """)
+    List<MerchantDepositAccountDO> selectAccountsByMerchant(@Param("tenantId") Long tenantId,
+                                                            @Param("merchantId") String merchantId);
 }

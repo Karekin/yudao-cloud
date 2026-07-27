@@ -241,4 +241,35 @@ public interface CustomerServiceStoreMapper {
                     #{operationId},#{reasonCode},#{occurredAt},#{createdAt})
             """)
             int insertHistory(CustomerServiceStatusHistoryDO value);
+
+    @Select("""
+            SELECT claim_id,tenant_id,claim_code,ticket_id,run_id,claim_type,order_ref,after_sale_ref,status,
+                   requested_amount_minor,approved_amount_minor,paid_amount_minor,currency_code,reason_code,
+                   compensation_entry_id,version,created_at,updated_at
+            FROM cloudmold_customer_service_claim
+            WHERE tenant_id=#{tenantId} AND ticket_id=#{ticketId}
+            ORDER BY created_at,claim_id
+            """)
+    List<CustomerServiceClaimDO> selectClaimsByTicket(@Param("tenantId") Long tenantId,
+                                                      @Param("ticketId") String ticketId);
+
+    @Select("""
+            SELECT feedback_id,tenant_id,ticket_id,run_id,customer_principal_id,touchpoint_code,sentiment_code,
+                   score_basis_points,reason_code,comment_token,occurred_at,created_at
+            FROM cloudmold_customer_service_buyer_feedback
+            WHERE tenant_id=#{tenantId} AND ticket_id=#{ticketId}
+            ORDER BY occurred_at,feedback_id
+            """)
+    List<CustomerServiceBuyerFeedbackDO> selectBuyerFeedbackByTicket(@Param("tenantId") Long tenantId,
+                                                                     @Param("ticketId") String ticketId);
+
+    @Select("""
+            SELECT compensation_entry_id,tenant_id,claim_id,ticket_id,entry_type,amount_minor,currency_code,
+                   operation_idempotency_key,occurred_at,created_at
+            FROM cloudmold_customer_service_compensation_entry
+            WHERE tenant_id=#{tenantId} AND ticket_id=#{ticketId}
+            ORDER BY occurred_at,compensation_entry_id
+            """)
+    List<CustomerServiceCompensationEntryDO> selectCompensationEntriesByTicket(@Param("tenantId") Long tenantId,
+                                                                                @Param("ticketId") String ticketId);
 }

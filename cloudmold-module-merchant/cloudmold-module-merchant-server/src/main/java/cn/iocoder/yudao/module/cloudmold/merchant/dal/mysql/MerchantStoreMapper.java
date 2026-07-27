@@ -276,4 +276,36 @@ public interface MerchantStoreMapper {
                                                               @Param("shopId") String shopId,
                                                               @Param("principalId") String principalId,
                                                               @Param("roleCode") String roleCode);
+
+    @Select("""
+            SELECT application_id,tenant_id,run_id,legal_entity_id,owner_principal_id,channel_code,external_shop_id,
+                   status,decision_reason,merchant_id,shop_id,owner_assignment_id,version,created_at,updated_at
+            FROM cloudmold_merchant_onboarding_application
+            WHERE tenant_id=#{tenantId} AND application_id=#{applicationId}
+            """)
+    MerchantOnboardingApplicationDO selectApplication(@Param("tenantId") Long tenantId,
+                                                       @Param("applicationId") String applicationId);
+
+    @Select("""
+            SELECT merchant_id,tenant_id,merchant_code,legal_entity_id,status,version,created_at,updated_at
+            FROM cloudmold_merchant_account
+            WHERE tenant_id=#{tenantId} AND merchant_id=#{merchantId}
+            """)
+    MerchantAccountDO selectMerchant(@Param("tenantId") Long tenantId, @Param("merchantId") String merchantId);
+
+    @Select("""
+            SELECT shop_id,tenant_id,merchant_id,channel_code,external_shop_id,status,version,created_at,updated_at
+            FROM cloudmold_merchant_shop
+            WHERE tenant_id=#{tenantId} AND shop_id=#{shopId}
+            """)
+    MerchantShopDO selectShop(@Param("tenantId") Long tenantId, @Param("shopId") String shopId);
+
+    @Select("""
+            SELECT assignment_id,tenant_id,merchant_id,shop_id,principal_id,role_code,status,version,valid_from,
+                   valid_to,created_at,updated_at
+            FROM cloudmold_merchant_operator_assignment
+            WHERE tenant_id=#{tenantId} AND assignment_id=#{assignmentId}
+            """)
+    MerchantOperatorAssignmentDO selectAssignment(@Param("tenantId") Long tenantId,
+                                                   @Param("assignmentId") String assignmentId);
 }
