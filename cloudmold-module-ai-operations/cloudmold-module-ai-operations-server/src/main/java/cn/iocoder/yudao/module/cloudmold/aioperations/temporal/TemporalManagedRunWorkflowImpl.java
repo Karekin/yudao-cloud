@@ -17,6 +17,7 @@ public class TemporalManagedRunWorkflowImpl implements TemporalManagedRunWorkflo
             .status("QUEUED").phase("PREPARE").waitingOn("PREPARE").controlEventCount(0).build();
     private ApprovalGateChildWorkflow approvalChild;
     private SkillTaskChildWorkflow skillTaskChild;
+    private BusinessEventWaitChildWorkflow businessEventChild;
     private String acceptedApprovalDecision;
 
     public TemporalManagedRunWorkflowImpl() {
@@ -58,6 +59,14 @@ public class TemporalManagedRunWorkflowImpl implements TemporalManagedRunWorkflo
             current = skillTaskChild.run(request, current);
             refreshVisibility(request);
         }
+        if ("WAITING_EVENT".equals(current.getStatus())) {
+            businessEventChild = Workflow.newChildWorkflowStub(BusinessEventWaitChildWorkflow.class,
+                    ChildWorkflowOptions.newBuilder()
+                            .setWorkflowId(Workflow.getInfo().getWorkflowId() + "/business-event")
+                            .build());
+            current = businessEventChild.run(request, current);
+            refreshVisibility(request);
+        }
         return current;
     }
 
@@ -74,9 +83,18 @@ public class TemporalManagedRunWorkflowImpl implements TemporalManagedRunWorkflo
     }
 
     @Override
+    public void businessEvent(String eventCode, String eventRef) {
+        if (businessEventChild != null && current != null && !current.isTerminal()) {
+            businessEventChild.businessEvent(eventCode, eventRef);
+        }
+    }
+
+    @Override
     public void pause(String reason) {
         if (approvalChild != null && current != null && current.isWaitingApproval()) {
             approvalChild.pause(reason);
+        } else if (businessEventChild != null && current != null && "WAITING_EVENT".equals(current.getStatus())) {
+            businessEventChild.pause(reason);
         } else if (skillTaskChild != null && current != null && !current.isTerminal()) {
             skillTaskChild.pause(reason);
         }
@@ -87,6 +105,9 @@ public class TemporalManagedRunWorkflowImpl implements TemporalManagedRunWorkflo
         if (approvalChild != null && current != null && current.isPaused()
                 && "APPROVAL_GATE".equals(current.getResumableStatus() == null ? current.getPhase() : "APPROVAL_GATE")) {
             approvalChild.resume(reason);
+        } else if (businessEventChild != null && current != null && current.isPaused()
+                && "WAITING_EVENT".equals(current.getResumableStatus())) {
+            businessEventChild.resume(reason);
         } else if (skillTaskChild != null && current != null && current.isPaused()) {
             skillTaskChild.resume(reason);
         }
@@ -96,6 +117,8 @@ public class TemporalManagedRunWorkflowImpl implements TemporalManagedRunWorkflo
     public void cancel(String reason) {
         if (approvalChild != null && current != null && current.isWaitingApproval()) {
             approvalChild.cancel(reason);
+        } else if (businessEventChild != null && current != null && "WAITING_EVENT".equals(current.getStatus())) {
+            businessEventChild.cancel(reason);
         } else if (skillTaskChild != null && current != null && !current.isTerminal()) {
             skillTaskChild.cancel(reason);
         }

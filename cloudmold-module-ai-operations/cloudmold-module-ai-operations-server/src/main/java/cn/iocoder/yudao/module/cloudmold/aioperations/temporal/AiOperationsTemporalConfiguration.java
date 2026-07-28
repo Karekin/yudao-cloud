@@ -47,6 +47,7 @@ public class AiOperationsTemporalConfiguration {
         worker.registerWorkflowImplementationTypes(TemporalManagedRunWorkflowImpl.class);
         worker.registerWorkflowImplementationTypes(ApprovalGateChildWorkflowImpl.class);
         worker.registerWorkflowImplementationTypes(SkillTaskChildWorkflowImpl.class);
+        worker.registerWorkflowImplementationTypes(BusinessEventWaitChildWorkflowImpl.class);
         worker.registerActivitiesImplementations(activities);
         return factory;
     }

@@ -10,10 +10,12 @@ import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentControlQueryApi;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentControlResult;
 import cn.iocoder.yudao.module.cloudmold.aioperations.service.command.AiOperationsManagedRunCommandService;
 import cn.iocoder.yudao.module.cloudmold.aioperations.service.command.AiOperationsManagedRunQueryServiceFacade;
+import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoWarehouseInboundQueryApi;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskQueryApi;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskTerminalProofView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowView;
+import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningQueryApi;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -38,9 +40,13 @@ class TemporalManagedRunActivitiesImplTest {
     private final AgentAuthorityGovernanceApi authorityGovernance =
             mock(AgentAuthorityGovernanceApi.class);
     private final SkillTaskQueryApi skillTaskQueries = mock(SkillTaskQueryApi.class);
+    private final SupplyPlanningQueryApi supplyPlanningQueries = mock(SupplyPlanningQueryApi.class);
+    private final YudaoWarehouseInboundQueryApi warehouseInboundQueries =
+            mock(YudaoWarehouseInboundQueryApi.class);
     private final AiOperationsTemporalMapper mapper = mock(AiOperationsTemporalMapper.class);
     private final TemporalManagedRunActivitiesImpl activities = new TemporalManagedRunActivitiesImpl(
-            workflows, managedRuns, agentCommands, agentQueries, authorityGovernance, skillTaskQueries, mapper);
+            workflows, managedRuns, agentCommands, agentQueries, authorityGovernance, skillTaskQueries,
+            supplyPlanningQueries, warehouseInboundQueries, mapper);
 
     @AfterEach
     void tearDown() {

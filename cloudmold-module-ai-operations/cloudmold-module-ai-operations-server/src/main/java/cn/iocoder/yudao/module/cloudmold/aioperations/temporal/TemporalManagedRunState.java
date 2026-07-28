@@ -28,6 +28,8 @@ public class TemporalManagedRunState implements Serializable {
     private String approvalDecision;
     private String pauseReason;
     private String cancelReason;
+    private String businessReferenceId;
+    private String waitReference;
     private Integer controlEventCount;
     private TemporalManagedBusinessResult businessResult;
 

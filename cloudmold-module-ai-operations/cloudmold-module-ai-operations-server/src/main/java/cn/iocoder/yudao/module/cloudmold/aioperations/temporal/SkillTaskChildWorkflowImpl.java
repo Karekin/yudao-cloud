@@ -36,6 +36,9 @@ public class SkillTaskChildWorkflowImpl implements SkillTaskChildWorkflow {
             current = activities.resumeApproved(request, current);
         }
         while (current != null && !current.isTerminal()) {
+            if ("WAITING_EVENT".equals(current.getStatus())) {
+                return current;
+            }
             if (current.isPaused()) {
                 Workflow.await(() -> resumeReason != null || cancelReason != null);
                 if (cancelReason != null) {

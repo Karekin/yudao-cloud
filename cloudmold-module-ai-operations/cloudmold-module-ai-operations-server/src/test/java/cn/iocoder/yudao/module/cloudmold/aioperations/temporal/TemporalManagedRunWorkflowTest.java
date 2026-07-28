@@ -100,6 +100,23 @@ class TemporalManagedRunWorkflowTest {
         assertThat(activities.rejectCount.get()).isZero();
     }
 
+    @Test
+    void shouldResumeBusinessEventWaitOnlyOnceForDuplicateSignal() {
+        FakeActivities activities = new FakeActivities(FakeActivities.Mode.R1_BUSINESS_WAIT);
+        TemporalManagedRunWorkflow workflow = startAsync(
+                activities, request(false, 30L), "replenishment-business-event");
+
+        waitUntilStatus(workflow, "WAITING_EVENT");
+        workflow.businessEvent("SUPPLIER_CONFIRMED", "9001");
+        workflow.businessEvent("SUPPLIER_CONFIRMED", "9001");
+
+        TemporalManagedRunState result = waitForCompletion("replenishment-business-event");
+
+        assertThat(result.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(result.getBusinessResult().getOutcomeCode()).isEqualTo("REPLENISHMENT_COMPLETED");
+        assertThat(activities.businessEventRefreshCount.get()).isEqualTo(1);
+    }
+
     private TemporalManagedRunState runSynchronously(FakeActivities activities,
                                                      TemporalManagedRunRequest request,
                                                      String workflowId) {
@@ -127,14 +144,18 @@ class TemporalManagedRunWorkflowTest {
     }
 
     private void waitUntilWaitingApproval(TemporalManagedRunWorkflow workflow) {
+        waitUntilStatus(workflow, "WAITING_APPROVAL");
+    }
+
+    private void waitUntilStatus(TemporalManagedRunWorkflow workflow, String expectedStatus) {
         for (int i = 0; i < 10; i++) {
             environment.sleep(Duration.ofSeconds(1));
             TemporalManagedRunState state = workflow.state();
-            if (state != null && "WAITING_APPROVAL".equals(state.getStatus())) {
+            if (state != null && expectedStatus.equals(state.getStatus())) {
                 return;
             }
         }
-        throw new AssertionError("workflow never entered WAITING_APPROVAL");
+        throw new AssertionError("workflow never entered " + expectedStatus);
     }
 
     private TestWorkflowEnvironment buildEnvironment(FakeActivities activities) {
@@ -143,7 +164,8 @@ class TemporalManagedRunWorkflowTest {
         worker.registerWorkflowImplementationTypes(
                 TemporalManagedRunWorkflowImpl.class,
                 ApprovalGateChildWorkflowImpl.class,
-                SkillTaskChildWorkflowImpl.class);
+                SkillTaskChildWorkflowImpl.class,
+                BusinessEventWaitChildWorkflowImpl.class);
         worker.registerActivitiesImplementations(activities);
         testEnvironment.start();
         return testEnvironment;
@@ -168,6 +190,7 @@ class TemporalManagedRunWorkflowTest {
 
         enum Mode {
             R1_SUCCESS,
+            R1_BUSINESS_WAIT,
             R2_APPROVE_SUCCESS,
             R2_REJECT,
             R2_TIMEOUT
@@ -178,6 +201,7 @@ class TemporalManagedRunWorkflowTest {
         private final AtomicInteger refreshCount = new AtomicInteger();
         private final AtomicInteger rejectCount = new AtomicInteger();
         private final AtomicInteger timeoutCount = new AtomicInteger();
+        private final AtomicInteger businessEventRefreshCount = new AtomicInteger();
 
         private FakeActivities(Mode mode) {
             this.mode = mode;
@@ -185,7 +209,7 @@ class TemporalManagedRunWorkflowTest {
 
         @Override
         public TemporalManagedRunState prepare(TemporalManagedRunRequest request, String workflowId, String runId) {
-            if (mode == Mode.R1_SUCCESS) {
+            if (mode == Mode.R1_SUCCESS || mode == Mode.R1_BUSINESS_WAIT) {
                 return TemporalManagedRunState.builder()
                         .status("READY_FOR_SUBMISSION")
                         .phase("SKILL_TASK")
@@ -297,6 +321,21 @@ class TemporalManagedRunWorkflowTest {
         public TemporalManagedRunState refreshSkillTask(TemporalManagedRunRequest request,
                                                         TemporalManagedRunState current) {
             refreshCount.incrementAndGet();
+            if (mode == Mode.R1_BUSINESS_WAIT) {
+                return current.toBuilder()
+                        .status("WAITING_EVENT")
+                        .phase("BUSINESS_EVENT_GATE")
+                        .waitingOn("SUPPLIER_CONFIRMATION")
+                        .businessReferenceId("recommendation-1")
+                        .businessResult(TemporalManagedBusinessResult.builder()
+                                .outcomeCode("WAITING_BUSINESS_EVENT")
+                                .summary("等待供应商确认")
+                                .domainObjectType("PROCUREMENT_ORDER")
+                                .domainObjectId("po-1")
+                                .evidenceRef("projection-1")
+                                .build())
+                        .build();
+            }
             return current.toBuilder()
                     .status("SUCCEEDED")
                     .phase("COMPLETED")
@@ -308,6 +347,45 @@ class TemporalManagedRunWorkflowTest {
                             .domainObjectId(current.getTaskId())
                             .evidenceRef("proof-" + current.getTaskId())
                             .build())
+                    .build();
+        }
+
+        @Override
+        public TemporalManagedRunState enterBusinessEventWait(TemporalManagedRunRequest request,
+                                                              TemporalManagedRunState current,
+                                                              String waitReference) {
+            return current;
+        }
+
+        @Override
+        public TemporalManagedRunState refreshBusinessEventWait(TemporalManagedRunRequest request,
+                                                                TemporalManagedRunState current,
+                                                                String waitReference) {
+            businessEventRefreshCount.incrementAndGet();
+            return current.toBuilder()
+                    .status("SUCCEEDED")
+                    .phase("COMPLETED")
+                    .waitingOn(null)
+                    .waitReference(waitReference)
+                    .businessResult(TemporalManagedBusinessResult.builder()
+                            .outcomeCode("REPLENISHMENT_COMPLETED")
+                            .summary("补货链路已完成入库与上架")
+                            .domainObjectType("PROCUREMENT_ORDER")
+                            .domainObjectId("po-1")
+                            .evidenceRef(waitReference)
+                            .build())
+                    .build();
+        }
+
+        @Override
+        public TemporalManagedRunState timeoutBusinessEventWait(TemporalManagedRunRequest request,
+                                                                TemporalManagedRunState current) {
+            timeoutCount.incrementAndGet();
+            return current.toBuilder()
+                    .status("TIMED_OUT")
+                    .phase("COMPLETED")
+                    .waitingOn(null)
+                    .errorCode("BUSINESS_EVENT_TIMEOUT")
                     .build();
         }
     }

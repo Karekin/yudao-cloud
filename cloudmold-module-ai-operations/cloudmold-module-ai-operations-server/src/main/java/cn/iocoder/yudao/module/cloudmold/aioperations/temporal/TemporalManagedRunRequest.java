@@ -22,4 +22,5 @@ public class TemporalManagedRunRequest implements Serializable {
     private String roleCode;
     private String actionCode;
     private Long approvalTimeoutSeconds;
+    private Long businessEventTimeoutSeconds;
 }

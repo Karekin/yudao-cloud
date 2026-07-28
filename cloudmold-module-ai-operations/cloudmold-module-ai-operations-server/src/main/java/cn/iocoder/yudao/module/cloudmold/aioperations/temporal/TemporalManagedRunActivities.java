@@ -30,4 +30,15 @@ public interface TemporalManagedRunActivities {
 
     TemporalManagedRunState refreshSkillTask(TemporalManagedRunRequest request,
                                              TemporalManagedRunState current);
+
+    TemporalManagedRunState enterBusinessEventWait(TemporalManagedRunRequest request,
+                                                   TemporalManagedRunState current,
+                                                   String waitReference);
+
+    TemporalManagedRunState refreshBusinessEventWait(TemporalManagedRunRequest request,
+                                                     TemporalManagedRunState current,
+                                                     String waitReference);
+
+    TemporalManagedRunState timeoutBusinessEventWait(TemporalManagedRunRequest request,
+                                                     TemporalManagedRunState current);
 }

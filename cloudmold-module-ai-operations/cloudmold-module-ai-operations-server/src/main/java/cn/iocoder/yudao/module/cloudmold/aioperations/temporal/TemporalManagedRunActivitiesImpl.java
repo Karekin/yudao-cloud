@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.cloudmold.aioperations.temporal;
 
+import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.tenant.core.util.TenantUtils;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentControlCommand;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentControlCommandApi;
@@ -14,10 +15,14 @@ import cn.iocoder.yudao.module.cloudmold.aioperations.controller.admin.vo.Manage
 import cn.iocoder.yudao.module.cloudmold.aioperations.service.command.AiOperationsManagedRunCommandService;
 import cn.iocoder.yudao.module.cloudmold.aioperations.service.command.AiOperationsManagedRunQueryServiceFacade;
 import cn.iocoder.yudao.module.cloudmold.aioperations.service.command.ManagedSkillTaskTriggerResult;
+import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoWarehouseInboundQueryApi;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskQueryApi;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskTerminalProofView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowView;
+import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.ReplenishmentBusinessStageView;
+import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningQueryApi;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -26,11 +31,13 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.Objects;
 
 @Component
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "cloudmold.ai-operations.temporal", name = "enabled", havingValue = "true")
 public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActivities {
+    private static final String REPLENISHMENT_SKILL_ID = "skill.cloudmold.supply-planning.prepare.v1";
 
     private final AiOperationsManagedRunQueryServiceFacade workflows;
     private final AiOperationsManagedRunCommandService managedRuns;
@@ -38,6 +45,8 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
     private final AgentControlQueryApi agentQueries;
     private final AgentAuthorityGovernanceApi authorityGovernance;
     private final SkillTaskQueryApi skillTaskQueries;
+    private final SupplyPlanningQueryApi supplyPlanningQueries;
+    private final YudaoWarehouseInboundQueryApi warehouseInboundQueries;
     private final AiOperationsTemporalMapper mapper;
 
     @Override
@@ -194,6 +203,26 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
                         .build();
             }
             SkillTaskTerminalProofView proof = skillTaskQueries.getTerminalProof(current.getTaskId());
+            if ("SUCCEEDED".equals(status) && isReplenishmentPrepareSkill(request)) {
+                String recommendationId = current.getBusinessReferenceId() != null
+                        ? current.getBusinessReferenceId() : requireReplenishmentRecommendationId(request);
+                TemporalManagedRunState waiting = current.toBuilder()
+                        .status("WAITING_EVENT").phase("BUSINESS_EVENT_GATE")
+                        .waitingOn(null)
+                        .errorCode(null)
+                        .businessReferenceId(recommendationId)
+                        .businessResult(TemporalManagedBusinessResult.builder()
+                                .outcomeCode("REPLENISHMENT_PREPARED")
+                                .summary("补货建议已生成真实业务单据，等待后续业务事件")
+                                .domainObjectType("REPLENISHMENT_RECOMMENDATION")
+                                .domainObjectId(recommendationId)
+                                .evidenceRef(proof == null ? task.getRunId() : proof.getTerminalResultSha256())
+                                .build())
+                        .build();
+                mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), "WAITING_EVENT",
+                        null, current.getManagedRunId(), current.getTaskId(), now());
+                return enterBusinessEventWait(request, waiting, current.getWaitReference());
+            }
             String runStatus = "SUCCEEDED".equals(status) ? "SUCCEEDED" : "NEEDS_REVIEW";
             String errorCode = "SUCCEEDED".equals(status) ? null : status;
             mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), runStatus,
@@ -210,6 +239,40 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
                             .domainObjectType("SKILL_TASK")
                             .domainObjectId(task.getTaskId())
                             .evidenceRef(proof == null ? task.getRunId() : proof.getTerminalResultSha256())
+                            .build())
+                    .build();
+        });
+    }
+
+    @Override
+    public TemporalManagedRunState enterBusinessEventWait(TemporalManagedRunRequest request,
+                                                          TemporalManagedRunState current,
+                                                          String waitReference) {
+        return TenantUtils.execute(request.getTenantId(), () -> loadBusinessWaitState(request, current, waitReference));
+    }
+
+    @Override
+    public TemporalManagedRunState refreshBusinessEventWait(TemporalManagedRunRequest request,
+                                                            TemporalManagedRunState current,
+                                                            String waitReference) {
+        return TenantUtils.execute(request.getTenantId(), () -> loadBusinessWaitState(request, current, waitReference));
+    }
+
+    @Override
+    public TemporalManagedRunState timeoutBusinessEventWait(TemporalManagedRunRequest request,
+                                                            TemporalManagedRunState current) {
+        return TenantUtils.execute(request.getTenantId(), () -> {
+            mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), "TIMED_OUT",
+                    "BUSINESS_EVENT_TIMEOUT", current.getManagedRunId(), current.getTaskId(), now());
+            return current.toBuilder().status("TIMED_OUT").phase("COMPLETED")
+                    .waitingOn(null).errorCode("BUSINESS_EVENT_TIMEOUT")
+                    .businessResult(TemporalManagedBusinessResult.builder()
+                            .outcomeCode("BUSINESS_EVENT_TIMEOUT")
+                            .summary("补货业务事件在有效期内未推进到下一阶段")
+                            .domainObjectType(current.getBusinessResult() == null
+                                    ? "REPLENISHMENT_RECOMMENDATION" : current.getBusinessResult().getDomainObjectType())
+                            .domainObjectId(current.getBusinessReferenceId())
+                            .evidenceRef(current.getWaitReference())
                             .build())
                     .build();
         });
@@ -313,6 +376,140 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
         trigger.setSkillVersion(request.getSkillVersion());
         trigger.setInputJson(request.getInputJson());
         return trigger;
+    }
+
+    private TemporalManagedRunState loadBusinessWaitState(TemporalManagedRunRequest request,
+                                                          TemporalManagedRunState current,
+                                                          String waitReference) {
+        if (!isReplenishmentPrepareSkill(request)) {
+            return current;
+        }
+        String recommendationId = current.getBusinessReferenceId() != null
+                ? current.getBusinessReferenceId() : requireReplenishmentRecommendationId(request);
+        ReplenishmentBusinessStageView stage = supplyPlanningQueries.requireReplenishmentBusinessStage(recommendationId);
+        if ("PURCHASE_REQUEST".equals(stage.getTargetType())
+                && waitReference != null
+                && stage.getProcurementOrderId() != null
+                && "SUPPLIER_CONFIRMED".equals(stage.getProcurementOrderStatus())) {
+            YudaoWarehouseInboundQueryApi.PurchaseInboundTerminalView inbound =
+                    warehouseInboundQueries.getPurchaseInboundTerminal(
+                            new YudaoWarehouseInboundQueryApi.PurchaseInboundTerminalQuery(
+                                    "PROCUREMENT_ORDER", stage.getProcurementOrderId(),
+                                    stage.getProcurementOrderNo(), Long.valueOf(waitReference)));
+            stage = stage.toBuilder()
+                    .asnStatus(inbound.asnStatus())
+                    .receiptStatus(inbound.receiptStatus())
+                    .qualityStatus(inbound.qualityStatus())
+                    .putawayStatus(inbound.putawayStatus())
+                    .nextWaitingEventCode(inbound.nextWaitingEventCode())
+                    .nextWaitingEventLabel(inbound.nextWaitingEventLabel())
+                    .inventoryLedgerTransactionId(inbound.inventoryLedgerTransactionId())
+                    .inventoryBalanceId(inbound.inventoryBalanceId())
+                    .build();
+        }
+        return evaluateBusinessStage(request, current, recommendationId, waitReference, stage);
+    }
+
+    private TemporalManagedRunState evaluateBusinessStage(TemporalManagedRunRequest request,
+                                                          TemporalManagedRunState current,
+                                                          String recommendationId,
+                                                          String waitReference,
+                                                          ReplenishmentBusinessStageView stage) {
+        if ("CANCELLED".equals(stage.getProcurementOrderStatus())
+                || "CANCELLED".equals(stage.getReceiptStatus())
+                || "CANCELLED".equals(stage.getPutawayStatus())) {
+            mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), "CANCELLED",
+                    "BUSINESS_CANCELLED", current.getManagedRunId(), current.getTaskId(), now());
+            return current.toBuilder().status("CANCELLED").phase("COMPLETED")
+                    .waitingOn(null).errorCode("BUSINESS_CANCELLED")
+                    .businessReferenceId(recommendationId)
+                    .waitReference(waitReference)
+                    .businessResult(stageResult("BUSINESS_CANCELLED", "补货业务链路被取消", stage))
+                    .build();
+        }
+        if (isNeedsReview(stage)) {
+            mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), "NEEDS_REVIEW",
+                    "BUSINESS_NEEDS_REVIEW", current.getManagedRunId(), current.getTaskId(), now());
+            return current.toBuilder().status("NEEDS_REVIEW").phase("COMPLETED")
+                    .waitingOn(null).errorCode("BUSINESS_NEEDS_REVIEW")
+                    .businessReferenceId(recommendationId)
+                    .waitReference(waitReference)
+                    .businessResult(stageResult("BUSINESS_NEEDS_REVIEW", "补货链路需要人工复核", stage))
+                    .build();
+        }
+        if (isBusinessStageCompleted(stage)) {
+            mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), "SUCCEEDED",
+                    null, current.getManagedRunId(), current.getTaskId(), now());
+            return current.toBuilder().status("SUCCEEDED").phase("COMPLETED")
+                    .waitingOn(null).errorCode(null)
+                    .businessReferenceId(recommendationId)
+                    .waitReference(waitReference)
+                    .businessResult(stageResult("REPLENISHMENT_COMPLETED", "补货链路已完成入库与上架", stage))
+                    .build();
+        }
+        mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), "WAITING_EVENT",
+                null, current.getManagedRunId(), current.getTaskId(), now());
+        return current.toBuilder().status("WAITING_EVENT").phase("BUSINESS_EVENT_GATE")
+                .waitingOn(stage.getNextWaitingEventCode())
+                .errorCode(null)
+                .businessReferenceId(recommendationId)
+                .waitReference(waitReference)
+                .businessResult(stageResult("WAITING_BUSINESS_EVENT", stageSummary(stage), stage))
+                .build();
+    }
+
+    private static TemporalManagedBusinessResult stageResult(String outcomeCode, String summary,
+                                                             ReplenishmentBusinessStageView stage) {
+        String domainType = stage.getProcurementOrderId() != null ? "PROCUREMENT_ORDER" : stage.getTargetType();
+        String domainId = stage.getProcurementOrderId() != null ? stage.getProcurementOrderId() : stage.getRecommendationId();
+        String evidenceRef = stage.getProjectionExternalDocumentId() != null
+                ? stage.getProjectionSourceSystem() + ":" + stage.getProjectionDocumentType() + ":" + stage.getProjectionExternalDocumentId()
+                : stage.getRecommendationId();
+        return TemporalManagedBusinessResult.builder()
+                .outcomeCode(outcomeCode)
+                .summary(summary)
+                .domainObjectType(domainType)
+                .domainObjectId(domainId)
+                .evidenceRef(evidenceRef)
+                .build();
+    }
+
+    private static boolean isBusinessStageCompleted(ReplenishmentBusinessStageView stage) {
+        return "COMPLETED".equals(stage.getSupplierConfirmationStatus())
+                && "COMPLETED".equals(stage.getAsnStatus())
+                && "COMPLETED".equals(stage.getReceiptStatus())
+                && "COMPLETED".equals(stage.getQualityStatus())
+                && "COMPLETED".equals(stage.getPutawayStatus());
+    }
+
+    private static boolean isNeedsReview(ReplenishmentBusinessStageView stage) {
+        return startsWith(stage.getReceiptStatus(), "NEEDS_")
+                || startsWith(stage.getQualityStatus(), "NEEDS_")
+                || startsWith(stage.getPutawayStatus(), "NEEDS_")
+                || "MANUAL_RECONCILIATION".equals(stage.getNextWaitingEventCode());
+    }
+
+    private static boolean startsWith(String value, String prefix) {
+        return value != null && value.startsWith(prefix);
+    }
+
+    private static String stageSummary(ReplenishmentBusinessStageView stage) {
+        return "等待业务事件：" + (stage.getNextWaitingEventLabel() == null
+                ? stage.getNextWaitingEventCode() : stage.getNextWaitingEventLabel());
+    }
+
+    private static boolean isReplenishmentPrepareSkill(TemporalManagedRunRequest request) {
+        return REPLENISHMENT_SKILL_ID.equals(request.getSkillId());
+    }
+
+    private static String requireReplenishmentRecommendationId(TemporalManagedRunRequest request) {
+        JsonNode root = JsonUtils.parseTree(request.getInputJson());
+        JsonNode command = root == null ? null : root.path("command");
+        JsonNode conversion = command == null ? null : command.path("replenishmentConversion");
+        String recommendationId = JsonUtils.getText(conversion, "recommendationId");
+        require(recommendationId != null && !recommendationId.isBlank(),
+                "replenishment Temporal input is missing recommendationId");
+        return recommendationId;
     }
 
     private void persist(TemporalManagedRunRequest request, TemporalManagedRunState state) {
