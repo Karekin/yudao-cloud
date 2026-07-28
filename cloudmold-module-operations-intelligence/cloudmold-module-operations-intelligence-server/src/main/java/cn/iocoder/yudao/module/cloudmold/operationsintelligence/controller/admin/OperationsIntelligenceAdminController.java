@@ -2,6 +2,9 @@ package cn.iocoder.yudao.module.cloudmold.operationsintelligence.controller.admi
 
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.*;
+import cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.workflow.BusinessControlWorkflowResult;
+import cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.workflow.DailyBusinessControlQueryPort;
+import cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.workflow.WeeklyBusinessReviewQueryPort;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
@@ -16,6 +19,8 @@ import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 public class OperationsIntelligenceAdminController {
     @Resource private OperationsIntelligenceCommandApi commandApi;
     @Resource private OperationsIntelligenceQueryApi queryApi;
+    @Resource private DailyBusinessControlQueryPort dailyBusinessControlQueryPort;
+    @Resource private WeeklyBusinessReviewQueryPort weeklyBusinessReviewQueryPort;
 
     @PostMapping("/command")
     @Operation(summary = "Record governed observations, reviewed clues and alert lifecycle changes")
@@ -46,5 +51,19 @@ public class OperationsIntelligenceAdminController {
     @PreAuthorize("@ss.hasPermission('cloudmold:operations-intelligence:query')")
     public CommonResult<OperationsIntelligenceResult> getAlert(@RequestParam String alertId) {
         return success(queryApi.getAlert(alertId));
+    }
+
+    @GetMapping("/workflow/daily-business-control")
+    @Operation(summary = "Get the tenant-scoped daily business control read model without writing Mission state")
+    @PreAuthorize("@ss.hasPermission('cloudmold:operations-intelligence:query')")
+    public CommonResult<BusinessControlWorkflowResult> getDailyBusinessControl() {
+        return success(dailyBusinessControlQueryPort.inspectDaily());
+    }
+
+    @GetMapping("/workflow/weekly-business-review")
+    @Operation(summary = "Get the tenant-scoped weekly business review read model without writing Mission state")
+    @PreAuthorize("@ss.hasPermission('cloudmold:operations-intelligence:query')")
+    public CommonResult<BusinessControlWorkflowResult> getWeeklyBusinessReview() {
+        return success(weeklyBusinessReviewQueryPort.inspectWeekly());
     }
 }
