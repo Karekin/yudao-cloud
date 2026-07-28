@@ -82,6 +82,20 @@ class CloudMoldCapabilityCatalogTest {
             assertThat(capability.methodName()).isEqualTo("savePurchasePromise");
             assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.WRITE);
         });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.supplyplanning.supply-planning-command.execute.sig-1ca9b1370b9e.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningCommandApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.WRITE);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.supplyplanning.supply-planning-query.require-replenishment-business-stage.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningQueryApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.READ);
+        });
     }
 
     @Test

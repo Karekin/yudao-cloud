@@ -19,5 +19,6 @@ cn.iocoder.yudao.module.cloudmold.payment.api
 cn.iocoder.yudao.module.cloudmold.promotion.api
 cn.iocoder.yudao.module.cloudmold.risk.api
 cn.iocoder.yudao.module.cloudmold.skilltask.api
+cn.iocoder.yudao.module.cloudmold.supplyplanning.api
 cn.iocoder.yudao.module.cloudmold.tokenplatform.api
 cn.iocoder.yudao.module.cloudmold.warehouse.api
