@@ -12,4 +12,8 @@ public interface AgentApprovalWorkflowAttestationGate {
     };
 
     void assertDecisionAllowed(Long tenantId, Long operatorUserId, Approval approval, String decision);
+
+    default boolean supportsR3MultiPartyApproval() {
+        return false;
+    }
 }

@@ -49,6 +49,7 @@ class AgentControlServiceImplTest {
         when(mapper.markOperationSucceeded(anyLong(), eq(17L), anyString(), anyString(), anyString(), any()))
                 .thenReturn(1);
         when(mapper.insertAuditEvent(any())).thenReturn(1);
+        when(approvalAttestations.supportsR3MultiPartyApproval()).thenReturn(true);
         when(mapper.insertAgentOutbox(any(), eq(17L), anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(1);
         when(mapper.selectRole(eq(17L), anyString())).thenAnswer(invocation -> activeRole(invocation.getArgument(1)));
@@ -156,6 +157,15 @@ class AgentControlServiceImplTest {
                         .decision("APPROVE").reasonCode("WITHIN_BUDGET").approvalExpectedVersion(1L)
                         .workOrderExpectedVersion(2L).build()).build(), 100L))
                 .hasMessage("approval requester and approver must be different authenticated users");
+
+        row.setAssigneeUserId(200L);
+        assertThatThrownBy(() -> service.execute(base(AgentControlOperation.DECIDE_APPROVAL,
+                "approval-executor-self-1")
+                .approval(AgentControlCommand.ApprovalDefinition.builder().approvalId("approval-1")
+                        .decision("APPROVE").reasonCode("WITHIN_BUDGET").approvalExpectedVersion(1L)
+                        .workOrderExpectedVersion(2L).build()).build(), 200L))
+                .hasMessage("work-order executor and approver must be different authenticated users");
+        row.setAssigneeUserId(null);
 
         when(mapper.decideApproval(eq(17L), eq("approval-1"), eq(1L), eq("APPROVED"), eq(200L),
                 eq("WITHIN_BUDGET"), any()))
@@ -473,6 +483,7 @@ class AgentControlServiceImplTest {
                 .setRoleCode("buyer").setActionCode("purchase.commit").setBusinessContextJson("{\"sku\":\"A\"}")
                 .setRequesterUserId(100L).setStatus("WAITING_APPROVAL").setVersion(1L);
         RoleActionPolicy approvalPolicy = policy("buyer", "purchase.commit", true);
+        approvalPolicy.setRiskLevel("R2");
         freeze(row, approvalPolicy, row.getBusinessContextJson());
         when(mapper.selectActionPolicy(17L, "buyer", "purchase.commit")).thenReturn(approvalPolicy);
         workOrder.set(row);
@@ -502,6 +513,7 @@ class AgentControlServiceImplTest {
                 .setRequesterUserId(100L).setApprovalId("approval-exact").setStatus("WAITING_APPROVAL")
                 .setVersion(2L);
         RoleActionPolicy approvalPolicy = policy("buyer", "purchase.commit", true);
+        approvalPolicy.setRiskLevel("R2");
         freeze(row, approvalPolicy, row.getBusinessContextJson());
         workOrder.set(row);
         Approval approvalRow = new Approval().setApprovalId("approval-exact").setTenantId(17L)
@@ -510,7 +522,7 @@ class AgentControlServiceImplTest {
         approval.set(approvalRow);
         when(mapper.selectActionPolicy(17L, "buyer", "purchase.commit")).thenReturn(approvalPolicy);
         when(mapper.selectEffectiveApprovalAuthorityGrant(eq(17L), eq(200L), eq("approval-exact"),
-                eq("buyer"), eq("purchase.commit"), eq("R3"), eq(approvalRow.getScopeHash()), any()))
+                eq("buyer"), eq("purchase.commit"), eq("R2"), eq(approvalRow.getScopeHash()), any()))
                 .thenReturn(null);
 
         assertThatThrownBy(() -> service.execute(base(AgentControlOperation.DECIDE_APPROVAL, "approval-no-grant")

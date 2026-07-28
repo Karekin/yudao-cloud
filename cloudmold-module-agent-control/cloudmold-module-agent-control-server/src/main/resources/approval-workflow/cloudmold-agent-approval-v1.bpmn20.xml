@@ -9,7 +9,7 @@
   <process id="cloudmold-agent-approval-v1"
            name="Agent 高风险动作审批"
            isExecutable="true">
-    <documentation>CloudMold fixed approval flow for explicit, pre-granted human approvers.</documentation>
+    <documentation>R2 默认由租户运营主体首审；R3 在运营主体通过后，由同租户领域责任人并行全员会签。所有审批人均由有效治理授权动态注入，不绑定固定用户。</documentation>
 
     <startEvent id="start_event" name="提交审批"/>
 
@@ -18,14 +18,51 @@
                   targetRef="approval_review"/>
 
     <userTask id="approval_review"
-              name="审批人审核"
+              name="运营主体首审"
               flowable:candidateStrategy="35"
               flowable:approveType="1">
-      <documentation>候选审批人必须由 startUserSelectAssignees 显式注入。</documentation>
+      <extensionElements>
+        <flowable:approveType>1</flowable:approveType>
+        <flowable:approveMethod>1</flowable:approveMethod>
+      </extensionElements>
+      <documentation>候选审批人必须由租户内有效审批授权动态解析并通过 startUserSelectAssignees 注入；请求人和执行人不得自审。</documentation>
     </userTask>
 
-    <sequenceFlow id="flow_review_to_end"
+    <sequenceFlow id="flow_review_to_risk_gateway"
                   sourceRef="approval_review"
+                  targetRef="risk_gateway"/>
+
+    <exclusiveGateway id="risk_gateway"
+                      name="是否 R3"
+                      default="flow_r2_to_end"/>
+
+    <sequenceFlow id="flow_r3_to_countersign"
+                  sourceRef="risk_gateway"
+                  targetRef="domain_responsibility_countersign">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${risk_level == 'R3'}]]></conditionExpression>
+    </sequenceFlow>
+
+    <userTask id="domain_responsibility_countersign"
+              name="领域责任人会签"
+              flowable:candidateStrategy="35"
+              flowable:approveType="1">
+      <extensionElements>
+        <flowable:approveType>1</flowable:approveType>
+        <flowable:approveMethod>2</flowable:approveMethod>
+      </extensionElements>
+      <documentation>R3 领域责任人由同租户有效角色授予解析。所有责任人必须通过；任一拒绝即拒绝流程。</documentation>
+      <multiInstanceLoopCharacteristics isSequential="false"
+                                        flowable:collection="${coll_userList}">
+        <completionCondition xsi:type="tFormalExpression"><![CDATA[${nrOfCompletedInstances/nrOfInstances >= 1.00}]]></completionCondition>
+      </multiInstanceLoopCharacteristics>
+    </userTask>
+
+    <sequenceFlow id="flow_countersign_to_end"
+                  sourceRef="domain_responsibility_countersign"
+                  targetRef="approved_end"/>
+
+    <sequenceFlow id="flow_r2_to_end"
+                  sourceRef="risk_gateway"
                   targetRef="approved_end"/>
 
     <endEvent id="approved_end" name="审批结束"/>
@@ -45,11 +82,23 @@
                         bpmnElement="approval_review">
         <dc:Bounds x="280" y="160" width="140" height="80"/>
       </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BPMNShape_risk_gateway"
+                        bpmnElement="risk_gateway"
+                        isMarkerVisible="true">
+        <dc:Bounds x="470" y="175" width="50" height="50"/>
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="463" y="232" width="64" height="22"/>
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BPMNShape_domain_responsibility_countersign"
+                        bpmnElement="domain_responsibility_countersign">
+        <dc:Bounds x="580" y="130" width="160" height="80"/>
+      </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="BPMNShape_approved_end"
                         bpmnElement="approved_end">
-        <dc:Bounds x="510" y="182" width="36" height="36"/>
+        <dc:Bounds x="820" y="182" width="36" height="36"/>
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="492" y="225" width="72" height="22"/>
+          <dc:Bounds x="802" y="225" width="72" height="22"/>
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="BPMNEdge_flow_start_to_review"
@@ -57,10 +106,30 @@
         <di:waypoint x="196" y="200"/>
         <di:waypoint x="280" y="200"/>
       </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="BPMNEdge_flow_review_to_end"
-                       bpmnElement="flow_review_to_end">
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_review_to_risk_gateway"
+                       bpmnElement="flow_review_to_risk_gateway">
         <di:waypoint x="420" y="200"/>
-        <di:waypoint x="510" y="200"/>
+        <di:waypoint x="470" y="200"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_r3_to_countersign"
+                       bpmnElement="flow_r3_to_countersign">
+        <di:waypoint x="495" y="175"/>
+        <di:waypoint x="495" y="170"/>
+        <di:waypoint x="580" y="170"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_countersign_to_end"
+                       bpmnElement="flow_countersign_to_end">
+        <di:waypoint x="740" y="170"/>
+        <di:waypoint x="780" y="170"/>
+        <di:waypoint x="780" y="200"/>
+        <di:waypoint x="820" y="200"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_r2_to_end"
+                       bpmnElement="flow_r2_to_end">
+        <di:waypoint x="495" y="225"/>
+        <di:waypoint x="495" y="280"/>
+        <di:waypoint x="838" y="280"/>
+        <di:waypoint x="838" y="218"/>
       </bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>

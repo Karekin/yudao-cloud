@@ -17,9 +17,21 @@ JOIN cloudmold_agent_approval a
 WHERE b.status = 'BPM_APPROVED_PENDING_ATTESTATION'
   AND a.status = 'APPROVED'
   AND (a.approver_user_id IS NULL
-       OR a.approver_user_id <> b.approver_user_id
-       OR b.terminal_operator_user_id <> b.approver_user_id
-       OR BINARY b.terminal_task_definition_key <> BINARY 'approval_review'
+       OR a.approver_user_id <> b.terminal_operator_user_id
+       OR (b.risk_level <> 'R3'
+           AND (b.terminal_operator_user_id <> b.approver_user_id
+                OR BINARY b.terminal_task_definition_key <> BINARY 'approval_review'))
+       OR (b.risk_level = 'R3'
+           AND (BINARY b.terminal_task_definition_key <> BINARY 'domain_responsibility_countersign'
+                OR b.responsibility_authority_sha256 IS NULL
+                OR NOT EXISTS (
+                    SELECT 1
+                    FROM JSON_TABLE(
+                        b.responsibility_approver_user_ids_json,
+                        '$[*]' COLUMNS (user_id BIGINT PATH '$')
+                    ) responsible
+                    WHERE responsible.user_id = b.terminal_operator_user_id
+                )))
        OR BINARY a.scope_hash <> BINARY b.scope_hash)
 UNION ALL
 SELECT 'agent_approval_workflow_terminal_event_mismatch', COUNT(*)
@@ -50,17 +62,56 @@ SELECT 'agent_approval_workflow_invalid_terminal_attestation', COUNT(*)
 FROM cloudmold_agent_approval_workflow_binding
 WHERE (status IN ('BPM_APPROVED_PENDING_ATTESTATION','BPM_REJECTED')
        AND (terminal_operator_user_id IS NULL
-            OR terminal_operator_user_id <> approver_user_id
             OR terminal_task_id IS NULL OR terminal_task_id = ''
-            OR BINARY terminal_task_definition_key <> BINARY 'approval_review'))
+            OR terminal_task_definition_key IS NULL
+            OR (risk_level <> 'R3'
+                AND (terminal_operator_user_id <> approver_user_id
+                     OR BINARY terminal_task_definition_key <> BINARY 'approval_review'))
+            OR (risk_level = 'R3'
+                AND (responsibility_authority_sha256 IS NULL
+                     OR responsibility_role_codes_json IS NULL
+                     OR responsibility_approver_user_ids_json IS NULL
+                     OR (BINARY terminal_task_definition_key = BINARY 'approval_review'
+                         AND terminal_operator_user_id <> approver_user_id)
+                     OR (BINARY terminal_task_definition_key = BINARY 'domain_responsibility_countersign'
+                         AND NOT EXISTS (
+                             SELECT 1
+                             FROM JSON_TABLE(
+                                 responsibility_approver_user_ids_json,
+                                 '$[*]' COLUMNS (user_id BIGINT PATH '$')
+                             ) responsible
+                             WHERE responsible.user_id = terminal_operator_user_id
+                         ))
+                     OR terminal_task_definition_key NOT IN (
+                         'approval_review','domain_responsibility_countersign')))))
    OR (status NOT IN ('BPM_APPROVED_PENDING_ATTESTATION','BPM_REJECTED','BPM_CANCELLED')
        AND (terminal_operator_user_id IS NOT NULL
             OR terminal_task_id IS NOT NULL
             OR terminal_task_definition_key IS NOT NULL))
 UNION ALL
 SELECT 'agent_approval_workflow_invalid_terminal_event_evidence', COUNT(*)
-FROM cloudmold_agent_approval_workflow_event
-WHERE observed_status IN ('BPM_APPROVED_PENDING_ATTESTATION','BPM_REJECTED')
-  AND (terminal_operator_user_id IS NULL
-       OR terminal_task_id IS NULL OR terminal_task_id = ''
-       OR BINARY terminal_task_definition_key <> BINARY 'approval_review');
+FROM cloudmold_agent_approval_workflow_event e
+JOIN cloudmold_agent_approval_workflow_binding b
+  ON b.tenant_id = e.tenant_id
+ AND BINARY b.approval_id = BINARY e.approval_id
+WHERE e.observed_status IN ('BPM_APPROVED_PENDING_ATTESTATION','BPM_REJECTED')
+  AND (e.terminal_operator_user_id IS NULL
+       OR e.terminal_task_id IS NULL OR e.terminal_task_id = ''
+       OR e.terminal_task_definition_key IS NULL
+       OR (b.risk_level <> 'R3'
+           AND (e.terminal_operator_user_id <> b.approver_user_id
+                OR BINARY e.terminal_task_definition_key <> BINARY 'approval_review'))
+       OR (b.risk_level = 'R3'
+           AND ((BINARY e.terminal_task_definition_key = BINARY 'approval_review'
+                 AND e.terminal_operator_user_id <> b.approver_user_id)
+                OR (BINARY e.terminal_task_definition_key = BINARY 'domain_responsibility_countersign'
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM JSON_TABLE(
+                            b.responsibility_approver_user_ids_json,
+                            '$[*]' COLUMNS (user_id BIGINT PATH '$')
+                        ) responsible
+                        WHERE responsible.user_id = e.terminal_operator_user_id
+                    ))
+                OR e.terminal_task_definition_key NOT IN (
+                    'approval_review','domain_responsibility_countersign'))));

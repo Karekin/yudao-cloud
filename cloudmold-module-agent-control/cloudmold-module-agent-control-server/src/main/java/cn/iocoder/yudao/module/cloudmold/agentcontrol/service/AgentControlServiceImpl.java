@@ -317,6 +317,9 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
                 "approval requester and approver must be different authenticated users");
         WorkOrder workOrder = requireNonNull(mapper.selectWorkOrderForUpdate(tenantId, approval.getWorkOrderId()),
                 "work order not found");
+        require(workOrder.getAssigneeUserId() == null
+                        || !operatorUserId.equals(workOrder.getAssigneeUserId()),
+                "work-order executor and approver must be different authenticated users");
         requireActiveRole(tenantId, workOrder.getRoleCode());
         requireExpectedVersion(input.getWorkOrderExpectedVersion(), workOrder.getVersion(),
                 "workOrderExpectedVersion");
@@ -334,9 +337,15 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
                         && Objects.equals(workOrder.getActionPolicyVersion(), policy.getVersion())
                         && Objects.equals(workOrder.getRiskLevel(), policy.getRiskLevel()),
                 "work order action policy snapshot no longer matches the configured policy");
-        require(mapper.selectEffectiveApprovalAuthorityGrant(tenantId, operatorUserId, approval.getApprovalId(),
-                workOrder.getRoleCode(), workOrder.getActionCode(), workOrder.getRiskLevel(), approval.getScopeHash(),
-                now) != null, "authenticated actor has no exact effective approver grant");
+        if ("R3".equals(workOrder.getRiskLevel())) {
+            require(approvalAttestations.supportsR3MultiPartyApproval(),
+                    "R3 decision requires the governed multi-party BPM approval gate");
+        } else {
+            require(mapper.selectEffectiveApprovalAuthorityGrant(tenantId, operatorUserId, approval.getApprovalId(),
+                    workOrder.getRoleCode(), workOrder.getActionCode(), workOrder.getRiskLevel(),
+                    approval.getScopeHash(), now) != null,
+                    "authenticated actor has no exact effective approver grant");
+        }
         approvalAttestations.assertDecisionAllowed(tenantId, operatorUserId, approval, input.getDecision());
         String approvalStatus = "APPROVE".equals(input.getDecision()) ? "APPROVED" : "REJECTED";
         String workOrderStatus = "APPROVE".equals(input.getDecision()) ? "READY" : "CANCELLED";

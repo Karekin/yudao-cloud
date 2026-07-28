@@ -4,12 +4,14 @@ import cn.iocoder.yudao.module.bpm.api.event.BpmProcessInstanceStatusEvent;
 import cn.iocoder.yudao.module.bpm.enums.task.BpmProcessInstanceStatusEnum;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.*;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql.AgentControlStoreMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -20,9 +22,23 @@ class AgentApprovalWorkflowServiceTest {
     private static final Instant NOW = Instant.parse("2026-07-25T01:00:00Z");
     private final AgentControlStoreMapper mapper = mock(AgentControlStoreMapper.class);
     private final AgentApprovalWorkflowAdapter adapter = mock(AgentApprovalWorkflowAdapter.class);
+    private final AgentApprovalResponsibilityResolver responsibilityResolver =
+            mock(AgentApprovalResponsibilityResolver.class);
     private final AgentApprovalWorkflowProperties properties = properties();
     private final AgentApprovalWorkflowService service = new AgentApprovalWorkflowService(
-            mapper, adapter, properties, Clock.fixed(NOW, ZoneOffset.UTC));
+            mapper, adapter, responsibilityResolver, properties, Clock.fixed(NOW, ZoneOffset.UTC));
+
+    @BeforeEach
+    void setUpResponsibilityResolution() {
+        lenient().when(responsibilityResolver.resolve(any(), any())).thenAnswer(invocation -> {
+            ApprovalWorkflowStartCandidate candidate = invocation.getArgument(0);
+            candidate.setResponsibilityRoleCodes(List.of("buyer", "finance"))
+                    .setResponsibilityApproverUserIds(List.of(210L, 220L))
+                    .setResponsibilityAuthoritySha256("b".repeat(64));
+            return new AgentApprovalResponsibilityResolver.Resolution(
+                    List.of("buyer", "finance"), List.of(210L, 220L), "b".repeat(64));
+        });
+    }
 
     @Test
     void registersFrozenBindingIdempotently() {
@@ -71,7 +87,9 @@ class AgentApprovalWorkflowServiceTest {
     @Test
     void claimsExactlyOnceBeforeStartingBpm() {
         ApprovalWorkflowStartCandidate candidate = candidate();
-        when(mapper.claimApprovalWorkflowStart(eq(17L), eq("approval-1"), eq(1L), eq(200L), anyString(), any()))
+        when(mapper.claimApprovalWorkflowStart(eq(17L), eq("approval-1"), eq(1L), eq(200L),
+                eq("[\"buyer\",\"finance\"]"), eq("[210,220]"), eq("b".repeat(64)),
+                anyString(), any()))
                 .thenReturn(1);
         when(adapter.start(candidate)).thenReturn("process-1");
         when(mapper.markApprovalWorkflowRunning(eq(17L), eq("approval-1"), anyString(),
@@ -86,7 +104,9 @@ class AgentApprovalWorkflowServiceTest {
 
     @Test
     void concurrentLoserDoesNotCallBpm() {
-        when(mapper.claimApprovalWorkflowStart(eq(17L), eq("approval-1"), eq(1L), eq(200L), anyString(), any()))
+        when(mapper.claimApprovalWorkflowStart(eq(17L), eq("approval-1"), eq(1L), eq(200L),
+                eq("[\"buyer\",\"finance\"]"), eq("[210,220]"), eq("b".repeat(64)),
+                anyString(), any()))
                 .thenReturn(0);
 
         assertThat(service.start(candidate())).isFalse();
@@ -97,7 +117,9 @@ class AgentApprovalWorkflowServiceTest {
     @Test
     void ambiguousStartFailureStopsAutomaticRetry() {
         ApprovalWorkflowStartCandidate candidate = candidate();
-        when(mapper.claimApprovalWorkflowStart(eq(17L), eq("approval-1"), eq(1L), eq(200L), anyString(), any()))
+        when(mapper.claimApprovalWorkflowStart(eq(17L), eq("approval-1"), eq(1L), eq(200L),
+                eq("[\"buyer\",\"finance\"]"), eq("[210,220]"), eq("b".repeat(64)),
+                anyString(), any()))
                 .thenReturn(1);
         when(adapter.start(candidate)).thenThrow(new IllegalStateException("timeout after send"));
         when(mapper.markApprovalWorkflowStartUncertain(eq(17L), eq("approval-1"), anyString(),

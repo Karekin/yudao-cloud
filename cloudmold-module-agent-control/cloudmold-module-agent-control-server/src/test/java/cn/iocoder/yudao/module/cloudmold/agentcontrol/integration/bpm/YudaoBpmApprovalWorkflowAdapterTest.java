@@ -39,17 +39,39 @@ class YudaoBpmApprovalWorkflowAdapterTest {
         verify(bpm).createProcessInstance(eq(100L), request.capture());
         assertThat(request.getValue().getProcessDefinitionKey()).isEqualTo("cloudmold-agent-approval-v1");
         assertThat(request.getValue().getBusinessKey()).isEqualTo("cloudmold-agent-approval:17:approval-1");
-        assertThat(request.getValue().getVariables()).containsExactly(
+        assertThat(request.getValue().getVariables()).contains(
                 org.assertj.core.api.Assertions.entry("approval_id", "approval-1"),
                 org.assertj.core.api.Assertions.entry("work_order_id", "work-1"),
                 org.assertj.core.api.Assertions.entry("action_code", "purchase.commit"),
                 org.assertj.core.api.Assertions.entry("role_code", "buyer"),
                 org.assertj.core.api.Assertions.entry("risk_level", "R3"),
-                org.assertj.core.api.Assertions.entry("scope_hash", "a".repeat(64)));
+                org.assertj.core.api.Assertions.entry("scope_hash", "a".repeat(64)),
+                org.assertj.core.api.Assertions.entry("approval_stage",
+                        "OPERATING_PRINCIPAL_THEN_DOMAIN_COUNTERSIGN"),
+                org.assertj.core.api.Assertions.entry("approver_source", "TENANT_APPROVAL_AUTHORITY_GRANT"),
+                org.assertj.core.api.Assertions.entry("responsibility_roles",
+                        java.util.List.of("buyer", "finance")),
+                org.assertj.core.api.Assertions.entry("responsibility_authority_sha256", "b".repeat(64)),
+                org.assertj.core.api.Assertions.entry("countersign_strategy",
+                        "SERIAL_STAGE_THEN_PARALLEL_UNANIMOUS"),
+                org.assertj.core.api.Assertions.entry("business_action",
+                        "提交采购单（purchase.commit）"),
+                org.assertj.core.api.Assertions.entry("impact_objects",
+                        "supplierId=supplier-1；sku=SKU-A"),
+                org.assertj.core.api.Assertions.entry("impact_metrics",
+                        "quantity=120；amountMinor=398000；currency=CNY"),
+                org.assertj.core.api.Assertions.entry("recommendation", "建议采购"),
+                org.assertj.core.api.Assertions.entry("evidence_summary", "销量预测与安全库存"),
+                org.assertj.core.api.Assertions.entry("non_execution_consequence", "预计三天后缺货"),
+                org.assertj.core.api.Assertions.entry("execution_steps", "创建采购单, 等待供应商确认"));
         assertThat(request.getValue().getStartUserSelectAssignees())
-                .containsOnlyKeys(YudaoBpmApprovalWorkflowAdapter.APPROVAL_TASK_KEY);
+                .containsOnlyKeys(YudaoBpmApprovalWorkflowAdapter.APPROVAL_TASK_KEY,
+                        YudaoBpmApprovalWorkflowAdapter.RESPONSIBILITY_TASK_KEY);
         assertThat(request.getValue().getStartUserSelectAssignees()
                 .get(YudaoBpmApprovalWorkflowAdapter.APPROVAL_TASK_KEY)).containsExactly(200L);
+        assertThat(request.getValue().getStartUserSelectAssignees()
+                .get(YudaoBpmApprovalWorkflowAdapter.RESPONSIBILITY_TASK_KEY))
+                .containsExactly(210L, 220L);
 
         ArgumentCaptor<BpmSystemModelRegisterReqDTO> modelRequest =
                 ArgumentCaptor.forClass(BpmSystemModelRegisterReqDTO.class);
@@ -77,6 +99,24 @@ class YudaoBpmApprovalWorkflowAdapterTest {
         assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> adapter.start(candidate().setApproverUserId(100L))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("must differ from requester");
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> adapter.start(candidate().setApproverUserId(300L))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("must differ from work-order executor");
+        verifyNoInteractions(bpm, models);
+    }
+
+    @Test
+    void rejectsMissingOrConflictingR3ResponsibilityAuthority() {
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> adapter.start(candidate()
+                .setResponsibilityRoleCodes(java.util.List.of())
+                .setResponsibilityApproverUserIds(java.util.List.of())
+                .setResponsibilityAuthoritySha256(null))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("authority is missing");
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> adapter.start(candidate()
+                .setResponsibilityApproverUserIds(java.util.List.of(200L, 220L)))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("separation of duties");
         verifyNoInteractions(bpm, models);
     }
 
@@ -91,15 +131,26 @@ class YudaoBpmApprovalWorkflowAdapterTest {
 
             String bpmnDiNamespace = "http://www.omg.org/spec/BPMN/20100524/DI";
             assertThat(document.getElementsByTagNameNS(bpmnDiNamespace, "BPMNDiagram").getLength()).isEqualTo(1);
-            assertThat(document.getElementsByTagNameNS(bpmnDiNamespace, "BPMNShape").getLength()).isEqualTo(3);
-            assertThat(document.getElementsByTagNameNS(bpmnDiNamespace, "BPMNEdge").getLength()).isEqualTo(2);
+            assertThat(document.getElementsByTagNameNS(bpmnDiNamespace, "BPMNShape").getLength()).isEqualTo(5);
+            assertThat(document.getElementsByTagNameNS(bpmnDiNamespace, "BPMNEdge").getLength()).isEqualTo(5);
         }
     }
 
     private static ApprovalWorkflowStartCandidate candidate() {
         return new ApprovalWorkflowStartCandidate().setTenantId(17L).setApprovalId("approval-1")
-                .setWorkOrderId("work-1").setActionCode("purchase.commit").setRoleCode("buyer")
-                .setRiskLevel("R3").setRequesterUserId(100L).setApproverUserId(200L).setScopeHash("a".repeat(64))
+                .setWorkOrderId("work-1").setWorkOrderTitle("提交采购单")
+                .setBusinessContextJson("""
+                        {"supplierId":"supplier-1","sku":"SKU-A","quantity":120,
+                         "amountMinor":398000,"currency":"CNY","recommendation":"建议采购",
+                         "evidenceSummary":"销量预测与安全库存","nonExecutionConsequence":"预计三天后缺货",
+                         "executionSteps":["创建采购单","等待供应商确认"]}
+                        """)
+                .setActionCode("purchase.commit").setRoleCode("buyer")
+                .setRiskLevel("R3").setRequesterUserId(100L).setExecutorUserId(300L)
+                .setApproverUserId(200L)
+                .setResponsibilityRoleCodes(java.util.List.of("buyer", "finance"))
+                .setResponsibilityApproverUserIds(java.util.List.of(210L, 220L))
+                .setResponsibilityAuthoritySha256("b".repeat(64)).setScopeHash("a".repeat(64))
                 .setProcessDefinitionKey("cloudmold-agent-approval-v1")
                 .setBusinessKey("cloudmold-agent-approval:17:approval-1")
                 .setStatus("START_REQUESTED").setVersion(1L);

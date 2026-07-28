@@ -255,6 +255,21 @@ public interface AgentControlStoreMapper {
                                                   @Param("roleCode") String roleCode,
                                                   @Param("now") LocalDateTime now);
 
+    @Select("""
+            SELECT g.grant_id,g.tenant_id,g.actor_user_id,g.role_code,g.status,g.valid_from,g.valid_until,
+                   g.granted_by_user_id,g.revoked_by_user_id,g.revoke_reason,g.version,g.granted_at,
+                   g.revoked_at,g.updated_at
+            FROM cloudmold_agent_actor_role_grant g
+            JOIN cloudmold_agent_role_definition r
+              ON r.tenant_id=g.tenant_id AND r.role_code=g.role_code AND r.status='ACTIVE'
+            WHERE g.tenant_id=#{tenantId} AND g.role_code=#{roleCode}
+              AND g.status='ACTIVE' AND g.valid_from<=#{now} AND g.valid_until>#{now}
+            ORDER BY g.actor_user_id,g.grant_id
+            """)
+    List<ActorRoleGrant> selectEffectiveActorRoleGrantsByRole(@Param("tenantId") Long tenantId,
+                                                              @Param("roleCode") String roleCode,
+                                                              @Param("now") LocalDateTime now);
+
     @Update("""
             UPDATE cloudmold_agent_actor_role_grant
             SET status='EXPIRED',version=version+1,updated_at=#{now}
@@ -507,9 +522,13 @@ public interface AgentControlStoreMapper {
     @Insert("""
             INSERT IGNORE INTO cloudmold_agent_approval_workflow_binding
               (approval_id,tenant_id,work_order_id,action_code,role_code,risk_level,requester_user_id,approver_user_id,scope_hash,
-               process_definition_key,business_key,status,start_attempt_count,version,requested_at,updated_at)
+               process_definition_key,business_key,status,responsibility_role_codes_json,
+               responsibility_approver_user_ids_json,responsibility_authority_sha256,
+               start_attempt_count,version,requested_at,updated_at)
             VALUES (#{approvalId},#{tenantId},#{workOrderId},#{actionCode},#{roleCode},#{riskLevel},
                     #{requesterUserId},#{approverUserId},#{scopeHash},#{processDefinitionKey},#{businessKey},#{status},
+                    CAST(#{responsibilityRoleCodesJson} AS JSON),
+                    CAST(#{responsibilityApproverUserIdsJson} AS JSON),#{responsibilityAuthoritySha256},
                     #{startAttemptCount},#{version},#{requestedAt},#{updatedAt})
             """)
     int insertApprovalWorkflowBinding(ApprovalWorkflowBinding value);
@@ -518,6 +537,8 @@ public interface AgentControlStoreMapper {
             SELECT approval_id,tenant_id,work_order_id,action_code,role_code,risk_level,requester_user_id,approver_user_id,scope_hash,
                    process_definition_key,process_instance_id,business_key,status,last_bpm_status,last_reason_sha256,
                    terminal_operator_user_id,terminal_task_id,terminal_task_definition_key,
+                   responsibility_role_codes_json,responsibility_approver_user_ids_json,
+                   responsibility_authority_sha256,
                    start_attempt_token,start_attempt_count,version,requested_at,start_attempted_at,started_at,
                    terminal_at,last_error_code,updated_at
             FROM cloudmold_agent_approval_workflow_binding
@@ -528,15 +549,21 @@ public interface AgentControlStoreMapper {
 
     @TenantIgnore
     @Select("""
-            SELECT b.approval_id,b.tenant_id,b.work_order_id,b.action_code,b.role_code,b.risk_level,
+            SELECT b.approval_id,b.tenant_id,b.work_order_id,w.title AS work_order_title,
+                   w.business_context_json,w.assignee_user_id AS executor_user_id,
+                   b.action_code,b.role_code,b.risk_level,
                    b.requester_user_id,g.approver_user_id,b.scope_hash,b.process_definition_key,
                    b.business_key,b.status,b.version
             FROM cloudmold_agent_approval_workflow_binding b
+            JOIN cloudmold_agent_work_order w
+              ON w.tenant_id=b.tenant_id AND w.work_order_id=b.work_order_id
             JOIN cloudmold_agent_approval_authority_grant g
               ON g.tenant_id=b.tenant_id AND g.approval_id=b.approval_id
              AND g.status='ACTIVE' AND g.valid_from<=UTC_TIMESTAMP(6) AND g.valid_until>UTC_TIMESTAMP(6)
-            WHERE b.status='START_REQUESTED' AND b.requester_user_id<>g.approver_user_id
-            ORDER BY requested_at,tenant_id,approval_id,g.approver_user_id
+            WHERE b.status='START_REQUESTED'
+              AND b.requester_user_id<>g.approver_user_id
+              AND (w.assignee_user_id IS NULL OR w.assignee_user_id<>g.approver_user_id)
+            ORDER BY b.requested_at,b.tenant_id,b.approval_id,g.approver_user_id
             LIMIT #{limit}
             """)
     List<ApprovalWorkflowStartCandidate> selectApprovalWorkflowStartCandidates(@Param("limit") int limit);
@@ -560,11 +587,20 @@ public interface AgentControlStoreMapper {
     @Update("""
             UPDATE cloudmold_agent_approval_workflow_binding
             SET status='STARTING',approver_user_id=#{approverUserId},
+                responsibility_role_codes_json=CAST(#{responsibilityRoleCodesJson} AS JSON),
+                responsibility_approver_user_ids_json=CAST(#{responsibilityApproverUserIdsJson} AS JSON),
+                responsibility_authority_sha256=#{responsibilityAuthoritySha256},
                 start_attempt_token=#{attemptToken},start_attempt_count=start_attempt_count+1,
                 start_attempted_at=#{now},last_error_code=NULL,version=version+1,updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND approval_id=#{approvalId} AND version=#{expectedVersion}
               AND status='START_REQUESTED' AND start_attempt_count=0 AND approver_user_id IS NULL
               AND requester_user_id<>#{approverUserId}
+              AND NOT EXISTS (
+                SELECT 1 FROM cloudmold_agent_work_order w
+                WHERE w.tenant_id=cloudmold_agent_approval_workflow_binding.tenant_id
+                  AND w.work_order_id=cloudmold_agent_approval_workflow_binding.work_order_id
+                  AND w.assignee_user_id=#{approverUserId}
+              )
               AND EXISTS (
                 SELECT 1 FROM cloudmold_agent_approval_authority_grant g
                 WHERE g.tenant_id=cloudmold_agent_approval_workflow_binding.tenant_id
@@ -581,6 +617,9 @@ public interface AgentControlStoreMapper {
     int claimApprovalWorkflowStart(@Param("tenantId") Long tenantId, @Param("approvalId") String approvalId,
                                    @Param("expectedVersion") Long expectedVersion,
                                    @Param("approverUserId") Long approverUserId,
+                                   @Param("responsibilityRoleCodesJson") String responsibilityRoleCodesJson,
+                                   @Param("responsibilityApproverUserIdsJson") String responsibilityApproverUserIdsJson,
+                                   @Param("responsibilityAuthoritySha256") String responsibilityAuthoritySha256,
                                    @Param("attemptToken") String attemptToken,
                                    @Param("now") LocalDateTime now);
 
@@ -613,6 +652,8 @@ public interface AgentControlStoreMapper {
             SELECT approval_id,tenant_id,work_order_id,action_code,role_code,risk_level,requester_user_id,scope_hash,
                    process_definition_key,process_instance_id,business_key,status,last_bpm_status,last_reason_sha256,
                    terminal_operator_user_id,terminal_task_id,terminal_task_definition_key,
+                   responsibility_role_codes_json,responsibility_approver_user_ids_json,
+                   responsibility_authority_sha256,
                    start_attempt_token,start_attempt_count,version,requested_at,start_attempted_at,started_at,
                    terminal_at,last_error_code,updated_at
             FROM cloudmold_agent_approval_workflow_binding

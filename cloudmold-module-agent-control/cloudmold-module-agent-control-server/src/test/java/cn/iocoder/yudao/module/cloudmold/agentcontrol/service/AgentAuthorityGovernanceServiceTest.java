@@ -93,7 +93,8 @@ class AgentAuthorityGovernanceServiceTest {
                 .setEnabled(true).setVersion(1L);
         WorkOrder workOrder = new WorkOrder().setWorkOrderId("wo-approval").setTenantId(17L)
                 .setRoleCode("buyer").setActionCode("purchase.commit").setBusinessContextJson("{\"sku\":\"A\"}")
-                .setRequesterUserId(100L).setApprovalId("approval-1").setStatus("WAITING_APPROVAL").setVersion(2L)
+                .setRequesterUserId(100L).setAssigneeUserId(300L)
+                .setApprovalId("approval-1").setStatus("WAITING_APPROVAL").setVersion(2L)
                 .setActionPolicyId(actionPolicy.getPolicyId()).setActionPolicyVersion(actionPolicy.getVersion())
                 .setRiskLevel(actionPolicy.getRiskLevel()).setExecutionRequired(false)
                 .setExecutionInputSha256(cn.hutool.crypto.digest.DigestUtil.sha256Hex("{\"sku\":\"A\"}"));
@@ -120,6 +121,16 @@ class AgentAuthorityGovernanceServiceTest {
                         .validFrom(NOW.minusSeconds(1)).validUntil(NOW.plus(Duration.ofHours(2))).build()).build();
         assertThatThrownBy(() -> service.executeAuthorityGovernance(mismatched, 900L))
                 .hasMessage("approver grant riskLevel does not match the frozen action policy");
+
+        AgentAuthorityCommand executorSelfApproval = base(AgentAuthorityOperation.GRANT_APPROVER,
+                "approval-executor-self-grant")
+                .approvalGrant(AgentAuthorityCommand.ApprovalGrantDefinition.builder()
+                        .grantId("approval-grant-executor").approverUserId(300L).approvalId("approval-1")
+                        .roleCode("buyer").actionCode("purchase.commit").riskLevel("R3")
+                        .scopeHash(approval.getScopeHash()).validFrom(NOW.minusSeconds(1))
+                        .validUntil(NOW.plus(Duration.ofHours(2))).build()).build();
+        assertThatThrownBy(() -> service.executeAuthorityGovernance(executorSelfApproval, 900L))
+                .hasMessage("work-order executor cannot be granted approver authority");
 
         when(mapper.selectEffectiveActorRoleGrant(eq(17L), eq(200L), eq("buyer"), any())).thenReturn(null);
         when(mapper.insertApprovalAuthorityGrant(any())).thenReturn(1);

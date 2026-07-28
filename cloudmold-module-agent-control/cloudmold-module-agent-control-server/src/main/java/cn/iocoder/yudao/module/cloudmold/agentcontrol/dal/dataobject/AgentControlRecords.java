@@ -5,6 +5,7 @@ import lombok.experimental.Accessors;
 
 import java.time.LocalDateTime;
 import java.math.BigDecimal;
+import java.util.List;
 
 public final class AgentControlRecords {
     private AgentControlRecords() {}
@@ -269,6 +270,9 @@ public final class AgentControlRecords {
         private Long terminalOperatorUserId;
         private String terminalTaskId;
         private String terminalTaskDefinitionKey;
+        private String responsibilityRoleCodesJson;
+        private String responsibilityApproverUserIdsJson;
+        private String responsibilityAuthoritySha256;
         private String startAttemptToken;
         private Integer startAttemptCount;
         private Long version;
@@ -285,11 +289,17 @@ public final class AgentControlRecords {
         private String approvalId;
         private Long tenantId;
         private String workOrderId;
+        private String workOrderTitle;
+        private String businessContextJson;
         private String actionCode;
         private String roleCode;
         private String riskLevel;
         private Long requesterUserId;
+        private Long executorUserId;
         private Long approverUserId;
+        private List<String> responsibilityRoleCodes;
+        private List<Long> responsibilityApproverUserIds;
+        private String responsibilityAuthoritySha256;
         private String scopeHash;
         private String processDefinitionKey;
         private String businessKey;

@@ -144,6 +144,9 @@ public class AgentAuthorityGovernanceService implements AgentAuthorityGovernance
                 "approval requester cannot issue its own approver grant");
         WorkOrder workOrder = requireNonNull(mapper.selectWorkOrderForUpdate(tenantId, approval.getWorkOrderId()),
                 "work order not found");
+        require(workOrder.getAssigneeUserId() == null
+                        || !input.getApproverUserId().equals(workOrder.getAssigneeUserId()),
+                "work-order executor cannot be granted approver authority");
         require("WAITING_APPROVAL".equals(workOrder.getStatus())
                         && approvalId.equals(workOrder.getApprovalId()),
                 "approval is not bound to the current waiting work order");

@@ -31,19 +31,28 @@ public class AgentApprovalWorkflowService implements AgentApprovalWorkflowRegist
 
     private final AgentControlStoreMapper mapper;
     private final AgentApprovalWorkflowAdapter adapter;
+    private final AgentApprovalResponsibilityResolver responsibilityResolver;
     private final AgentApprovalWorkflowProperties properties;
     private final Clock clock;
 
     @Autowired
     public AgentApprovalWorkflowService(AgentControlStoreMapper mapper, AgentApprovalWorkflowAdapter adapter,
+                                        AgentApprovalResponsibilityResolver responsibilityResolver,
                                         AgentApprovalWorkflowProperties properties) {
-        this(mapper, adapter, properties, Clock.systemUTC());
+        this(mapper, adapter, responsibilityResolver, properties, Clock.systemUTC());
     }
 
     AgentApprovalWorkflowService(AgentControlStoreMapper mapper, AgentApprovalWorkflowAdapter adapter,
                                  AgentApprovalWorkflowProperties properties, Clock clock) {
+        this(mapper, adapter, new AgentApprovalResponsibilityResolver(mapper), properties, clock);
+    }
+
+    AgentApprovalWorkflowService(AgentControlStoreMapper mapper, AgentApprovalWorkflowAdapter adapter,
+                                 AgentApprovalResponsibilityResolver responsibilityResolver,
+                                 AgentApprovalWorkflowProperties properties, Clock clock) {
         this.mapper = mapper;
         this.adapter = adapter;
+        this.responsibilityResolver = responsibilityResolver;
         this.properties = properties;
         this.clock = clock;
     }
@@ -85,8 +94,11 @@ public class AgentApprovalWorkflowService implements AgentApprovalWorkflowRegist
     public boolean start(ApprovalWorkflowStartCandidate candidate) {
         String attemptToken = UUID.randomUUID().toString();
         LocalDateTime now = now();
+        AgentApprovalResponsibilityResolver.Resolution responsibility =
+                responsibilityResolver.resolve(candidate, now);
         if (mapper.claimApprovalWorkflowStart(candidate.getTenantId(), candidate.getApprovalId(),
-                candidate.getVersion(), candidate.getApproverUserId(), attemptToken, now) != 1) {
+                candidate.getVersion(), candidate.getApproverUserId(), responsibility.roleCodesJson(),
+                responsibility.approverUserIdsJson(), responsibility.authoritySha256(), attemptToken, now) != 1) {
             return false;
         }
         try {
