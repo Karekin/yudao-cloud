@@ -22,6 +22,9 @@ final class AgentApprovalR3Policy {
                 || action.equals("consumer.journey")) {
             return List.of("customer-service", "finance");
         }
+        if (action.equals("category.daily-operations")) {
+            return List.of("risk", "operations-lead");
+        }
         if (startsWithAny(action, "buyer.", "purchase.", "procurement.", "replenishment.",
                 "supply-planning.", "supplier.")) {
             return List.of("buyer", "finance");

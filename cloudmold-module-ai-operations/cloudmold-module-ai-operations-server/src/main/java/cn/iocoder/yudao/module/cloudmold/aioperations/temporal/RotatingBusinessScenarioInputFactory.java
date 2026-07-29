@@ -34,6 +34,8 @@ class RotatingBusinessScenarioInputFactory {
     static final String FULL_CHAIN_SKILL = "skill.cloudmold.commerce.full-chain-hsf.v1";
     static final String PRODUCT_TO_LISTING_SKILL = "skill.cloudmold.commerce.product-to-listing.v1";
     static final String AUTONOMOUS_DAY_SKILL = "skill.cloudmold.commerce.autonomous-day.v1";
+    static final String CATEGORY_DAILY_OPERATIONS_SKILL =
+            "skill.cloudmold.commerce.category-daily-operations.v1";
     static final String CATALOG_MATRIX_SKILL = "skill.cloudmold.commerce.catalog-matrix.v1";
     static final String AFTERSALE_SAGA_SKILL = "skill.cloudmold.commerce.aftersale-saga.v1";
     static final String CONSUMER_JOURNEY_SKILL = "skill.cloudmold.consumer.shopping-journey.v1";
@@ -319,6 +321,18 @@ class RotatingBusinessScenarioInputFactory {
             }
             output = bondedCustomsLifecycle(
                     newPrefix, occurredAt, consumer, operator.path("principalId").asText());
+        } else if (CATEGORY_DAILY_OPERATIONS_SKILL.equals(targetSkillId)) {
+            if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
+                return Optional.empty();
+            }
+            JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
+            if (operator.path("principalId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            ObjectNode consumer = consumerJourney(rotated, newPrefix, occurredAt,
+                    seedProperties.getSyntheticConsumerMemberUserId());
+            output = categoryDailyOperations(rotated, newPrefix, occurredAt, consumer,
+                    operator.path("principalId").asText(), occurrenceKey);
         } else {
             if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
                 return Optional.empty();
@@ -347,6 +361,7 @@ class RotatingBusinessScenarioInputFactory {
             case FULL_CHAIN_SKILL -> "f";
             case PRODUCT_TO_LISTING_SKILL -> "p";
             case AUTONOMOUS_DAY_SKILL -> "d";
+            case CATEGORY_DAILY_OPERATIONS_SKILL -> "y";
             case CATALOG_MATRIX_SKILL -> "c";
             case AFTERSALE_SAGA_SKILL -> "a";
             case CONSUMER_JOURNEY_SKILL -> "u";
@@ -515,6 +530,45 @@ class RotatingBusinessScenarioInputFactory {
                 "DAILY_PLAN_DISPATCHED", "OPERATIONS_CONTROL_ASSIGNED",
                 "FULL_CYCLE_VERIFIED");
         output.set("product", productToListing(fullChain, prefix));
+        output.set("consumer", consumer);
+        return output;
+    }
+
+    private static ObjectNode categoryDailyOperations(
+            ObjectNode fullChain, String prefix, String occurredAt, ObjectNode consumer,
+            String operatorPrincipalId, String occurrenceKey) {
+        String[] issueCodes = {
+                "LOW_CONVERSION",
+                "HIGH_VIEW_LOW_CART",
+                "CAMPAIGN_MISS",
+                "CONTENT_QUALITY"
+        };
+        String issueCode = issueCodes[Math.floorMod(occurrenceKey.hashCode(), issueCodes.length)];
+        ObjectNode output = JsonNodeFactory.instance.objectNode();
+        output.putObject("runIds")
+                .put("product", prefix + "-product")
+                .put("experiment", prefix + "-experiment")
+                .put("campaign", prefix + "-campaign")
+                .put("consumer", prefix + "-consumer");
+        output.put("operatorPrincipalId", operatorPrincipalId);
+        output.putObject("diagnosis")
+                .put("issueCode", issueCode)
+                .put("scopeType", "CATEGORY")
+                .put("scopeRef", "category:daily:" + prefix)
+                .put("modelConfidenceBasisPoints", 9700)
+                .putArray("chosenActions")
+                .add("LAUNCH_NEW_ASSORTMENT")
+                .add("RUN_CONVERSION_EXPERIMENT")
+                .add("ACTIVATE_TARGETED_CAMPAIGN")
+                .add("VERIFY_CONSUMER_JOURNEY");
+        addRoleOperationsCase(output, prefix, occurredAt, operatorPrincipalId,
+                "AI_CATEGORY_DAY_", "category-operations:", "category_operations_",
+                "CATEGORY_OPERATIONS", issueCode,
+                "CATEGORY_DIAGNOSIS_READY", "CATEGORY_OPERATOR_ASSIGNED",
+                "CATEGORY_ACTIONS_VERIFIED");
+        output.set("product", productToListing(fullChain, prefix));
+        output.set("experiment", growthExperiment(prefix, occurredAt));
+        output.set("campaign", promotionCampaign(prefix, occurredAt, operatorPrincipalId));
         output.set("consumer", consumer);
         return output;
     }

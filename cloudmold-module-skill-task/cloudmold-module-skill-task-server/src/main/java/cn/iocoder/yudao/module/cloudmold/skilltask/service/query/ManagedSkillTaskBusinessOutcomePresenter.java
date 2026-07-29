@@ -34,6 +34,7 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("skill.cloudmold.commerce.catalog-matrix.v1", "商品款色码建档"),
             Map.entry("skill.cloudmold.commerce.product-to-listing.v1", "自动铺品"),
             Map.entry("skill.cloudmold.commerce.autonomous-day.v1", "AI 自主经营日"),
+            Map.entry("skill.cloudmold.commerce.category-daily-operations.v1", "品类日常运营闭环"),
             Map.entry("skill.cloudmold.consumer.shopping-journey.v1", "消费者选购与服务全旅程"),
             Map.entry("skill.cloudmold.commerce.aftersale-saga.v1", "售后退款全链路"),
             Map.entry("skill.cloudmold.commerce.legacy-projection-plan.v1", "旧系统投影预检"),
@@ -100,6 +101,9 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                     "模拟综合运营控制岗位创建、通知并认领当日经营行动单，生成全新商品与刊登，"
                             + "再由独立消费者完成选购、支付履约、售后、客服和社区种草；"
                             + "仅在两条业务链全部成功后关闭经营行动单。"),
+            Map.entry("skill.cloudmold.commerce.category-daily-operations.v1",
+                    "模拟品类运营创建并认领每日行动单，完成新品铺货、转化实验、目标活动触达和真实消费者选购验证；"
+                            + "每日轮换低转化、高浏览低加购、活动缺口和内容质量问题，仅在四条业务链全部成功后关闭行动单。"),
             Map.entry("skill.cloudmold.consumer.shopping-journey.v1",
                     "模拟真实会员完成搜索、商详、收藏、加购、结算、下单支付、履约、售后、咨询与社区发布。"),
             Map.entry("skill.cloudmold.commerce.aftersale-saga.v1",
@@ -458,6 +462,19 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             ,Map.entry("wait_purchase_order", "等待采购订单确认")
             ,Map.entry("submit_physical_warehouse_cycle", "发起补货仓储作业")
             ,Map.entry("wait_physical_warehouse_cycle", "等待仓储收发调盘闭环")
+            ,Map.entry("open_category_day", "创建品类运营行动单")
+            ,Map.entry("notice_category_day", "通知品类运营岗位")
+            ,Map.entry("claim_category_day", "认领品类运营行动单")
+            ,Map.entry("submit_product_launch", "发起新品铺货")
+            ,Map.entry("wait_product_launch", "等待新品发布完成")
+            ,Map.entry("submit_conversion_experiment", "发起转化实验")
+            ,Map.entry("wait_conversion_experiment", "等待实验决策完成")
+            ,Map.entry("submit_targeted_campaign", "发起目标活动触达")
+            ,Map.entry("wait_targeted_campaign", "等待活动触达完成")
+            ,Map.entry("submit_consumer_validation", "发起消费者选购验证")
+            ,Map.entry("wait_consumer_validation", "等待消费者旅程完成")
+            ,Map.entry("resolve_category_day", "关闭品类运营行动单")
+            ,Map.entry("verify_category_day_resolved", "核验品类运营行动单终态")
             ,Map.entry("ticket_receive_message", "接收用户咨询消息")
             ,Map.entry("ticket_assign_agent", "分派客服坐席")
             ,Map.entry("ticket_start_processing", "开始处理咨询")

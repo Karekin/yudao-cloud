@@ -152,6 +152,69 @@ class RotatingBusinessScenarioInputFactoryTest {
     }
 
     @Test
+    void shouldBuildFreshCategoryOperationsDayAcrossFourBusinessArteries() {
+        mockReadyMaster();
+        properties.setSyntheticConsumerMemberUserId(286L);
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
+                {
+                  "runIds":{"catalog":"base-cat"},
+                  "catalog":{"definitions":[
+                    {"styleCode":"YS-BASEABC1","spuCode":"YS-BASEABC1",
+                     "occurredAt":"2026-01-01T00:00:00Z"}],"lifecycle":[]},
+                  "master":{"identityReference":{},"warehouseReference":{}},
+                  "aftersale":{"commands":[
+                    {"operation":"CREATE_DRAFT","offers":[{}]},{},{},{},{},{},
+                    {"operation":"RECEIVE"},{"operation":"PLACE_FROM_LISTING","items":[{}]},
+                    {"operation":"RESERVE"},{"operation":"CONFIRM_INVENTORY"},
+                    {"operation":"CAPTURE"},{"operation":"CONFIRM_PAYMENT"},
+                    {"operation":"CREATE","items":[{}]},{"operation":"SHIP"},
+                    {"operation":"SHIP"},{"operation":"CONFIRM_SHIPMENT"},
+                    {"operation":"IN_TRANSIT"},{"operation":"DELIVERED"},
+                    {"operation":"COMPLETE"},{"operation":"REQUEST"},
+                    {"operation":"APPROVE"},{"operation":"HANDOVER"},
+                    {"operation":"TRANSIT"},{"operation":"RECEIVE"},
+                    {"operation":"ACCEPT"}]},
+                  "readback":{}
+                }
+                """);
+
+        JsonNode input = JsonUtils.parseTree(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.CATEGORY_DAILY_OPERATIONS_SKILL,
+                "2026-07-30", "temporal-category-1").orElseThrow());
+
+        assertThat(input.path("runIds").path("product").asText())
+                .startsWith("y260730162-").endsWith("-product");
+        assertThat(input.path("runIds").path("experiment").asText())
+                .endsWith("-experiment");
+        assertThat(input.path("runIds").path("campaign").asText())
+                .endsWith("-campaign");
+        assertThat(input.path("runIds").path("consumer").asText())
+                .endsWith("-consumer");
+        assertThat(input.path("diagnosis").path("issueCode").asText())
+                .isIn("LOW_CONVERSION", "HIGH_VIEW_LOW_CART", "CAMPAIGN_MISS",
+                        "CONTENT_QUALITY");
+        assertThat(input.path("diagnosis").path("modelConfidenceBasisPoints").asInt())
+                .isEqualTo(9700);
+        assertThat(input.path("diagnosis").path("chosenActions")).hasSize(4);
+        assertThat(input.path("operationsCommands")).hasSize(4);
+        assertThat(input.path("operationsCommands").get(0).path("alert")
+                .path("category").asText()).isEqualTo("CATEGORY_OPERATIONS");
+        assertThat(input.path("operationsCommands").get(0).path("alert")
+                .path("subcategory").asText())
+                .isEqualTo(input.path("diagnosis").path("issueCode").asText());
+        assertThat(input.path("operationsCommands").get(3).path("operation").asText())
+                .isEqualTo("RESOLVE_ALERT");
+        assertThat(input.path("product").path("listing").path("commands")).hasSize(6);
+        assertThat(input.path("experiment").path("conclusion").path("decision").asText())
+                .isEqualTo("TREATMENT");
+        assertThat(input.path("campaign").path("clickedReceiptCommand").isObject()).isTrue();
+        assertThat(input.path("consumer").path("identityReference").path("sourceId").asText())
+                .isEqualTo("286");
+        assertThat(input.path("consumer").path("commands")).hasSize(19);
+    }
+
+    @Test
     void shouldRotateReusableChildBusinessScenariosInsteadOfLeavingDailySchedulesIdle() {
         mockReadyMaster();
         when(mapper.selectLatestSuccessfulSkillTaskInput(

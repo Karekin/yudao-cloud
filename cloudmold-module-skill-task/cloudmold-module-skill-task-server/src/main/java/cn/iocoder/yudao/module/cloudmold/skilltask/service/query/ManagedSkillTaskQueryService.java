@@ -75,6 +75,10 @@ public class ManagedSkillTaskQueryService {
             Map.entry("skill.cloudmold.commerce.autonomous-day.v1",
                     new WorkflowPresentation("AI 自主经营日",
                             "每日生成全新商品与刊登，再由独立消费者身份完成选购、支付履约、售后、客服和社区种草闭环。")),
+            Map.entry("skill.cloudmold.commerce.category-daily-operations.v1",
+                    new WorkflowPresentation("品类日常运营闭环",
+                            "品类运营创建并认领行动单，依次完成新品铺货、转化实验、活动触达和真实消费者选购验证；"
+                                    + "四条业务链全部成功后才关闭行动单，每日轮换问题场景并生成全新业务数据。")),
             Map.entry("skill.cloudmold.consumer.shopping-journey.v1",
                     new WorkflowPresentation("消费者选购与服务全旅程",
                             "模拟真实会员完成搜索、商详、收藏、加购、结算、下单支付、履约、售后、咨询与社区发布。")),

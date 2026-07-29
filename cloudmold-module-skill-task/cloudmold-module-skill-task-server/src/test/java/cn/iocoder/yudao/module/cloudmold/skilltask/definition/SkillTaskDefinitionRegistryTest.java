@@ -281,10 +281,32 @@ class SkillTaskDefinitionRegistryTest {
             assertThat(step.getWaitSuccess().path("/deliveryStatus").asText())
                     .isEqualTo("DELIVERED");
         });
+        SkillTaskDefinition productToListing = workspaceRegistry.require(
+                "skill.cloudmold.commerce.product-to-listing.v1", "1.1.0");
+        assertThat(productToListing.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(productToListing.getOwnerRole()).isEqualTo("product-listing-operator");
+        SkillTaskDefinition categoryDailyOperations = workspaceRegistry.require(
+                "skill.cloudmold.commerce.category-daily-operations.v1", "1.0.0");
+        assertThat(categoryDailyOperations.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(categoryDailyOperations.getOwnerRole()).isEqualTo("category-operations");
+        assertThat(categoryDailyOperations.getRiskLevel()).isEqualTo("R3");
+        assertThat(categoryDailyOperations.getSteps()).hasSize(13);
+        assertThat(categoryDailyOperations.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(4);
+        assertThat(categoryDailyOperations.getSteps())
+                .filteredOn(step -> "SUBMIT_CHILD".equals(step.getStepKind()))
+                .hasSize(4);
+        assertThat(categoryDailyOperations.getSteps().get(12)).satisfies(step -> {
+            assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
+            assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("RESOLVED");
+            assertThat(step.getWaitSuccess().path("/aggregateVersion").asInt()).isEqualTo(4);
+        });
         assertThat(workspaceRegistry.all()).extracting(SkillTaskDefinition::getSkillId)
                 .contains("skill.cloudmold.commerce.catalog-matrix.v1",
                         "skill.cloudmold.commerce.order-cancellation-operational.v1",
                         "skill.cloudmold.commerce.product-to-listing.v1",
+                        "skill.cloudmold.commerce.category-daily-operations.v1",
                         "skill.cloudmold.commerce.aftersale-saga.v1",
                         "skill.cloudmold.supply-planning.sop-lifecycle.v1",
                         "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1",
