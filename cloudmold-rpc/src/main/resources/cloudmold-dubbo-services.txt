@@ -101,6 +101,8 @@ cn.iocoder.yudao.module.cloudmold.payment.api.PaymentCommandApi
 cn.iocoder.yudao.module.cloudmold.payment.api.PaymentRefundQueryApi
 cn.iocoder.yudao.module.cloudmold.payment.api.PaymentWorkflowFactsApi
 cn.iocoder.yudao.module.cloudmold.payment.api.workflow.FinanceOperationsWorkflowQueryApi
+cn.iocoder.yudao.module.cloudmold.partnermarketing.api.PartnerMarketingCommandApi
+cn.iocoder.yudao.module.cloudmold.partnermarketing.api.PartnerMarketingQueryApi
 cn.iocoder.yudao.module.cloudmold.promotion.api.PromotionCommandApi
 cn.iocoder.yudao.module.cloudmold.promotion.api.PromotionQueryApi
 cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommandApi

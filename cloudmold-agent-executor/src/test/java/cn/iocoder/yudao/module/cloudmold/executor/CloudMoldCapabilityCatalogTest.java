@@ -124,6 +124,20 @@ class CloudMoldCapabilityCatalogTest {
                     "cn.iocoder.yudao.module.cloudmold.crossborder.api.bonded.BondedCustomsQueryApi");
             assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.READ);
         });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.partnermarketing.partner-marketing-command.execute.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.partnermarketing.api.PartnerMarketingCommandApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.WRITE);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.partnermarketing.partner-marketing-query.get-workflow.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.partnermarketing.api.PartnerMarketingQueryApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.READ);
+        });
     }
 
     @Test

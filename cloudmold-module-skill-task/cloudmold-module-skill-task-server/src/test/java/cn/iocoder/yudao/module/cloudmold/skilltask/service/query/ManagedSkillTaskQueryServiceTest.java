@@ -123,11 +123,13 @@ class ManagedSkillTaskQueryServiceTest {
                 "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1", "1.0.0", "R3");
         SkillTaskDefinition bondedCustomsLifecycle = definition(
                 "skill.cloudmold.crossborder.bonded-customs-lifecycle.v1", "1.0.0", "R3");
+        SkillTaskDefinition partnerMarketingLifecycle = definition(
+                "skill.cloudmold.partner-marketing.kol-media-operations.v1", "1.0.0", "R3");
         SkillTaskDefinition replenishmentPrepare = definition(
                 "skill.cloudmold.supply-planning.prepare.v1", "1.0.0", "R2");
         when(registry.all()).thenReturn(List.of(
                 productToListing, financeClose, fulfillmentException, crossborderLifecycle,
-                bondedCustomsLifecycle,
+                bondedCustomsLifecycle, partnerMarketingLifecycle,
                 qualityLifecycle, replenishmentPrepare));
 
         List<ManagedSkillTaskWorkflowView> workflows = service.listManagedWorkflows();
@@ -151,6 +153,9 @@ class ManagedSkillTaskQueryServiceTest {
                         org.assertj.core.groups.Tuple.tuple(
                                 "履约异常处置闭环",
                                 "模拟物流经理为全新在途订单识别异常、诊断影响、制定方案、经过审批、恢复交付、完成订单并关闭异常；每天生成全新订单与异常案例。"),
+                        org.assertj.core.groups.Tuple.tuple(
+                                "海外 KOL 与媒体合作投放闭环",
+                                "模拟海外合作运营完成候选筛选与风险准入、合作 brief、内容发布核验、真实消费者选购归因、达人结算和终态验收；每天生成全新的合作案例与商品订单。"),
                         org.assertj.core.groups.Tuple.tuple(
                                 "质量检验与召回闭环",
                                 "模拟质量运营岗位完成标准发布、双人持证检验、CAPA、批次召回、库存隔离和终态验收；每天生成全新质检批次。"),

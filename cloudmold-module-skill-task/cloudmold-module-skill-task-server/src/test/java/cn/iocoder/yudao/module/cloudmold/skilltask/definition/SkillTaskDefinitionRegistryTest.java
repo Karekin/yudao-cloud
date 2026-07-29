@@ -281,6 +281,30 @@ class SkillTaskDefinitionRegistryTest {
             assertThat(step.getWaitSuccess().path("/deliveryStatus").asText())
                     .isEqualTo("DELIVERED");
         });
+        SkillTaskDefinition partnerMarketingLifecycle = workspaceRegistry.require(
+                "skill.cloudmold.partner-marketing.kol-media-operations.v1", "1.0.0");
+        assertThat(partnerMarketingLifecycle.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(partnerMarketingLifecycle.getOwnerRole()).isEqualTo("partner-marketing-operations");
+        assertThat(partnerMarketingLifecycle.getRiskLevel()).isEqualTo("R3");
+        assertThat(partnerMarketingLifecycle.getSteps()).hasSize(22);
+        assertThat(partnerMarketingLifecycle.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(15);
+        assertThat(partnerMarketingLifecycle.getSteps())
+                .filteredOn(step -> "SUBMIT_CHILD".equals(step.getStepKind()))
+                .hasSize(3);
+        assertThat(partnerMarketingLifecycle.getSteps())
+                .filteredOn(step -> "WAIT_CHILD".equals(step.getStepKind()))
+                .hasSize(3);
+        assertThat(partnerMarketingLifecycle.getSteps().get(21)).satisfies(step -> {
+            assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
+            assertThat(step.getCapabilityId()).isEqualTo(
+                    "capability.cloudmold.partnermarketing.partner-marketing-query.get-workflow.v1");
+            assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("SUCCEEDED");
+            assertThat(step.getWaitSuccess().path("/currentStatus").asText()).isEqualTo("CLOSED");
+            assertThat(step.getWaitSuccess().path("/terminal").asBoolean()).isTrue();
+            assertThat(step.getWaitSuccess().path("/aggregateVersion").asInt()).isEqualTo(12);
+        });
         SkillTaskDefinition productToListing = workspaceRegistry.require(
                 "skill.cloudmold.commerce.product-to-listing.v1", "1.1.0");
         assertThat(productToListing.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
@@ -311,6 +335,7 @@ class SkillTaskDefinitionRegistryTest {
                         "skill.cloudmold.supply-planning.sop-lifecycle.v1",
                         "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1",
                         "skill.cloudmold.crossborder.bonded-customs-lifecycle.v1",
+                        "skill.cloudmold.partner-marketing.kol-media-operations.v1",
                         "skill.cloudmold.commerce.terminal-readback.v1");
         List<String> readbackSkillIds = List.of(
                 "skill.cloudmold.operations.daily-business-control.v1",

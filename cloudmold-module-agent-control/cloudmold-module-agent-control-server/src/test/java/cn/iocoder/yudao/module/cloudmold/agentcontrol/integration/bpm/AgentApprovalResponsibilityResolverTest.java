@@ -160,6 +160,9 @@ class AgentApprovalResponsibilityResolverTest {
                 .containsExactly("risk", "legal");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("crossborder.bonded-customs"))
                 .containsExactly("risk", "legal");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes(
+                "partner-marketing.kol-media-operations"))
+                .containsExactly("risk", "legal");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("commerce.autonomous-day"))
                 .containsExactly("customer-service", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("category.daily-operations"))

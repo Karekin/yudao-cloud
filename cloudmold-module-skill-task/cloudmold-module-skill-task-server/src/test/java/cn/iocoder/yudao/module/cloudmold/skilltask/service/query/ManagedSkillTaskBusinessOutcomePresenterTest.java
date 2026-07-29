@@ -306,6 +306,54 @@ class ManagedSkillTaskBusinessOutcomePresenterTest {
     }
 
     @Test
+    void shouldDescribePartnerMarketingAsPublishedAttributedSettledAndClosed() {
+        ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
+                task("skill.cloudmold.partner-marketing.kol-media-operations.v1"),
+                List.of(
+                        step("wait_product_launch", """
+                                {"status":"SUCCEEDED","outputs":{
+                                  "listing_publish":{"listingId":"listing-1","listingNo":"L-500"}}}
+                                """),
+                        step("wait_placement_campaign", """
+                                {"status":"SUCCEEDED","outputs":{
+                                  "campaign_activate":{"campaignId":"campaign-1","campaignCode":"C-500"}}}
+                                """),
+                        step("wait_consumer_validation", """
+                                {"status":"SUCCEEDED","outputs":{
+                                  "order_place":{"orderId":"order-5","orderNo":"O-500","currentStatus":"COMPLETED"},
+                                  "payment_capture":{"paymentId":"payment-5","paymentNo":"P-500",
+                                    "currentStatus":"CAPTURED"}}}
+                                """),
+                        step("verify_partner_marketing_closed", """
+                                {"businessKey":"partner-case-1","currentStatus":"CLOSED",
+                                 "status":"SUCCEEDED","terminal":true,"aggregateVersion":12,
+                                 "artifacts":[
+                                   {"type":"PARTNER_MARKETING_CASE","id":"partner-case-1","status":"CLOSED"},
+                                   {"type":"PUBLICATION","id":"content-1","status":"VERIFIED"},
+                                   {"type":"SETTLEMENT","id":"SET-500","status":"CLOSED"}
+                                 ]}
+                                """)));
+
+        assertThat(outcome.getHeadline())
+                .isEqualTo("KOL 合作案例 partner-case-1 已完成投放归因与结算");
+        assertThat(outcome.getSummary()).contains("候选筛选", "真实消费者选购支付归因", "受控测试证据");
+        assertThat(outcome.getMetrics()).extracting("label", "value")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("合作状态", "已关闭"),
+                        org.assertj.core.groups.Tuple.tuple("归因订单", "O-500"),
+                        org.assertj.core.groups.Tuple.tuple("披露核验", "已核验"),
+                        org.assertj.core.groups.Tuple.tuple("结算状态", "已完成"));
+        assertThat(outcome.getBusinessObjects()).extracting("objectType", "businessId")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("PARTNER_MARKETING_CASE", "partner-case-1"),
+                        org.assertj.core.groups.Tuple.tuple("LISTING", "listing-1"),
+                        org.assertj.core.groups.Tuple.tuple("CAMPAIGN", "campaign-1"),
+                        org.assertj.core.groups.Tuple.tuple("ORDER", "order-5"),
+                        org.assertj.core.groups.Tuple.tuple("PAYMENT", "payment-5"),
+                        org.assertj.core.groups.Tuple.tuple("SETTLEMENT", "SET-500"));
+    }
+
+    @Test
     void shouldDescribeFullChainByCompletedChildFlows() {
         ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
                 task("skill.cloudmold.commerce.full-chain-hsf.v1"),

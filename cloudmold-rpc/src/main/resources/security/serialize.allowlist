@@ -20,6 +20,7 @@ cn.iocoder.yudao.module.cloudmold.dreamplant.api
 cn.iocoder.yudao.module.cloudmold.operationsintelligence.api
 cn.iocoder.yudao.module.cloudmold.order.api
 cn.iocoder.yudao.module.cloudmold.payment.api
+cn.iocoder.yudao.module.cloudmold.partnermarketing.api
 cn.iocoder.yudao.module.cloudmold.promotion.api
 cn.iocoder.yudao.module.cloudmold.procurement.api
 cn.iocoder.yudao.module.cloudmold.supplier.api

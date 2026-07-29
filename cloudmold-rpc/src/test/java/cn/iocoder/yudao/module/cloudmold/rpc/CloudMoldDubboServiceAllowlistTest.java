@@ -32,6 +32,8 @@ class CloudMoldDubboServiceAllowlistTest {
                         "cn.iocoder.yudao.module.cloudmold.crossborder.api.bonded.BondedCustomsQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.crossborder.api.CrossBorderCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.crossborder.api.CrossBorderQueryApi",
+                        "cn.iocoder.yudao.module.cloudmold.partnermarketing.api.PartnerMarketingCommandApi",
+                        "cn.iocoder.yudao.module.cloudmold.partnermarketing.api.PartnerMarketingQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoWarehouseInboundQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.order.api.workflow.OrderWorkflowFactsApi",
                         "cn.iocoder.yudao.module.cloudmold.payment.api.PaymentWorkflowFactsApi",

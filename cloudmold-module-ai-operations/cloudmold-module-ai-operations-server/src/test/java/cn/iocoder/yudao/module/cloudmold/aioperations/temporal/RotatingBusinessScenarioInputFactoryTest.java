@@ -523,6 +523,78 @@ class RotatingBusinessScenarioInputFactoryTest {
     }
 
     @Test
+    void shouldBuildFreshPartnerMarketingRoleWithRealConsumerAttributionBindings() {
+        properties.setSyntheticConsumerMemberUserId(286L);
+        mockReadyMaster();
+        when(mapper.selectApprovalPolicy(162L)).thenReturn(new TemporalApprovalPolicyRecord()
+                .setTenantId(162L).setGovernanceUserId(227L).setStatus("ACTIVE"));
+        when(mapper.selectFirstEffectiveAgentRoleActor(162L, "finance")).thenReturn(228L);
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
+                {
+                  "runIds":{"catalog":"base-cat"},
+                  "catalog":{},"master":{"identityReference":{},"warehouseReference":{}},
+                  "aftersale":{"commands":[
+                    {},{},{},{},{},{},
+                    {"operation":"RECEIVE"},{"operation":"PLACE_FROM_LISTING","items":[{}]},
+                    {"operation":"RESERVE"},{"operation":"CONFIRM_INVENTORY"},
+                    {"operation":"CAPTURE"},{"operation":"CONFIRM_PAYMENT"},
+                    {"operation":"CREATE","items":[{}]},{"operation":"SHIP"},
+                    {"operation":"SHIP"},{"operation":"CONFIRM_SHIPMENT"},
+                    {"operation":"IN_TRANSIT"},{"operation":"DELIVERED"},
+                    {"operation":"COMPLETE"},{"operation":"REQUEST"},
+                    {"operation":"APPROVE"},{"operation":"HANDOVER"},
+                    {"operation":"TRANSIT"},{"operation":"RECEIVE"},
+                    {"operation":"ACCEPT"}]},
+                  "readback":{}
+                }
+                """);
+
+        JsonNode first = build(
+                RotatingBusinessScenarioInputFactory
+                        .PARTNER_MARKETING_KOL_MEDIA_OPERATIONS_SKILL);
+        JsonNode second = JsonUtils.parseTree(factory.build(162L,
+                RotatingBusinessScenarioInputFactory
+                        .PARTNER_MARKETING_KOL_MEDIA_OPERATIONS_SKILL,
+                "2026-07-29", "temporal-run-2").orElseThrow());
+
+        assertThat(first.path("operatorPrincipalId").asText()).isEqualTo("principal-1");
+        assertThat(first.path("independentReviewerPrincipalId").asText())
+                .isEqualTo("governance-user:227");
+        assertThat(first.path("financePrincipalId").asText())
+                .isEqualTo("finance-user:228");
+        assertThat(first.path("product").isObject()).isTrue();
+        assertThat(first.path("campaign").isObject()).isTrue();
+        assertThat(first.path("consumer").path("identityReference")
+                .path("sourceId").asText()).isEqualTo("286");
+        assertThat(first.path("partnerMarketingCommands")).hasSize(12);
+        assertThat(first.path("partnerMarketingCommands").get(0)
+                .path("candidateCase").path("caseId").asText())
+                .isNotEqualTo(second.path("partnerMarketingCommands").get(0)
+                        .path("candidateCase").path("caseId").asText());
+        assertThat(first.path("partnerMarketingCommands").get(3)
+                .path("brief").path("campaignId").asText()).isEqualTo(
+                "00000000-0000-0000-0000-000000000000");
+        JsonNode attribution = first.path("partnerMarketingCommands").get(8)
+                .path("attribution");
+        assertThat(attribution.path("attributionSourceRef").asText())
+                .startsWith("persona:o260729162-");
+        assertThat(attribution.path("grossSettlementAmountMinor").asLong())
+                .isEqualTo(attribution.path("platformFeeAmountMinor").asLong()
+                        + attribution.path("taxWithholdingAmountMinor").asLong()
+                        + attribution.path("netPayableAmountMinor").asLong());
+        assertThat(first.path("partnerMarketingCommands").get(4)
+                .path("actorPrincipalId").asText())
+                .isNotEqualTo(first.path("partnerMarketingCommands").get(3)
+                        .path("actorPrincipalId").asText());
+        assertThat(first.path("partnerMarketingCommands").get(10)
+                .path("actorPrincipalId").asText())
+                .isNotEqualTo(first.path("partnerMarketingCommands").get(9)
+                        .path("actorPrincipalId").asText());
+        assertThat(first.path("communityCommands")).hasSize(3);
+    }
+
+    @Test
     void shouldBuildUniqueMerchantOnboardingLifecycleInput() {
         mockReadyMaster();
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(

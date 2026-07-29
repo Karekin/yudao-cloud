@@ -67,6 +67,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                     "跨境履约与关务合规闭环"),
             Map.entry("skill.cloudmold.crossborder.bonded-customs-lifecycle.v1",
                     "保税仓关务闭环"),
+            Map.entry("skill.cloudmold.partner-marketing.kol-media-operations.v1",
+                    "海外 KOL 与媒体合作投放闭环"),
             Map.entry("skill.cloudmold.consumer.in-transit-order-scenario.v1", "在途订单场景准备"),
             Map.entry("skill.cloudmold.commerce.return-refund-readback.v1", "退货退款终态跟踪"),
             Map.entry("skill.cloudmold.customer-service.resolution-readback.v1", "客户问题解决终态跟踪"),
@@ -165,6 +167,9 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("skill.cloudmold.crossborder.bonded-customs-lifecycle.v1",
                     "模拟保税仓关务岗位为全新已支付订单完成 179 测试规则下的准入评估、商品归类、订单/支付/物流三单对碰、"
                             + "税费计算、风险与法务会签、申报受理、保税放行、境内妥投及关单；不冒充真实海关或税则权威。"),
+            Map.entry("skill.cloudmold.partner-marketing.kol-media-operations.v1",
+                    "模拟海外 KOL 与媒体合作岗位完成候选风险筛选、合作 brief 和披露合规审批、受控外部发布、"
+                            + "真实消费者选购支付归因、交付验收与结算闭环；外部平台发布和付款使用测试证据，不冒充真实平台或银行权威。"),
             Map.entry("skill.cloudmold.consumer.in-transit-order-scenario.v1",
                     "内部造数子流程：模拟会员选购、下单支付、出库和在途运输，为履约异常岗位主流程提供全新业务对象。"),
             Map.entry("skill.cloudmold.commerce.return-refund-readback.v1",
@@ -294,6 +299,20 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("community_create", "创建社区种草内容"),
             Map.entry("community_submit", "提交社区内容审核"),
             Map.entry("community_publish", "发布社区种草内容"),
+            Map.entry("submit_placement_campaign", "启动全新合作投放活动"),
+            Map.entry("wait_placement_campaign", "等待合作活动启用"),
+            Map.entry("open_candidate_case", "建立 KOL 候选合作案例"),
+            Map.entry("qualify_candidate", "完成候选品牌安全与合规筛选"),
+            Map.entry("start_outreach", "启动 KOL 合作邀约"),
+            Map.entry("submit_brief", "提交合作 brief"),
+            Map.entry("approve_brief", "独立审核合作 brief"),
+            Map.entry("submit_content", "提交合作内容审阅"),
+            Map.entry("approve_content", "独立审核合作内容"),
+            Map.entry("verify_publication_disclosure", "核验外部发布与广告披露"),
+            Map.entry("reconcile_attribution", "核对真实订单与支付归因"),
+            Map.entry("approve_settlement", "独立复核达人结算"),
+            Map.entry("mark_settlement_paid", "登记受控付款回执"),
+            Map.entry("verify_partner_marketing_closed", "验收发布、归因、结算与关单终态"),
             Map.entry("inventory_receive", "商品入库"),
             Map.entry("order_place", "创建订单"),
             Map.entry("inventory_reserve", "预占库存"),
@@ -507,6 +526,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                     crossborderFulfillmentComplianceLifecycle(task, steps);
             case "skill.cloudmold.crossborder.bonded-customs-lifecycle.v1" ->
                     bondedCustomsLifecycle(task, steps);
+            case "skill.cloudmold.partner-marketing.kol-media-operations.v1" ->
+                    partnerMarketingLifecycle(task, steps);
             default -> genericSuccess(task, steps);
         };
     }
@@ -859,6 +880,49 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                 task);
     }
 
+    private ManagedSkillTaskBusinessOutcomeView partnerMarketingLifecycle(
+            Task task, List<Step> steps) {
+        JsonNode product = result(steps, "wait_product_launch");
+        JsonNode listing = product.at("/outputs/listing_publish");
+        JsonNode campaign = result(steps, "wait_placement_campaign").at("/outputs/campaign_activate");
+        JsonNode consumer = result(steps, "wait_consumer_validation");
+        JsonNode order = consumer.at("/outputs/order_place");
+        JsonNode payment = consumer.at("/outputs/payment_capture");
+        JsonNode closed = result(steps, "verify_partner_marketing_closed");
+        JsonNode artifacts = closed.path("artifacts");
+        JsonNode partnerCase = artifact(artifacts, "PARTNER_MARKETING_CASE");
+        JsonNode publication = artifact(artifacts, "PUBLICATION");
+        JsonNode settlement = artifact(artifacts, "SETTLEMENT");
+        String caseId = valueOr(text(partnerCase, "id"), text(closed, "businessKey"));
+        return outcome("PARTNER_MARKETING_LIFECYCLE",
+                "KOL 合作案例 " + valueOr(caseId, "目标案例") + " 已完成投放归因与结算",
+                "海外合作运营已完成候选筛选、邀约、brief 与内容双重审核、广告披露核验、"
+                        + "真实消费者选购支付归因、达人结算付款和终态关单；外部发布与付款为受控测试证据。",
+                List.of(
+                        metric("合作状态", "CLOSED".equals(text(closed, "currentStatus"))
+                                ? "已关闭" : statusLabel(text(closed, "currentStatus"))),
+                        metric("归因订单", valueOr(text(order, "orderNo"), text(order, "orderId"))),
+                        metric("支付状态", statusLabel(text(payment, "currentStatus"))),
+                        metric("披露核验", "VERIFIED".equals(text(publication, "status"))
+                                ? "已核验" : statusLabel(text(publication, "status"))),
+                        metric("结算状态", statusLabel(text(settlement, "status")))),
+                List.of(
+                        object("PARTNER_MARKETING_CASE", "KOL 合作案例",
+                                caseId, caseId, text(closed, "currentStatus")),
+                        object("LISTING", "合作商品刊登",
+                                text(listing, "listingId"), text(listing, "listingNo"), "PUBLISHED"),
+                        object("CAMPAIGN", "合作投放活动",
+                                text(campaign, "campaignId"), text(campaign, "campaignCode"), "ACTIVE"),
+                        object("ORDER", "归因订单",
+                                text(order, "orderId"), text(order, "orderNo"), text(order, "currentStatus")),
+                        object("PAYMENT", "归因支付",
+                                text(payment, "paymentId"), text(payment, "paymentNo"),
+                                text(payment, "currentStatus")),
+                        object("SETTLEMENT", "达人结算",
+                                text(settlement, "id"), text(settlement, "id"), text(settlement, "status"))),
+                task);
+    }
+
     private ManagedSkillTaskBusinessOutcomeView productToListing(Task task, List<Step> steps) {
         JsonNode catalog = result(steps, "wait_catalog");
         JsonNode firstCatalog = catalog.at("/outputs/define_1");
@@ -1133,6 +1197,18 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
     private JsonNode firstResult(List<Step> steps, String prefix) {
         return steps.stream().filter(step -> step.getStepCode().startsWith(prefix))
                 .findFirst().map(this::resultNode).orElse(objectMapper.missingNode());
+    }
+
+    private JsonNode artifact(JsonNode artifacts, String type) {
+        if (artifacts == null || !artifacts.isArray()) {
+            return objectMapper.missingNode();
+        }
+        for (JsonNode artifact : artifacts) {
+            if (type.equals(text(artifact, "type"))) {
+                return artifact;
+            }
+        }
+        return objectMapper.missingNode();
     }
 
     private JsonNode resultNode(Step step) {

@@ -58,6 +58,9 @@ final class AgentApprovalR3Policy {
                 || action.equals("crossborder.bonded-customs")) {
             return List.of("risk", "legal");
         }
+        if (action.equals("partner-marketing.kol-media-operations")) {
+            return List.of("risk", "legal");
+        }
         if (startsWithAny(action, "quality.", "recall.", "capa.")) {
             return List.of("quality", "risk", "operations-lead");
         }

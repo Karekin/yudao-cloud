@@ -39,6 +39,7 @@
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-operations-intelligence-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-order-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-payment-api</artifactId><version>${revision}</version></dependency>
+        <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-partner-marketing-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-promotion-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-procurement-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-supplier-api</artifactId><version>${revision}</version></dependency>

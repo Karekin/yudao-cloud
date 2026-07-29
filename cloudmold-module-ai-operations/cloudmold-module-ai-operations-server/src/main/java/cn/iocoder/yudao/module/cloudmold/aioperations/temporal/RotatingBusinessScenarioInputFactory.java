@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -66,6 +67,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1";
     static final String BONDED_CUSTOMS_LIFECYCLE_SKILL =
             "skill.cloudmold.crossborder.bonded-customs-lifecycle.v1";
+    static final String PARTNER_MARKETING_KOL_MEDIA_OPERATIONS_SKILL =
+            "skill.cloudmold.partner-marketing.kol-media-operations.v1";
     static final String READY_MASTER_SKILL = "skill.cloudmold.commerce.reuse-ready-master.v1";
     static final String LEGACY_PROJECTION_SKILL = "skill.cloudmold.commerce.legacy-projection-plan.v1";
     private static final String ZERO_UUID = "00000000-0000-0000-0000-000000000000";
@@ -321,6 +324,29 @@ class RotatingBusinessScenarioInputFactory {
             }
             output = bondedCustomsLifecycle(
                     newPrefix, occurredAt, consumer, operator.path("principalId").asText());
+        } else if (PARTNER_MARKETING_KOL_MEDIA_OPERATIONS_SKILL.equals(targetSkillId)) {
+            if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
+                return Optional.empty();
+            }
+            JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
+            TemporalApprovalPolicyRecord approvalPolicy = mapper.selectApprovalPolicy(tenantId);
+            Long financeActorUserId =
+                    mapper.selectFirstEffectiveAgentRoleActor(tenantId, "finance");
+            Long reviewerUserId = approvalPolicy == null
+                    ? null : approvalPolicy.getGovernanceUserId();
+            if (operator.path("principalId").asText().isBlank()
+                    || reviewerUserId == null || reviewerUserId <= 0
+                    || financeActorUserId == null || financeActorUserId <= 0
+                    || reviewerUserId.equals(financeActorUserId)) {
+                return Optional.empty();
+            }
+            ObjectNode consumer = consumerJourney(rotated, newPrefix, occurredAt,
+                    seedProperties.getSyntheticConsumerMemberUserId());
+            output = partnerMarketingKolMediaOperations(
+                    rotated, newPrefix, occurredAt, consumer,
+                    operator.path("principalId").asText(),
+                    "governance-user:" + reviewerUserId,
+                    "finance-user:" + financeActorUserId);
         } else if (CATEGORY_DAILY_OPERATIONS_SKILL.equals(targetSkillId)) {
             if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
                 return Optional.empty();
@@ -379,6 +405,7 @@ class RotatingBusinessScenarioInputFactory {
             case FULFILLMENT_EXCEPTION_LIFECYCLE_SKILL -> "x";
             case CROSSBORDER_FULFILLMENT_COMPLIANCE_LIFECYCLE_SKILL -> "b";
             case BONDED_CUSTOMS_LIFECYCLE_SKILL -> "t";
+            case PARTNER_MARKETING_KOL_MEDIA_OPERATIONS_SKILL -> "o";
             case READY_MASTER_SKILL -> "m";
             case LEGACY_PROJECTION_SKILL -> "l";
             default -> throw new IllegalArgumentException("Unsupported rotating scenario Skill: " + skillId);
@@ -1884,6 +1911,210 @@ class RotatingBusinessScenarioInputFactory {
     private static String bondedCustomsEvidence(String prefix, String purpose) {
         return "evidence:bonded-customs/sha256/"
                 + DigestUtil.sha256Hex(prefix + ":" + purpose);
+    }
+
+    private static ObjectNode partnerMarketingKolMediaOperations(
+            ObjectNode fullChain, String prefix, String occurredAt, ObjectNode consumer,
+            String operatorPrincipalId, String reviewerPrincipalId,
+            String financePrincipalId) {
+        String correlationId = stableUuid(prefix + ":partner-marketing-correlation");
+        String caseId = stableUuid(prefix + ":partner-marketing-case");
+        String runId = prefix + "-partner-marketing";
+        String attributionSourceRef = "persona:" + prefix;
+
+        ObjectNode input = JsonNodeFactory.instance.objectNode();
+        input.put("operatorPrincipalId", operatorPrincipalId);
+        input.put("independentReviewerPrincipalId", reviewerPrincipalId);
+        input.put("financePrincipalId", financePrincipalId);
+        input.putObject("runIds")
+                .put("product", prefix + "-product")
+                .put("campaign", prefix + "-campaign")
+                .put("consumer", prefix + "-consumer")
+                .put("partnerMarketing", runId);
+        input.set("product", productToListing(fullChain, prefix));
+        input.set("campaign", promotionCampaign(prefix, occurredAt, operatorPrincipalId));
+        input.set("consumer", consumer);
+
+        ArrayNode commands = input.putArray("partnerMarketingCommands");
+        commands.add(partnerMarketingCommand(runId, correlationId, occurredAt,
+                        operatorPrincipalId, "OPEN_CANDIDATE_CASE")
+                .set("candidateCase", JsonNodeFactory.instance.objectNode()
+                        .put("caseId", caseId)
+                        .put("caseCode", "AI-KOL-" + prefix.toUpperCase(Locale.ROOT))
+                        .put("creatorPrincipalId", operatorPrincipalId)
+                        .put("candidateHandle", "@cloudmold_creator_" + prefix)
+                        .put("platformCode", "INSTAGRAM")
+                        .put("regionCode", "US")
+                        .put("categoryCode", "APPAREL")
+                        .put("reasonCode", "AI_DAILY_CREATOR_DISCOVERY")));
+        commands.add(partnerMarketingCommand(runId, correlationId, occurredAt,
+                        operatorPrincipalId, "QUALIFY_CANDIDATE")
+                .set("qualification", JsonNodeFactory.instance.objectNode()
+                        .put("caseId", caseId)
+                        .put("expectedVersion", 1)
+                        .put("riskLevel", "LOW")
+                        .put("riskDecision", "PASS")
+                        .put("riskEvidenceSha256",
+                                partnerMarketingEvidence(prefix, "candidate-risk-screen"))
+                        .put("qualificationNote",
+                                "历史内容、受众地区、品牌安全和广告披露能力均通过受控检查")
+                        .put("reasonCode", "AI_BRAND_AND_COMPLIANCE_SCREEN")));
+        commands.add(partnerMarketingCommand(runId, correlationId, occurredAt,
+                        operatorPrincipalId, "START_OUTREACH")
+                .set("outreach", JsonNodeFactory.instance.objectNode()
+                        .put("caseId", caseId)
+                        .put("expectedVersion", 2)
+                        .put("outreachChannelCode", "INSTAGRAM_DM")
+                        .put("outreachExternalRef", "outreach:" + prefix)
+                        .put("reasonCode", "AI_CREATOR_OUTREACH")));
+        commands.add(partnerMarketingCommand(runId, correlationId, occurredAt,
+                        operatorPrincipalId, "SUBMIT_BRIEF")
+                .set("brief", JsonNodeFactory.instance.objectNode()
+                        .put("caseId", caseId)
+                        .put("expectedVersion", 3)
+                        .put("campaignId", ZERO_UUID)
+                        .put("listingId", ZERO_UUID)
+                        .put("cooperationModel", "FIXED_FEE")
+                        .put("budgetAmountMinor", 10_000)
+                        .put("currencyCode", "CNY")
+                        .put("briefSummary",
+                                "新品开箱、尺码体验、本地化表达、广告披露与站内追踪链接")
+                        .put("briefEvidenceSha256",
+                                partnerMarketingEvidence(prefix, "cooperation-brief"))
+                        .put("reasonCode", "AI_CREATOR_BRIEF_SUBMIT")));
+        commands.add(partnerMarketingCommand(runId, correlationId, occurredAt,
+                        reviewerPrincipalId, "APPROVE_BRIEF")
+                .set("brief", JsonNodeFactory.instance.objectNode()
+                        .put("caseId", caseId)
+                        .put("expectedVersion", 4)
+                        .put("approvalEvidenceSha256",
+                                partnerMarketingEvidence(prefix, "brief-approval"))
+                        .put("reasonCode", "AI_BRIEF_APPROVED")));
+        commands.add(partnerMarketingCommand(runId, correlationId, occurredAt,
+                        operatorPrincipalId, "SUBMIT_CONTENT")
+                .set("content", JsonNodeFactory.instance.objectNode()
+                        .put("caseId", caseId)
+                        .put("expectedVersion", 5)
+                        .put("contentSummary",
+                                "本地化新品体验内容，包含材质、尺码、穿搭和付费合作披露")
+                        .put("contentEvidenceSha256",
+                                partnerMarketingEvidence(prefix, "creator-content"))
+                        .put("reasonCode", "AI_CREATOR_CONTENT_SUBMIT")));
+        commands.add(partnerMarketingCommand(runId, correlationId, occurredAt,
+                        reviewerPrincipalId, "APPROVE_CONTENT")
+                .set("content", JsonNodeFactory.instance.objectNode()
+                        .put("caseId", caseId)
+                        .put("expectedVersion", 6)
+                        .put("approvalEvidenceSha256",
+                                partnerMarketingEvidence(prefix, "content-approval"))
+                        .put("reasonCode", "AI_CONTENT_BRAND_COMPLIANCE_APPROVED")));
+        commands.add(partnerMarketingCommand(runId, correlationId, occurredAt,
+                        reviewerPrincipalId, "VERIFY_PUBLICATION_DISCLOSURE")
+                .set("publication", JsonNodeFactory.instance.objectNode()
+                        .put("caseId", caseId)
+                        .put("expectedVersion", 7)
+                        .put("externalPublishRef", "publication:" + prefix)
+                        .put("externalPublishUrl",
+                                "https://creator.example/cloudmold/" + prefix)
+                        .put("disclosureLabel", "PAID_PARTNERSHIP")
+                        .put("publishEvidenceSha256",
+                                partnerMarketingEvidence(prefix, "publication-disclosure"))
+                        .put("reasonCode", "AI_DISCLOSURE_VERIFIED")));
+        commands.add(partnerMarketingCommand(runId, correlationId, occurredAt,
+                        operatorPrincipalId, "RECONCILE_ATTRIBUTION")
+                .set("attribution", JsonNodeFactory.instance.objectNode()
+                        .put("caseId", caseId)
+                        .put("expectedVersion", 8)
+                        .put("attributedOrderCount", 1)
+                        .put("attributedOrderId", ZERO_UUID)
+                        .put("attributedPaymentId", ZERO_UUID)
+                        .put("attributionSourceRef", attributionSourceRef)
+                        .put("grossSettlementAmountMinor", 10_000)
+                        .put("platformFeeAmountMinor", 0)
+                        .put("taxWithholdingAmountMinor", 1_000)
+                        .put("netPayableAmountMinor", 9_000)
+                        .put("attributionEvidenceSha256",
+                                partnerMarketingEvidence(prefix, "paid-order-attribution"))
+                        .put("reasonCode", "AI_ATTRIBUTION_RECONCILED")));
+        commands.add(partnerMarketingCommand(runId, correlationId, occurredAt,
+                        reviewerPrincipalId, "APPROVE_SETTLEMENT")
+                .set("settlementApproval", JsonNodeFactory.instance.objectNode()
+                        .put("caseId", caseId)
+                        .put("expectedVersion", 9)
+                        .put("approvedNetPayableAmountMinor", 9_000)
+                        .put("approvalEvidenceSha256",
+                                partnerMarketingEvidence(prefix, "settlement-approval"))
+                        .put("reasonCode", "AI_SETTLEMENT_APPROVED")));
+        commands.add(partnerMarketingCommand(runId, correlationId, occurredAt,
+                        financePrincipalId, "MARK_SETTLEMENT_PAID")
+                .set("settlementPayment", JsonNodeFactory.instance.objectNode()
+                        .put("caseId", caseId)
+                        .put("expectedVersion", 10)
+                        .put("paidNetPayableAmountMinor", 9_000)
+                        .put("settlementReference", "settlement:" + prefix)
+                        .put("paymentEvidenceSha256",
+                                partnerMarketingEvidence(prefix, "settlement-payment"))
+                        .put("reasonCode", "AI_SETTLEMENT_PAID")));
+        commands.add(partnerMarketingCommand(runId, correlationId, occurredAt,
+                        operatorPrincipalId, "CLOSE_CASE")
+                .set("caseClose", JsonNodeFactory.instance.objectNode()
+                        .put("caseId", caseId)
+                        .put("expectedVersion", 11)
+                        .put("closureEvidenceSha256",
+                                partnerMarketingEvidence(prefix, "case-closure"))
+                        .put("reasonCode", "AI_PARTNER_MARKETING_CLOSED")));
+
+        ArrayNode community = input.putArray("communityCommands");
+        ArrayNode iv = JsonNodeFactory.instance.arrayNode();
+        for (int index = 0; index < 12; index++) iv.add(index + 1);
+        ArrayNode ciphertext = JsonNodeFactory.instance.arrayNode();
+        for (int index = 0; index < 24; index++) ciphertext.add(index + 11);
+        ObjectNode communityDraft = commonCommand(
+                prefix + "-partner-content-create", runId, occurredAt, correlationId)
+                .put("contentId", stableUuid(prefix + ":partner-content"))
+                .put("authorPrincipalId", operatorPrincipalId)
+                .put("contentType", "POST")
+                .put("bodyRef", "restricted:partner_content_" + prefix)
+                .put("bodyKeyId", "synthetic-key-v1")
+                .put("bodyDigestSha256",
+                        partnerMarketingEvidence(prefix, "community-content"))
+                .put("canonicalSpuId", ZERO_UUID)
+                .put("canonicalSkuId", ZERO_UUID)
+                .put("listingId", ZERO_UUID)
+                .put("listingOfferId", ZERO_UUID)
+                .put("desiredStatus", "DRAFT");
+        communityDraft.set("bodyIv", iv);
+        communityDraft.set("bodyCiphertext", ciphertext);
+        community.add(communityDraft);
+        community.add(commonCommand(
+                        prefix + "-partner-content-submit", runId, occurredAt, correlationId)
+                .put("contentId", ZERO_UUID)
+                .put("actorPrincipalId", operatorPrincipalId)
+                .put("desiredStatus", "PENDING_MODERATION")
+                .put("reasonCode", "BRAND_COMPLIANCE_REVIEW"));
+        community.add(commonCommand(
+                        prefix + "-partner-content-publish", runId, occurredAt, correlationId)
+                .put("contentId", ZERO_UUID)
+                .put("actorPrincipalId", reviewerPrincipalId)
+                .put("desiredStatus", "PUBLISHED")
+                .put("reasonCode", "AI_MODERATION_PASSED"));
+        return input;
+    }
+
+    private static ObjectNode partnerMarketingCommand(
+            String runId, String correlationId, String occurredAt,
+            String actorPrincipalId, String operation) {
+        return JsonNodeFactory.instance.objectNode()
+                .put("operation", operation)
+                .put("idempotencyKey", "pending-partner-marketing-command")
+                .put("runId", runId)
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt)
+                .put("actorPrincipalId", actorPrincipalId);
+    }
+
+    private static String partnerMarketingEvidence(String prefix, String purpose) {
+        return DigestUtil.sha256Hex(prefix + ":partner-marketing:" + purpose);
     }
 
     private static ObjectNode consumerJourney(ObjectNode fullChain, String prefix, String occurredAt,
