@@ -203,6 +203,38 @@ class ManagedSkillTaskBusinessOutcomePresenterTest {
     }
 
     @Test
+    void shouldDescribeFulfillmentExceptionAsRecoveredDeliveryAndClosedCase() {
+        ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
+                task("skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1"),
+                List.of(
+                        step("wait_in_transit_order", """
+                                {"status":"SUCCEEDED","outputs":{
+                                  "order_place":{"orderId":"order-1","orderNo":"O-100"},
+                                  "fulfillment_create":{"fulfillmentId":"fulfillment-1",
+                                    "fulfillmentNo":"F-100"}}}
+                                """),
+                        step("complete_recovered_order", """
+                                {"orderId":"order-1","orderNo":"O-100","currentStatus":"COMPLETED"}
+                                """),
+                        step("verify_exception_closed", """
+                                {"exceptionId":"exception-1","exceptionNo":"FE-100",
+                                 "exceptionType":"DELAY","action":"CONTACT_CARRIER","status":"CLOSED"}
+                                """)));
+
+        assertThat(outcome.getHeadline()).isEqualTo("履约异常 FE-100 已恢复交付并关单");
+        assertThat(outcome.getSummary()).contains("承运处置", "订单完结");
+        assertThat(outcome.getMetrics()).extracting("label", "value")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("异常状态", "已关闭"),
+                        org.assertj.core.groups.Tuple.tuple("订单状态", "已完成"));
+        assertThat(outcome.getBusinessObjects()).extracting("objectType", "businessId")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("FULFILLMENT_EXCEPTION", "exception-1"),
+                        org.assertj.core.groups.Tuple.tuple("ORDER", "order-1"),
+                        org.assertj.core.groups.Tuple.tuple("FULFILLMENT", "fulfillment-1"));
+    }
+
+    @Test
     void shouldDescribeFullChainByCompletedChildFlows() {
         ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
                 task("skill.cloudmold.commerce.full-chain-hsf.v1"),

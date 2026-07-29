@@ -56,6 +56,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.finance.close-lifecycle.v1";
     static final String QUALITY_INSPECTION_RECALL_LIFECYCLE_SKILL =
             "skill.cloudmold.quality.inspection-recall-lifecycle.v1";
+    static final String FULFILLMENT_EXCEPTION_LIFECYCLE_SKILL =
+            "skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1";
     static final String READY_MASTER_SKILL = "skill.cloudmold.commerce.reuse-ready-master.v1";
     static final String LEGACY_PROJECTION_SKILL = "skill.cloudmold.commerce.legacy-projection-plan.v1";
     private static final String ZERO_UUID = "00000000-0000-0000-0000-000000000000";
@@ -234,6 +236,16 @@ class RotatingBusinessScenarioInputFactory {
                     catalog.path("canonicalSkuId").asText(),
                     manager.path("principalId").asText(),
                     primaryInspectorUserId, independentReviewerUserId);
+        } else if (FULFILLMENT_EXCEPTION_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
+                return Optional.empty();
+            }
+            ObjectNode consumer = consumerJourney(rotated, newPrefix, occurredAt,
+                    seedProperties.getSyntheticConsumerMemberUserId());
+            if (!hydrateConsumerJourney(tenantId, consumer)) {
+                return Optional.empty();
+            }
+            output = fulfillmentExceptionLifecycle(newPrefix, occurredAt, consumer);
         } else {
             if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
                 return Optional.empty();
@@ -270,6 +282,7 @@ class RotatingBusinessScenarioInputFactory {
             case CUSTOMER_SERVICE_LIFECYCLE_SKILL -> "k";
             case FINANCE_CLOSE_LIFECYCLE_SKILL -> "n";
             case QUALITY_INSPECTION_RECALL_LIFECYCLE_SKILL -> "j";
+            case FULFILLMENT_EXCEPTION_LIFECYCLE_SKILL -> "x";
             case READY_MASTER_SKILL -> "m";
             case LEGACY_PROJECTION_SKILL -> "l";
             default -> throw new IllegalArgumentException("Unsupported rotating scenario Skill: " + skillId);
@@ -1187,6 +1200,70 @@ class RotatingBusinessScenarioInputFactory {
 
     private static String qualityEvidence(String prefix, String purpose) {
         return "sha256:" + DigestUtil.sha256Hex(prefix + ":" + purpose);
+    }
+
+    private static ObjectNode fulfillmentExceptionLifecycle(
+            String prefix, String occurredAt, ObjectNode consumer) {
+        boolean addressChange = Math.floorMod(prefix.hashCode(), 2) == 0;
+        String runId = prefix + "-fulfillment-exception";
+        String correlationId = stableUuid(prefix + ":fulfillment-exception-correlation");
+        String exceptionType = addressChange ? "ADDRESS_CHANGE" : "DELAY";
+        String action = addressChange ? "REROUTE_ADDRESS" : "CONTACT_CARRIER";
+        String reason = addressChange
+                ? "AI识别客户在签收前提出地址更正，需要重新规划末端配送路线"
+                : "AI识别在途节点超过承诺时效阈值，需要承运商优先干预";
+        String actionDescription = addressChange
+                ? "核验新地址、重算配送路线、通知承运商改派并同步新的预计送达时间"
+                : "联系承运商定位车辆与滞留原因，升级优先级并同步新的预计送达时间";
+        String resolutionSummary = addressChange
+                ? "承运商已确认改派路线和新地址，客户已获知新的预计送达时间"
+                : "承运商已解除滞留并恢复运输，客户已获知新的预计送达时间";
+
+        ObjectNode input = JsonNodeFactory.instance.objectNode();
+        input.put("inTransitRunId", prefix + "-in-transit-order");
+        input.set("consumer", consumer);
+        ArrayNode commands = input.putArray("exceptionCommands");
+        commands.add(fulfillmentExceptionCommand(runId, correlationId, occurredAt, "OPEN")
+                .put("exceptionType", exceptionType)
+                .put("reason", reason));
+        commands.add(fulfillmentExceptionCommand(runId, correlationId, occurredAt, "PLAN")
+                .put("exceptionId", ZERO_UUID)
+                .put("expectedVersion", 1)
+                .put("action", action)
+                .put("actionDescription", actionDescription)
+                .put("evidenceRef", fulfillmentExceptionEvidence(prefix, "impact-and-response-plan")));
+        commands.add(fulfillmentExceptionCommand(runId, correlationId, occurredAt,
+                        "REQUEST_APPROVAL")
+                .put("exceptionId", ZERO_UUID)
+                .put("expectedVersion", 2));
+        commands.add(fulfillmentExceptionCommand(runId, correlationId, occurredAt,
+                        "START_EXECUTION")
+                .put("exceptionId", ZERO_UUID)
+                .put("expectedVersion", 3));
+        commands.add(fulfillmentExceptionCommand(runId, correlationId, occurredAt, "RESOLVE")
+                .put("exceptionId", ZERO_UUID)
+                .put("expectedVersion", 4)
+                .put("evidenceRef", fulfillmentExceptionEvidence(prefix, "carrier-confirmation"))
+                .put("resolutionSummary", resolutionSummary));
+        commands.add(fulfillmentExceptionCommand(runId, correlationId, occurredAt, "CLOSE")
+                .put("exceptionId", ZERO_UUID)
+                .put("expectedVersion", 5));
+        return input;
+    }
+
+    private static ObjectNode fulfillmentExceptionCommand(
+            String runId, String correlationId, String occurredAt, String operation) {
+        return JsonNodeFactory.instance.objectNode()
+                .put("operation", operation)
+                .put("idempotencyKey", "pending-fulfillment-exception-command")
+                .put("runId", runId)
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt);
+    }
+
+    private static String fulfillmentExceptionEvidence(String prefix, String purpose) {
+        return "evidence:fulfillment-exception/sha256/"
+                + DigestUtil.sha256Hex(prefix + ":" + purpose);
     }
 
     private static ObjectNode consumerJourney(ObjectNode fullChain, String prefix, String occurredAt,

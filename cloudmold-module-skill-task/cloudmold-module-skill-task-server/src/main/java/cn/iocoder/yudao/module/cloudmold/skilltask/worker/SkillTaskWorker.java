@@ -271,7 +271,7 @@ public class SkillTaskWorker {
         }
         JsonNode template = json.parse(templateJson, "persisted step template");
         return templates.resolveValue(template, input, results, task.getTaskId(), task.getRunId(),
-                current.getIdempotencyKey());
+                current.getIdempotencyKey(), task.getApprovalRef());
     }
 
     private boolean writeApproved(Task task, Step step) {

@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Iterator;
 import java.util.Map;
 
@@ -23,7 +26,8 @@ public class SkillTaskTemplateResolver {
 
     public ArrayNode resolve(JsonNode template, JsonNode input, Map<String, JsonNode> stepResults,
                              String taskId, String stepIdempotencyKey) {
-        JsonNode resolved = resolveValue(template, input, stepResults, taskId, taskId, stepIdempotencyKey);
+        JsonNode resolved = resolveValue(template, input, stepResults, taskId, taskId,
+                stepIdempotencyKey, null);
         if (!resolved.isArray()) {
             throw new IllegalArgumentException("Resolved step arguments are not an array");
         }
@@ -32,17 +36,25 @@ public class SkillTaskTemplateResolver {
 
     public JsonNode resolveValue(JsonNode template, JsonNode input, Map<String, JsonNode> stepResults,
                                  String taskId, String runId, String stepIdempotencyKey) {
+        return resolveValue(template, input, stepResults, taskId, runId, stepIdempotencyKey, null);
+    }
+
+    public JsonNode resolveValue(JsonNode template, JsonNode input, Map<String, JsonNode> stepResults,
+                                 String taskId, String runId, String stepIdempotencyKey,
+                                 String approvalRef) {
         if (template == null) {
             throw new IllegalArgumentException("Step template is required");
         }
-        return resolveNode(template, input, stepResults, taskId, runId, stepIdempotencyKey);
+        return resolveNode(template, input, stepResults, taskId, runId, stepIdempotencyKey,
+                approvalRef);
     }
 
     private JsonNode resolveNode(JsonNode value, JsonNode input, Map<String, JsonNode> stepResults,
-                                 String taskId, String runId, String stepIdempotencyKey) {
+                                 String taskId, String runId, String stepIdempotencyKey,
+                                 String approvalRef) {
         if (value.isObject() && value.has("$object") && value.has("$overrides") && value.size() == 2) {
             JsonNode base = resolveNode(value.get("$object"), input, stepResults, taskId, runId,
-                    stepIdempotencyKey);
+                    stepIdempotencyKey, approvalRef);
             JsonNode overrides = value.get("$overrides");
             if (!base.isObject() || !overrides.isObject()) {
                 throw new IllegalArgumentException("$object template requires object base and overrides");
@@ -50,7 +62,7 @@ public class SkillTaskTemplateResolver {
             ObjectNode result = (ObjectNode) base.deepCopy();
             overrides.fields().forEachRemaining(entry -> {
                 JsonNode resolved = resolveNode(entry.getValue(), input, stepResults, taskId, runId,
-                        stepIdempotencyKey);
+                        stepIdempotencyKey, approvalRef);
                 if (entry.getKey().startsWith("/")) {
                     replaceAtPointer(result, entry.getKey(), resolved);
                 } else {
@@ -69,6 +81,13 @@ public class SkillTaskTemplateResolver {
             }
             if ("$task.stepIdempotencyKey".equals(text)) {
                 return objectMapper.getNodeFactory().textNode(stepIdempotencyKey);
+            }
+            if ("$task.approvalEvidenceRef".equals(text)) {
+                if (approvalRef == null || approvalRef.isBlank()) {
+                    throw new IllegalArgumentException(
+                            "Task approval evidence is unavailable: $task.approvalEvidenceRef");
+                }
+                return objectMapper.getNodeFactory().textNode(approvalEvidenceRef(approvalRef));
             }
             if (text.startsWith(INPUT_PREFIX)) {
                 return requirePath(input, text.substring(INPUT_PREFIX.length()), text);
@@ -92,14 +111,15 @@ public class SkillTaskTemplateResolver {
         if (value.isArray()) {
             ArrayNode result = objectMapper.createArrayNode();
             value.forEach(item -> result.add(resolveNode(item, input, stepResults, taskId, runId,
-                    stepIdempotencyKey)));
+                    stepIdempotencyKey, approvalRef)));
             return result;
         }
         if (value.isObject()) {
             ObjectNode result = objectMapper.createObjectNode();
             Iterator<Map.Entry<String, JsonNode>> fields = value.fields();
             fields.forEachRemaining(entry -> result.set(entry.getKey(),
-                    resolveNode(entry.getValue(), input, stepResults, taskId, runId, stepIdempotencyKey)));
+                    resolveNode(entry.getValue(), input, stepResults, taskId, runId,
+                            stepIdempotencyKey, approvalRef)));
             return result;
         }
         return value.deepCopy();
@@ -160,5 +180,15 @@ public class SkillTaskTemplateResolver {
 
     private static String decodePointerSegment(String value) {
         return value.replace("~1", "/").replace("~0", "~");
+    }
+
+    private static String approvalEvidenceRef(String approvalRef) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(approvalRef.getBytes(StandardCharsets.UTF_8));
+            return "agent-control://approval-ref/sha256/" + java.util.HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 }

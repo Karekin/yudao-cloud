@@ -79,4 +79,31 @@ class SkillTaskTemplateResolverTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("path is missing");
     }
+
+    @Test
+    void resolvesTaskApprovalAsOpaqueDeterministicEvidenceWithoutLeakingPermit() throws Exception {
+        JsonNode template = objectMapper.readTree("""
+                [{"approvalRef":"$task.approvalEvidenceRef"}]
+                """);
+        String rawApprovalRef = "signed-agent-control-permit-sensitive";
+
+        JsonNode result = resolver.resolveValue(template, objectMapper.createObjectNode(), Map.of(),
+                "task-1", "run-1", "task-1:approve", rawApprovalRef);
+
+        assertThat(result.at("/0/approvalRef").asText())
+                .startsWith("agent-control://approval-ref/sha256/")
+                .doesNotContain(rawApprovalRef);
+        assertThat(result).isEqualTo(resolver.resolveValue(template, objectMapper.createObjectNode(),
+                Map.of(), "task-1", "run-1", "task-1:approve", rawApprovalRef));
+    }
+
+    @Test
+    void rejectsApprovalEvidenceTemplateWhenTaskHasNoApproval() throws Exception {
+        JsonNode template = objectMapper.readTree("[\"$task.approvalEvidenceRef\"]");
+
+        assertThatThrownBy(() -> resolver.resolveValue(template, objectMapper.createObjectNode(),
+                Map.of(), "task-1", "run-1", "task-1:approve", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("approval evidence is unavailable");
+    }
 }

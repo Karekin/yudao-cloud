@@ -201,6 +201,24 @@ class SkillTaskDefinitionRegistryTest {
                             "capability.cloudmold.quality.quality-recall-workflow-query.inspect.v1");
                     assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("SUCCEEDED");
                 });
+        SkillTaskDefinition inTransitScenario = workspaceRegistry.require(
+                "skill.cloudmold.consumer.in-transit-order-scenario.v1", "1.0.0");
+        assertThat(inTransitScenario.getWorkflowLevel()).isEqualTo("INTERNAL_SUBFLOW");
+        assertThat(inTransitScenario.getRiskLevel()).isEqualTo("R3");
+        assertThat(inTransitScenario.getSteps()).hasSize(23);
+        SkillTaskDefinition fulfillmentExceptionLifecycle = workspaceRegistry.require(
+                "skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1", "1.0.0");
+        assertThat(fulfillmentExceptionLifecycle.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(fulfillmentExceptionLifecycle.getOwnerRole()).isEqualTo("logistics-operations");
+        assertThat(fulfillmentExceptionLifecycle.getRiskLevel()).isEqualTo("R3");
+        assertThat(fulfillmentExceptionLifecycle.getSteps()).hasSize(12);
+        assertThat(fulfillmentExceptionLifecycle.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(8);
+        assertThat(fulfillmentExceptionLifecycle.getSteps().get(10)).satisfies(step -> {
+            assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
+            assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("CLOSED");
+        });
         assertThat(workspaceRegistry.all()).extracting(SkillTaskDefinition::getSkillId)
                 .contains("skill.cloudmold.commerce.catalog-matrix.v1",
                         "skill.cloudmold.commerce.order-cancellation-operational.v1",

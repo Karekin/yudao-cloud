@@ -23,6 +23,8 @@ class TemporalAutomationCandidateMaterializerTest {
                 .setTenantId(162L)
                 .setEventId("event-payment-1")
                 .setEventType("payment.status.changed")
+                .setSchemaVersion(1)
+                .setSourceSystem("cloudmold-payment")
                 .setAggregateType("payment")
                 .setAggregateId("payment-1")
                 .setPayload("{\"order_id\":\"order-1\",\"payment_id\":\"payment-1\"}")
@@ -152,6 +154,8 @@ class TemporalAutomationCandidateMaterializerTest {
                 .setTenantId(162L)
                 .setEventId(eventId)
                 .setEventType("payment.status.changed")
+                .setSchemaVersion(1)
+                .setSourceSystem("cloudmold-payment")
                 .setAggregateType("payment")
                 .setAggregateId("payment-1")
                 .setPayload("{\"order_id\":\"order-1\",\"payment_id\":\"payment-1\","

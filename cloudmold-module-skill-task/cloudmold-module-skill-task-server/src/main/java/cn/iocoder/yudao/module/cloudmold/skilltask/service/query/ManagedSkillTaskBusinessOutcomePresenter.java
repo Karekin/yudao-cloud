@@ -58,6 +58,9 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("skill.cloudmold.commerce.order-to-cash-readback.v1", "订单到回款终态跟踪"),
             Map.entry("skill.cloudmold.commerce.order-cancellation-readback.v1", "订单取消终态跟踪"),
             Map.entry("skill.cloudmold.commerce.fulfillment-exception-readback.v1", "履约异常终态跟踪"),
+            Map.entry("skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1",
+                    "履约异常处置闭环"),
+            Map.entry("skill.cloudmold.consumer.in-transit-order-scenario.v1", "在途订单场景准备"),
             Map.entry("skill.cloudmold.commerce.return-refund-readback.v1", "退货退款终态跟踪"),
             Map.entry("skill.cloudmold.customer-service.resolution-readback.v1", "客户问题解决终态跟踪"),
             Map.entry("skill.cloudmold.quality.recall-readback.v1", "质量召回终态跟踪"),
@@ -138,6 +141,10 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                     "持续核验取消 Saga、库存释放与退款事实，异常或人工处理会明确留痕。"),
             Map.entry("skill.cloudmold.commerce.fulfillment-exception-readback.v1",
                     "持续核验订单履约异常的处理结果，未闭环时保持等待或人工处理状态。"),
+            Map.entry("skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1",
+                    "模拟物流经理为全新在途订单完成异常识别分级、影响诊断、处置方案、R3 审批、承运执行、恢复交付、订单完结、异常关单与终态验收。"),
+            Map.entry("skill.cloudmold.consumer.in-transit-order-scenario.v1",
+                    "内部造数子流程：模拟会员选购、下单支付、出库和在途运输，为履约异常岗位主流程提供全新业务对象。"),
             Map.entry("skill.cloudmold.commerce.return-refund-readback.v1",
                     "持续核验售后、退货质检、退款与库存恢复事实，直至闭环终态。"),
             Map.entry("skill.cloudmold.customer-service.resolution-readback.v1",
@@ -176,6 +183,18 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("get-active-sku", "查询在售 SKU"),
             Map.entry("diagnose-size-stockout", "诊断尺码库存"),
             Map.entry("inspect_listing_lifecycle", "核验商品刊登生命周期终态"),
+            Map.entry("submit_in_transit_order", "生成全新在途订单"),
+            Map.entry("wait_in_transit_order", "等待订单进入在途"),
+            Map.entry("open_exception", "识别并登记履约异常"),
+            Map.entry("plan_response", "诊断影响并制定处置方案"),
+            Map.entry("record_approval", "登记真实审批证据"),
+            Map.entry("start_response", "启动承运处置"),
+            Map.entry("resolve_exception", "确认异常恢复"),
+            Map.entry("deliver_recovered_shipment", "完成恢复后交付"),
+            Map.entry("complete_recovered_order", "完结恢复订单"),
+            Map.entry("close_exception", "关闭履约异常"),
+            Map.entry("verify_exception_closed", "验收异常关单"),
+            Map.entry("verify_delivery_completed", "验收交付终态"),
             Map.entry("activate_style", "启用商品款式"),
             Map.entry("submit_spu", "提交 SPU 审核"),
             Map.entry("approve_spu", "审批通过 SPU"),
@@ -405,6 +424,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             case "skill.cloudmold.commerce.reuse-ready-master.v1" -> masterData(task, steps);
             case "skill.cloudmold.commerce.terminal-readback.v1" -> readback(task, steps);
             case "skill.cloudmold.commerce.full-chain-hsf.v1" -> fullChain(task, steps);
+            case "skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1" ->
+                    fulfillmentExceptionLifecycle(task, steps);
             default -> genericSuccess(task, steps);
         };
     }
@@ -658,6 +679,36 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                         object("ORDER", "交易订单", text(order, "orderId"), orderNo, text(order, "currentStatus")),
                         object("AFTERSALE", "售后单", text(aftersale, "afterSaleId"), afterSaleNo,
                                 text(aftersale, "caseStatus"))),
+                task);
+    }
+
+    private ManagedSkillTaskBusinessOutcomeView fulfillmentExceptionLifecycle(
+            Task task, List<Step> steps) {
+        JsonNode transit = result(steps, "wait_in_transit_order");
+        JsonNode order = transit.at("/outputs/order_place");
+        JsonNode fulfillment = transit.at("/outputs/fulfillment_create");
+        JsonNode closed = result(steps, "verify_exception_closed");
+        JsonNode completedOrder = result(steps, "complete_recovered_order");
+        String exceptionNo = valueOr(text(closed, "exceptionNo"), text(closed, "exceptionId"));
+        return outcome("FULFILLMENT_EXCEPTION_RESOLUTION",
+                "履约异常 " + valueOr(exceptionNo, "处置单") + " 已恢复交付并关单",
+                "物流经理已完成异常识别、影响诊断、审批、承运处置、恢复交付和订单完结；"
+                        + "异常、订单与履约终态均已留存证据。",
+                List.of(
+                        metric("异常类型", statusLabel(text(closed, "exceptionType"))),
+                        metric("处置动作", statusLabel(text(closed, "action"))),
+                        metric("异常状态", "CLOSED".equals(text(closed, "status"))
+                                ? "已关闭" : statusLabel(text(closed, "status"))),
+                        metric("订单状态", statusLabel(text(completedOrder, "currentStatus")))),
+                List.of(
+                        object("FULFILLMENT_EXCEPTION", "履约异常",
+                                text(closed, "exceptionId"), exceptionNo, text(closed, "status")),
+                        object("ORDER", "恢复订单",
+                                text(order, "orderId"), text(order, "orderNo"),
+                                text(completedOrder, "currentStatus")),
+                        object("FULFILLMENT", "恢复履约单",
+                                text(fulfillment, "fulfillmentId"),
+                                text(fulfillment, "fulfillmentNo"), "DELIVERED")),
                 task);
     }
 

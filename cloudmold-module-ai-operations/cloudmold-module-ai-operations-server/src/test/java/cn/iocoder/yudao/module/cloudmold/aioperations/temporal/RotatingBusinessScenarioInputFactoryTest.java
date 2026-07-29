@@ -234,6 +234,74 @@ class RotatingBusinessScenarioInputFactoryTest {
     }
 
     @Test
+    void shouldBuildFreshFulfillmentExceptionRoleScenarioWithFreshInTransitOrder() {
+        properties.setSyntheticConsumerMemberUserId(286L);
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.READY_MASTER_SKILL, "principal"))
+                .thenReturn("{\"principalId\":\"principal-1\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.PRODUCT_TO_LISTING_SKILL, "listing_create"))
+                .thenReturn("""
+                        {"listingId":"listing-1","offers":[{"listingOfferId":"offer-1"}]}
+                        """);
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL, "define_1"))
+                .thenReturn("""
+                        {"canonicalSpuId":"spu-1","canonicalSkuId":"sku-1"}
+                        """);
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
+                {
+                  "runIds":{"catalog":"base-cat"},
+                  "catalog":{},"master":{"identityReference":{},"warehouseReference":{}},
+                  "aftersale":{"commands":[
+                    {},{},{},{},{},{},
+                    {"operation":"RECEIVE"},{"operation":"PLACE_FROM_LISTING","items":[{}]},
+                    {"operation":"RESERVE"},{"operation":"CONFIRM_INVENTORY"},
+                    {"operation":"CAPTURE"},{"operation":"CONFIRM_PAYMENT"},
+                    {"operation":"CREATE","items":[{}]},{"operation":"SHIP"},
+                    {"operation":"SHIP"},{"operation":"CONFIRM_SHIPMENT"},
+                    {"operation":"IN_TRANSIT"},{"operation":"DELIVERED"},
+                    {"operation":"COMPLETE"},{"operation":"REQUEST"},
+                    {"operation":"APPROVE"},{"operation":"HANDOVER"},
+                    {"operation":"TRANSIT"},{"operation":"RECEIVE"},
+                    {"operation":"ACCEPT"}]},
+                  "readback":{}
+                }
+                """);
+
+        JsonNode first = build(
+                RotatingBusinessScenarioInputFactory.FULFILLMENT_EXCEPTION_LIFECYCLE_SKILL);
+        JsonNode second = JsonUtils.parseTree(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.FULFILLMENT_EXCEPTION_LIFECYCLE_SKILL,
+                "2026-07-29", "temporal-run-2").orElseThrow());
+
+        assertThat(first.path("inTransitRunId").asText()).startsWith("x260729162-")
+                .endsWith("-in-transit-order");
+        assertThat(first.path("inTransitRunId").asText())
+                .isNotEqualTo(second.path("inTransitRunId").asText());
+        assertThat(first.path("consumer").path("identityReference").path("sourceId").asText())
+                .isEqualTo("286");
+        assertThat(first.path("consumer").path("commands")).hasSize(19);
+        assertThat(first.path("consumer").path("commands").get(10).path("operation").asText())
+                .isEqualTo("IN_TRANSIT");
+        assertThat(first.path("exceptionCommands")).hasSize(6);
+        assertThat(first.path("exceptionCommands").get(0).path("operation").asText())
+                .isEqualTo("OPEN");
+        assertThat(first.path("exceptionCommands").get(1).path("action").asText())
+                .isIn("CONTACT_CARRIER", "REROUTE_ADDRESS");
+        assertThat(first.path("exceptionCommands").get(1).path("evidenceRef").asText())
+                .matches("evidence:fulfillment-exception/sha256/[0-9a-f]{64}");
+        assertThat(first.path("exceptionCommands").get(2).path("operation").asText())
+                .isEqualTo("REQUEST_APPROVAL");
+        assertThat(first.path("exceptionCommands").get(2).has("approvalRef")).isFalse();
+        assertThat(first.path("exceptionCommands").get(3).has("approvalRef")).isFalse();
+        assertThat(first.path("exceptionCommands").get(5).path("operation").asText())
+                .isEqualTo("CLOSE");
+    }
+
+    @Test
     void shouldBuildUniqueMerchantOnboardingLifecycleInput() {
         mockReadyMaster();
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(

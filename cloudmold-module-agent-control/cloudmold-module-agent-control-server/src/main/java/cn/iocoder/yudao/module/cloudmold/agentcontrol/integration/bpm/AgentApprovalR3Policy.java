@@ -48,6 +48,9 @@ final class AgentApprovalR3Policy {
         if (action.equals("quality.inspection-recall")) {
             return List.of("quality", "operations-lead");
         }
+        if (action.equals("fulfillment.exception-resolution")) {
+            return List.of("customer-service", "operations-lead");
+        }
         if (startsWithAny(action, "quality.", "recall.", "capa.")) {
             return List.of("quality", "risk", "operations-lead");
         }
