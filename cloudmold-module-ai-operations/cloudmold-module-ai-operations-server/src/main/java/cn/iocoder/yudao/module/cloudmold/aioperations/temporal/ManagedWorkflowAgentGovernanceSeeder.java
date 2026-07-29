@@ -34,6 +34,7 @@ class ManagedWorkflowAgentGovernanceSeeder {
 
     private static final Map<String, String> ROLE_NAMES = Map.ofEntries(
             Map.entry("customer-service", "客户服务运营"),
+            Map.entry("finance-operations", "财务结算运营"),
             Map.entry("growth-marketing", "增长营销运营"),
             Map.entry("merchandising", "商品运营"),
             Map.entry("merchant-operations", "商家运营"),
@@ -58,7 +59,8 @@ class ManagedWorkflowAgentGovernanceSeeder {
             Map.entry("supplier.award", List.of("buyer", "finance")),
             Map.entry("purchase-order.dispatch", List.of("buyer", "finance")),
             Map.entry("warehouse.physical-cycle", List.of("inventory-control", "operations-control")),
-            Map.entry("replenishment.end-to-end", List.of("buyer", "finance"))
+            Map.entry("replenishment.end-to-end", List.of("buyer", "finance")),
+            Map.entry("finance.period-close", List.of("risk", "operations-control"))
     );
 
     private final AgentControlCommandApi agentCommands;

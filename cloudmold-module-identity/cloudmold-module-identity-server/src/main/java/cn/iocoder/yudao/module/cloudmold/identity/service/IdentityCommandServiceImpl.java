@@ -58,8 +58,11 @@ public class IdentityCommandServiceImpl implements IdentityCommandApi {
 
         SourceAccountValidationPort validator = resolveValidator(command);
         validator.requireActive(tenantId, command.getSourceSystem(), command.getSourceType(), command.getSourceId());
-        require(sourceIdentityMapper.selectActiveBySource(tenantId, command.getSourceSystem(),
-                command.getSourceType(), command.getSourceId()) == null, "source identity is already linked");
+        SourceIdentityDO existingSource = sourceIdentityMapper.selectActiveBySource(
+                tenantId, command.getSourceSystem(), command.getSourceType(), command.getSourceId());
+        if (existingSource != null) {
+            return resolveExistingLink(operationId, tenantId, command, existingSource, now);
+        }
 
         PrincipalDO principal = resolvePrincipal(tenantId, command, now);
         require(!principal.getPrincipalId().equals(command.getSourceId()),
@@ -79,6 +82,34 @@ public class IdentityCommandServiceImpl implements IdentityCommandApi {
                 .duplicate(false).build();
         require(operationMapper.markSucceeded(operationId, tenantId, principal.getPrincipalId(),
                 JsonUtils.toJsonString(result), now) == 1, "identity operation completion conflict");
+        return result;
+    }
+
+    private LinkSourceIdentityResult resolveExistingLink(
+            Long operationId, Long tenantId, LinkSourceIdentityCommand command,
+            SourceIdentityDO source, LocalDateTime now) {
+        PrincipalDO principal = principalMapper.selectForUpdate(tenantId, source.getPrincipalId());
+        require(principal != null, "linked canonical Principal does not exist");
+        require("ACTIVE".equals(principal.getStatus()), "linked canonical Principal is not ACTIVE");
+        require(Objects.equals(principal.getPrincipalType(), command.getPrincipalType()),
+                "principalType does not match linked canonical Principal");
+        if (command.getPrincipalId() != null) {
+            require(Objects.equals(command.getPrincipalId(), principal.getPrincipalId()),
+                    "source identity is linked to a different Principal");
+            require(Objects.equals(command.getExpectedVersion(), principal.getVersion()),
+                    "canonical Principal version conflict");
+        }
+        LinkSourceIdentityResult result = LinkSourceIdentityResult.builder()
+                .operationId(operationId)
+                .principalId(principal.getPrincipalId())
+                .sourceIdentityId(source.getSourceIdentityId())
+                .principalStatus(principal.getStatus())
+                .aggregateVersion(principal.getVersion())
+                .duplicate(true)
+                .build();
+        require(operationMapper.markSucceeded(operationId, tenantId, principal.getPrincipalId(),
+                JsonUtils.toJsonString(result), now) == 1,
+                "identity operation completion conflict");
         return result;
     }
 

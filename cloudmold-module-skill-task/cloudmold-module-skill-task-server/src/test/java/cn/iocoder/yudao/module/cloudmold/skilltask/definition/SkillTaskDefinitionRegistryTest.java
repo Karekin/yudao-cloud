@@ -174,6 +174,17 @@ class SkillTaskDefinitionRegistryTest {
                     .isEqualTo("capability.cloudmold.finance.finance-close-query.require-period.v1");
             assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("CLOSED");
         });
+        SkillTaskDefinition financeLifecycle = workspaceRegistry.require(
+                "skill.cloudmold.finance.close-lifecycle.v1", "1.0.0");
+        assertThat(financeLifecycle.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(financeLifecycle.getOwnerRole()).isEqualTo("finance-operations");
+        assertThat(financeLifecycle.getRiskLevel()).isEqualTo("R3");
+        assertThat(financeLifecycle.getSteps()).hasSize(12);
+        assertThat(financeLifecycle.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(11);
+        assertThat(financeLifecycle.getSteps().get(financeLifecycle.getSteps().size() - 1).getWaitSuccess()
+                .path("/status").asText()).isEqualTo("CLOSED");
         assertThat(workspaceRegistry.all()).extracting(SkillTaskDefinition::getSkillId)
                 .contains("skill.cloudmold.commerce.catalog-matrix.v1",
                         "skill.cloudmold.commerce.order-cancellation-operational.v1",

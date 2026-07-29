@@ -160,6 +160,8 @@ class AgentApprovalResponsibilityResolverTest {
                 .containsExactly("buyer", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("warehouse.physical-cycle"))
                 .containsExactly("inventory-control", "operations-control");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("finance.period-close"))
+                .containsExactly("risk", "operations-control");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("mission.stockout.start"))
                 .containsExactly("risk", "finance");
         assertThatThrownBy(() -> AgentApprovalR3Policy.requiredRoleCodes("unknown.write"))

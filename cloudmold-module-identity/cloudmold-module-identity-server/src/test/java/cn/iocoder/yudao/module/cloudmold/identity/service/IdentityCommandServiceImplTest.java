@@ -146,13 +146,20 @@ class IdentityCommandServiceImplTest {
     }
 
     @Test
-    void shouldRejectAlreadyLinkedSource() {
+    void shouldConvergeOnAlreadyLinkedActiveSource() {
         when(sourceIdentityMapper.selectActiveBySource(1L, "SYSTEM", "SYSTEM_ADMIN_USER", "42"))
-                .thenReturn(new SourceIdentityDO().setPrincipalId("existing-principal"));
+                .thenReturn(new SourceIdentityDO().setSourceIdentityId("existing-source")
+                        .setPrincipalId("existing-principal").setVersion(1L));
+        when(principalMapper.selectForUpdate(1L, "existing-principal"))
+                .thenReturn(new PrincipalDO().setPrincipalId("existing-principal")
+                        .setPrincipalType("PLATFORM_OPERATOR").setStatus("ACTIVE").setVersion(3L));
 
-        assertThatThrownBy(() -> service.linkSource(command("identity-link-conflict")))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("source identity is already linked");
+        LinkSourceIdentityResult result = service.linkSource(command("identity-link-converge"));
+
+        assertThat(result.getPrincipalId()).isEqualTo("existing-principal");
+        assertThat(result.getSourceIdentityId()).isEqualTo("existing-source");
+        assertThat(result.getAggregateVersion()).isEqualTo(3L);
+        assertThat(result.getDuplicate()).isTrue();
         verify(principalMapper, never()).insert((PrincipalDO) any());
         verify(outboxAppender, never()).append(any());
     }

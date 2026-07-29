@@ -29,6 +29,9 @@ final class AgentApprovalR3Policy {
         if (startsWithAny(action, "warehouse.", "wms.")) {
             return List.of("inventory-control", "operations-control");
         }
+        if (action.startsWith("finance.")) {
+            return List.of("risk", "operations-control");
+        }
         if (startsWithAny(action, "mission.stockout", "inventory.stockout")) {
             return List.of("risk", "finance");
         }

@@ -352,6 +352,38 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .path("assignedAgentPrincipalId").asText()).isEqualTo("principal-owner");
     }
 
+    @Test
+    void shouldBuildFreshFinanceCloseWithIndependentMakerAndChecker() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
+                {
+                  "runIds":{"catalog":"base-cat"},
+                  "catalog":{},"master":{"identityReference":{},"warehouseReference":{}},
+                  "aftersale":{"commands":[]},"readback":{}
+                }
+                """);
+        when(mapper.selectApprovalPolicy(162L)).thenReturn(new TemporalApprovalPolicyRecord()
+                .setTenantId(162L).setGovernanceUserId(227L).setStatus("ACTIVE"));
+        when(mapper.selectFirstEffectiveAgentRoleActor(162L, "finance")).thenReturn(228L);
+
+        JsonNode finance = build(RotatingBusinessScenarioInputFactory.FINANCE_CLOSE_LIFECYCLE_SKILL);
+
+        assertThat(finance.path("makerIdentityCommand").path("sourceId").asText()).isEqualTo("228");
+        assertThat(finance.path("checkerIdentityCommand").path("sourceId").asText()).isEqualTo("227");
+        assertThat(finance.path("commands")).hasSize(9);
+        assertThat(finance.path("commands").get(0).path("operation").asText())
+                .isEqualTo("OPEN_ACCOUNTING_PERIOD");
+        assertThat(finance.path("commands").get(2).path("operation").asText())
+                .isEqualTo("RECONCILE_CHANNEL_STATEMENT");
+        assertThat(finance.path("commands").get(3).path("differenceResolution")
+                .path("adjustmentAmountMinor").asLong()).isEqualTo(10_000L);
+        assertThat(finance.path("commands").get(8).path("operation").asText())
+                .isEqualTo("CLOSE_ACCOUNTING_PERIOD");
+        assertThat(finance.path("commands").get(1).path("statement")
+                .path("evidenceSha256").asText()).matches("[0-9a-f]{64}");
+    }
+
     private JsonNode build(String skillId) {
         return JsonUtils.parseTree(factory.build(162L, skillId,
                 "2026-07-29", "temporal-run-1").orElseThrow());

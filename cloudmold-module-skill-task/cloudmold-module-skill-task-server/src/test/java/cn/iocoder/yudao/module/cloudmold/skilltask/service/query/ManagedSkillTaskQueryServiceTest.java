@@ -113,9 +113,11 @@ class ManagedSkillTaskQueryServiceTest {
     void shouldDescribeNewBusinessWorkflowsWithTruthfulCompletionBoundary() {
         SkillTaskDefinition productToListing = definition(
                 "skill.cloudmold.commerce.product-to-listing.v1", "1.0.0", "R3");
+        SkillTaskDefinition financeClose = definition(
+                "skill.cloudmold.finance.close-lifecycle.v1", "1.0.0", "R3");
         SkillTaskDefinition replenishmentPrepare = definition(
                 "skill.cloudmold.supply-planning.prepare.v1", "1.0.0", "R2");
-        when(registry.all()).thenReturn(List.of(productToListing, replenishmentPrepare));
+        when(registry.all()).thenReturn(List.of(productToListing, financeClose, replenishmentPrepare));
 
         List<ManagedSkillTaskWorkflowView> workflows = service.listManagedWorkflows();
 
@@ -126,6 +128,9 @@ class ManagedSkillTaskQueryServiceTest {
                         org.assertj.core.groups.Tuple.tuple(
                                 "自动铺品",
                                 "串联规范商品建档、商家店铺准备、商品刊登审核发布与终态回读；缺少真实渠道回执时明确标记待渠道确认。"),
+                        org.assertj.core.groups.Tuple.tuple(
+                                "财务结算关账闭环",
+                                "模拟财务结算岗位以制单、复核双身份完成账单导入、差异调整、结算、凭证、过账、关账与终态验收；每天生成全新账期。"),
                         org.assertj.core.groups.Tuple.tuple(
                                 "补货单准备",
                                 "将已批准的补货建议转换为真实采购或调拨草稿，并明确后续等待的供应商或仓储事件。"));

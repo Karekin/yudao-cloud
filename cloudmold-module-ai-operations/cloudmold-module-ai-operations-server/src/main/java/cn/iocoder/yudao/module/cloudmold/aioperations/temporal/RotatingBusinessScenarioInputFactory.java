@@ -52,6 +52,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.supply.replenishment-lifecycle.v1";
     static final String CUSTOMER_SERVICE_LIFECYCLE_SKILL =
             "skill.cloudmold.customer-service.resolution-lifecycle.v1";
+    static final String FINANCE_CLOSE_LIFECYCLE_SKILL =
+            "skill.cloudmold.finance.close-lifecycle.v1";
     static final String READY_MASTER_SKILL = "skill.cloudmold.commerce.reuse-ready-master.v1";
     static final String LEGACY_PROJECTION_SKILL = "skill.cloudmold.commerce.legacy-projection-plan.v1";
     private static final String ZERO_UUID = "00000000-0000-0000-0000-000000000000";
@@ -190,6 +192,18 @@ class RotatingBusinessScenarioInputFactory {
                     customer.path("principalId").asText(),
                     agent.path("principalId").asText(),
                     order.path("orderId").asText());
+        } else if (FINANCE_CLOSE_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            TemporalApprovalPolicyRecord approvalPolicy = mapper.selectApprovalPolicy(tenantId);
+            Long financeMakerUserId = mapper.selectFirstEffectiveAgentRoleActor(tenantId, "finance");
+            Long financeCheckerUserId = approvalPolicy == null
+                    ? null : approvalPolicy.getGovernanceUserId();
+            if (financeMakerUserId == null || financeMakerUserId <= 0
+                    || financeCheckerUserId == null || financeCheckerUserId <= 0
+                    || financeMakerUserId.equals(financeCheckerUserId)) {
+                return Optional.empty();
+            }
+            output = financeCloseLifecycle(newPrefix, occurredAt,
+                    financeMakerUserId, financeCheckerUserId);
         } else {
             if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
                 return Optional.empty();
@@ -224,6 +238,7 @@ class RotatingBusinessScenarioInputFactory {
             case WMS_OPERATIONS_SKILL -> "w";
             case REPLENISHMENT_LIFECYCLE_SKILL -> "r";
             case CUSTOMER_SERVICE_LIFECYCLE_SKILL -> "k";
+            case FINANCE_CLOSE_LIFECYCLE_SKILL -> "n";
             case READY_MASTER_SKILL -> "m";
             case LEGACY_PROJECTION_SKILL -> "l";
             default -> throw new IllegalArgumentException("Unsupported rotating scenario Skill: " + skillId);
@@ -831,6 +846,137 @@ class RotatingBusinessScenarioInputFactory {
         ObjectNode input = JsonNodeFactory.instance.objectNode();
         input.set("commands", commands);
         return input;
+    }
+
+    private static ObjectNode financeCloseLifecycle(String prefix, String occurredAt,
+                                                    long makerUserId, long checkerUserId) {
+        LocalDate date = Instant.parse(occurredAt).atZone(java.time.ZoneOffset.UTC).toLocalDate();
+        String runId = prefix + "-finance-close";
+        String correlationId = stableUuid(prefix + ":finance-close-correlation");
+        String periodId = stableUuid(prefix + ":accounting-period");
+        String statementId = stableUuid(prefix + ":channel-statement");
+        String settlementId = stableUuid(prefix + ":settlement-batch");
+        String journalId = stableUuid(prefix + ":journal-entry");
+        long grossAmountMinor = 1_200_000L;
+        long refundAmountMinor = 100_000L;
+        long feeAmountMinor = 50_000L;
+        long netAmountMinor = grossAmountMinor - refundAmountMinor - feeAmountMinor;
+        long differenceAmountMinor = 10_000L;
+
+        ObjectNode input = JsonNodeFactory.instance.objectNode();
+        input.set("makerIdentityCommand", financeIdentityCommand(
+                runId, correlationId, occurredAt, makerUserId));
+        input.set("checkerIdentityCommand", financeIdentityCommand(
+                runId, correlationId, occurredAt, checkerUserId));
+        ArrayNode commands = input.putArray("commands");
+
+        commands.add(financeCommand(runId, correlationId, occurredAt, "OPEN_ACCOUNTING_PERIOD")
+                .set("period", JsonNodeFactory.instance.objectNode()
+                        .put("periodId", periodId)
+                        .put("periodCode", "AI-" + date.toString())
+                        .put("periodStart", date.toString())
+                        .put("periodEnd", date.toString())
+                        .put("currencyCode", "CNY")
+                        .put("reasonCode", "AI_DAILY_CLOSE")));
+        commands.add(financeCommand(runId, correlationId, occurredAt, "IMPORT_CHANNEL_STATEMENT")
+                .set("statement", JsonNodeFactory.instance.objectNode()
+                        .put("statementId", statementId)
+                        .put("statementCode", "AI-ST-" + prefix.toUpperCase())
+                        .put("periodId", periodId)
+                        .put("channelCode", "YSHOPPING_INTERNAL")
+                        .put("statementDate", date.toString())
+                        .put("currencyCode", "CNY")
+                        .put("grossAmountMinor", grossAmountMinor)
+                        .put("refundAmountMinor", refundAmountMinor)
+                        .put("feeAmountMinor", feeAmountMinor)
+                        .put("netSettlementAmountMinor", netAmountMinor)
+                        .put("expectedBusinessNetAmountMinor",
+                                netAmountMinor - differenceAmountMinor)
+                        .put("evidenceSha256",
+                                DigestUtil.sha256Hex(prefix + ":statement-evidence"))
+                        .put("reasonCode", "AI_CHANNEL_STATEMENT_IMPORT")));
+        commands.add(financeCommand(runId, correlationId, occurredAt,
+                        "RECONCILE_CHANNEL_STATEMENT")
+                .set("statement", JsonNodeFactory.instance.objectNode()
+                        .put("statementId", statementId)
+                        .put("expectedVersion", 1)
+                        .put("reasonCode", "AI_RECONCILIATION")));
+        commands.add(financeCommand(runId, correlationId, occurredAt,
+                        "RESOLVE_RECONCILIATION_DIFFERENCE")
+                .set("differenceResolution", JsonNodeFactory.instance.objectNode()
+                        .put("differenceId", ZERO_UUID)
+                        .put("adjustmentAmountMinor", differenceAmountMinor)
+                        .put("resolutionType", "CHANNEL_ADJUSTMENT")
+                        .put("resolutionEvidenceSha256",
+                                DigestUtil.sha256Hex(prefix + ":difference-evidence"))
+                        .put("expectedVersion", 1)
+                        .put("reasonCode", "AI_CHANNEL_ADJUSTMENT")));
+        commands.add(financeCommand(runId, correlationId, occurredAt,
+                        "CREATE_SETTLEMENT_BATCH")
+                .set("settlement", JsonNodeFactory.instance.objectNode()
+                        .put("settlementBatchId", settlementId)
+                        .put("settlementCode", "AI-SE-" + prefix.toUpperCase())
+                        .put("periodId", periodId)
+                        .put("statementId", statementId)
+                        .put("expectedAmountMinor", netAmountMinor)
+                        .put("reasonCode", "AI_SETTLEMENT_PREPARE")));
+        commands.add(financeCommand(runId, correlationId, occurredAt, "CONFIRM_SETTLEMENT")
+                .set("settlement", JsonNodeFactory.instance.objectNode()
+                        .put("settlementBatchId", settlementId)
+                        .put("settledAmountMinor", netAmountMinor)
+                        .put("bankReference", "AI-BANK-" + prefix.toUpperCase())
+                        .put("settlementEvidenceSha256",
+                                DigestUtil.sha256Hex(prefix + ":settlement-evidence"))
+                        .put("expectedVersion", 1)
+                        .put("reasonCode", "AI_BANK_RECEIPT_VERIFIED")));
+        commands.add(financeCommand(runId, correlationId, occurredAt, "PREPARE_JOURNAL_ENTRY")
+                .set("journalEntry", JsonNodeFactory.instance.objectNode()
+                        .put("journalEntryId", journalId)
+                        .put("journalCode", "AI-JE-" + prefix.toUpperCase())
+                        .put("periodId", periodId)
+                        .put("sourceType", "SETTLEMENT_BATCH")
+                        .put("sourceId", settlementId)
+                        .put("debitTotalMinor", netAmountMinor)
+                        .put("creditTotalMinor", netAmountMinor)
+                        .put("evidenceSha256",
+                                DigestUtil.sha256Hex(prefix + ":journal-evidence"))
+                        .put("reasonCode", "AI_JOURNAL_PREPARE")));
+        commands.add(financeCommand(runId, correlationId, occurredAt, "POST_JOURNAL_ENTRY")
+                .set("journalEntry", JsonNodeFactory.instance.objectNode()
+                        .put("journalEntryId", journalId)
+                        .put("expectedVersion", 1)
+                        .put("reasonCode", "AI_JOURNAL_POST")));
+        commands.add(financeCommand(runId, correlationId, occurredAt, "CLOSE_ACCOUNTING_PERIOD")
+                .set("period", JsonNodeFactory.instance.objectNode()
+                        .put("periodId", periodId)
+                        .put("expectedVersion", 1)
+                        .put("evidenceSha256",
+                                DigestUtil.sha256Hex(prefix + ":close-evidence"))
+                        .put("reasonCode", "AI_DAILY_CLOSE_COMPLETE")));
+        return input;
+    }
+
+    private static ObjectNode financeIdentityCommand(String runId, String correlationId,
+                                                     String occurredAt, long userId) {
+        return JsonNodeFactory.instance.objectNode()
+                .put("idempotencyKey", "pending-identity-link")
+                .put("runId", runId)
+                .put("principalType", "PLATFORM_OPERATOR")
+                .put("sourceSystem", "SYSTEM")
+                .put("sourceType", "SYSTEM_ADMIN_USER")
+                .put("sourceId", Long.toString(userId))
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt);
+    }
+
+    private static ObjectNode financeCommand(String runId, String correlationId,
+                                             String occurredAt, String operation) {
+        return JsonNodeFactory.instance.objectNode()
+                .put("operation", operation)
+                .put("correlationId", correlationId)
+                .put("runId", runId)
+                .put("idempotencyKey", "pending-finance-command")
+                .put("occurredAt", occurredAt);
     }
 
     private static ObjectNode consumerJourney(ObjectNode fullChain, String prefix, String occurredAt,
