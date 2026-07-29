@@ -62,6 +62,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("skill.cloudmold.commerce.fulfillment-exception-readback.v1", "履约异常终态跟踪"),
             Map.entry("skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1",
                     "履约异常处置闭环"),
+            Map.entry("skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1",
+                    "跨境履约与关务合规闭环"),
             Map.entry("skill.cloudmold.consumer.in-transit-order-scenario.v1", "在途订单场景准备"),
             Map.entry("skill.cloudmold.commerce.return-refund-readback.v1", "退货退款终态跟踪"),
             Map.entry("skill.cloudmold.customer-service.resolution-readback.v1", "客户问题解决终态跟踪"),
@@ -147,6 +149,9 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                     "持续核验订单履约异常的处理结果，未闭环时保持等待或人工处理状态。"),
             Map.entry("skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1",
                     "模拟物流经理为全新在途订单完成异常识别分级、影响诊断、处置方案、R3 审批、承运执行、恢复交付、订单完结、异常关单与终态验收。"),
+            Map.entry("skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1",
+                    "模拟跨境运营岗位为全新已支付订单完成受控直邮合规评估、AI 路线推荐、双岗会签、申报资料与三单校验、国际承运、清关放行、末端妥投及关单；"
+                            + "当前仅为 CN→US 测试规则包，不冒充通用税则或真实海关、承运商权威。"),
             Map.entry("skill.cloudmold.consumer.in-transit-order-scenario.v1",
                     "内部造数子流程：模拟会员选购、下单支付、出库和在途运输，为履约异常岗位主流程提供全新业务对象。"),
             Map.entry("skill.cloudmold.commerce.return-refund-readback.v1",
@@ -188,6 +193,22 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("diagnose-size-stockout", "诊断尺码库存"),
             Map.entry("inspect_listing_lifecycle", "核验商品刊登生命周期终态"),
             Map.entry("submit_in_transit_order", "生成全新在途订单"),
+            Map.entry("submit_paid_in_transit_order", "生成全新已支付跨境订单"),
+            Map.entry("wait_paid_in_transit_order", "等待跨境订单进入在途"),
+            Map.entry("create_crossborder_case", "建立跨境履约案件"),
+            Map.entry("assess_trade_compliance", "AI 评估贸易合规与路线"),
+            Map.entry("select_ai_recommended_route", "选择 AI 推荐直邮路线"),
+            Map.entry("approve_compliance_plan", "记录跨境合规会签"),
+            Map.entry("assemble_customs_declaration", "组装海关申报资料"),
+            Map.entry("validate_order_payment_logistics", "校验订单、支付与物流三单"),
+            Map.entry("book_international_carrier", "预订国际承运服务"),
+            Map.entry("record_carrier_label", "登记国际面单与运单号"),
+            Map.entry("handover_export_shipment", "完成出口交接"),
+            Map.entry("submit_customs_declaration", "提交受控海关申报"),
+            Map.entry("record_customs_release", "登记海关放行回执"),
+            Map.entry("record_last_mile_delivery", "登记末端妥投回执"),
+            Map.entry("close_crossborder_case", "关闭跨境履约案件"),
+            Map.entry("verify_crossborder_case_closed", "验收放行、妥投与关单终态"),
             Map.entry("wait_in_transit_order", "等待订单进入在途"),
             Map.entry("open_exception", "识别并登记履约异常"),
             Map.entry("plan_response", "诊断影响并制定处置方案"),
@@ -444,6 +465,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             case "skill.cloudmold.commerce.full-chain-hsf.v1" -> fullChain(task, steps);
             case "skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1" ->
                     fulfillmentExceptionLifecycle(task, steps);
+            case "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1" ->
+                    crossborderFulfillmentComplianceLifecycle(task, steps);
             default -> genericSuccess(task, steps);
         };
     }
@@ -727,6 +750,37 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                         object("FULFILLMENT", "恢复履约单",
                                 text(fulfillment, "fulfillmentId"),
                                 text(fulfillment, "fulfillmentNo"), "DELIVERED")),
+                task);
+    }
+
+    private ManagedSkillTaskBusinessOutcomeView crossborderFulfillmentComplianceLifecycle(
+            Task task, List<Step> steps) {
+        JsonNode transit = result(steps, "wait_paid_in_transit_order");
+        JsonNode order = transit.at("/outputs/order_place");
+        JsonNode fulfillment = transit.at("/outputs/fulfillment_create");
+        JsonNode closed = result(steps, "verify_crossborder_case_closed");
+        String caseNo = valueOr(text(closed, "caseNo"), text(closed, "caseId"));
+        return outcome("CROSSBORDER_FULFILLMENT_COMPLIANCE",
+                "跨境履约案件 " + valueOr(caseNo, "目标案件") + " 已清关、妥投并关单",
+                "跨境运营已完成有边界的合规评估、AI 路线推荐、风险与法务会签、申报资料、"
+                        + "三单校验、国际承运、海关放行和末端妥投；当前证据属于 CN→US 受控测试场景。",
+                List.of(
+                        metric("贸易模式", statusLabel(text(closed, "tradeMode"))),
+                        metric("运输路线", valueOr(text(closed.path("route"), "routeCode"), "-")),
+                        metric("海关状态", "RELEASED".equals(text(closed, "customsStatus"))
+                                ? "已放行" : statusLabel(text(closed, "customsStatus"))),
+                        metric("配送状态", "DELIVERED".equals(text(closed, "deliveryStatus"))
+                                ? "已送达" : statusLabel(text(closed, "deliveryStatus"))),
+                        metric("案件状态", "CLOSED".equals(text(closed, "status"))
+                                ? "已关闭" : statusLabel(text(closed, "status")))),
+                List.of(
+                        object("CROSSBORDER_CASE", "跨境履约案件",
+                                text(closed, "caseId"), caseNo, text(closed, "status")),
+                        object("ORDER", "跨境订单",
+                                text(order, "orderId"), text(order, "orderNo"), "IN_TRANSIT"),
+                        object("FULFILLMENT", "跨境履约单",
+                                text(fulfillment, "fulfillmentId"),
+                                text(fulfillment, "fulfillmentNo"), "IN_TRANSIT")),
                 task);
     }
 

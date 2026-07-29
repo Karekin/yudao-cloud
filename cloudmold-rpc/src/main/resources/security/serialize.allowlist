@@ -4,6 +4,7 @@ cn.iocoder.yudao.module.cloudmold.aioperations.api
 cn.iocoder.yudao.module.cloudmold.catalog.api
 cn.iocoder.yudao.module.cloudmold.commercebehavior.api
 cn.iocoder.yudao.module.cloudmold.customerservice.api
+cn.iocoder.yudao.module.cloudmold.crossborder.api
 cn.iocoder.yudao.module.cloudmold.datacontract.api
 cn.iocoder.yudao.module.cloudmold.engagement.api
 cn.iocoder.yudao.module.cloudmold.fulfillment.api

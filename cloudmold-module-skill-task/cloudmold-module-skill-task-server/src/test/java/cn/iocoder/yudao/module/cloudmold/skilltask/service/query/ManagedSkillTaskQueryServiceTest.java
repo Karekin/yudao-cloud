@@ -119,10 +119,12 @@ class ManagedSkillTaskQueryServiceTest {
                 "skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1", "1.0.0", "R3");
         SkillTaskDefinition qualityLifecycle = definition(
                 "skill.cloudmold.quality.inspection-recall-lifecycle.v1", "1.0.0", "R3");
+        SkillTaskDefinition crossborderLifecycle = definition(
+                "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1", "1.0.0", "R3");
         SkillTaskDefinition replenishmentPrepare = definition(
                 "skill.cloudmold.supply-planning.prepare.v1", "1.0.0", "R2");
         when(registry.all()).thenReturn(List.of(
-                productToListing, financeClose, fulfillmentException,
+                productToListing, financeClose, fulfillmentException, crossborderLifecycle,
                 qualityLifecycle, replenishmentPrepare));
 
         List<ManagedSkillTaskWorkflowView> workflows = service.listManagedWorkflows();
@@ -134,6 +136,9 @@ class ManagedSkillTaskQueryServiceTest {
                         org.assertj.core.groups.Tuple.tuple(
                                 "自动铺品",
                                 "串联规范商品建档、商家店铺准备、商品刊登审核发布与终态回读；缺少真实渠道回执时明确标记待渠道确认。"),
+                        org.assertj.core.groups.Tuple.tuple(
+                                "跨境履约与关务合规闭环",
+                                "模拟跨境运营为全新已支付订单完成受控直邮合规评估、AI 路线推荐、风险与法务会签、申报与三单校验、国际承运、清关放行、妥投和关单；当前限定 CN→US 测试规则包。"),
                         org.assertj.core.groups.Tuple.tuple(
                                 "财务结算关账闭环",
                                 "模拟财务结算岗位以制单、复核双身份完成账单导入、差异调整、结算、凭证、过账、关账与终态验收；每天生成全新账期。"),

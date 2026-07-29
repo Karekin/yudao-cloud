@@ -39,6 +39,7 @@ class ManagedWorkflowAgentGovernanceSeeder {
             Map.entry("merchandising", "商品运营"),
             Map.entry("merchant-operations", "商家运营"),
             Map.entry("logistics-operations", "物流履约异常运营"),
+            Map.entry("crossborder-operations", "跨境履约与关务运营"),
             Map.entry("operations-control", "综合运营控制"),
             Map.entry("procurement", "采购与供应商运营"),
             Map.entry("quality-operations", "质量检验与召回运营"),
@@ -68,7 +69,9 @@ class ManagedWorkflowAgentGovernanceSeeder {
             Map.entry("finance.period-close", List.of("risk", "operations-control")),
             Map.entry("quality.inspection-recall", List.of("quality", "operations-lead")),
             Map.entry("fulfillment.exception-resolution",
-                    List.of("customer-service", "operations-lead"))
+                    List.of("customer-service", "operations-lead")),
+            Map.entry("crossborder.fulfillment-compliance",
+                    List.of("risk", "legal"))
     );
 
     private final AgentControlCommandApi agentCommands;

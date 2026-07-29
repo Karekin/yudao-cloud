@@ -60,6 +60,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.quality.inspection-recall-lifecycle.v1";
     static final String FULFILLMENT_EXCEPTION_LIFECYCLE_SKILL =
             "skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1";
+    static final String CROSSBORDER_FULFILLMENT_COMPLIANCE_LIFECYCLE_SKILL =
+            "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1";
     static final String READY_MASTER_SKILL = "skill.cloudmold.commerce.reuse-ready-master.v1";
     static final String LEGACY_PROJECTION_SKILL = "skill.cloudmold.commerce.legacy-projection-plan.v1";
     private static final String ZERO_UUID = "00000000-0000-0000-0000-000000000000";
@@ -285,6 +287,21 @@ class RotatingBusinessScenarioInputFactory {
                 return Optional.empty();
             }
             output = fulfillmentExceptionLifecycle(newPrefix, occurredAt, consumer);
+        } else if (CROSSBORDER_FULFILLMENT_COMPLIANCE_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
+                return Optional.empty();
+            }
+            JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
+            if (operator.path("principalId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            ObjectNode consumer = consumerJourney(rotated, newPrefix, occurredAt,
+                    seedProperties.getSyntheticConsumerMemberUserId());
+            if (!hydrateConsumerJourney(tenantId, consumer)) {
+                return Optional.empty();
+            }
+            output = crossborderFulfillmentComplianceLifecycle(
+                    newPrefix, occurredAt, consumer, operator.path("principalId").asText());
         } else {
             if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
                 return Optional.empty();
@@ -323,6 +340,7 @@ class RotatingBusinessScenarioInputFactory {
             case FINANCE_CLOSE_LIFECYCLE_SKILL -> "n";
             case QUALITY_INSPECTION_RECALL_LIFECYCLE_SKILL -> "j";
             case FULFILLMENT_EXCEPTION_LIFECYCLE_SKILL -> "x";
+            case CROSSBORDER_FULFILLMENT_COMPLIANCE_LIFECYCLE_SKILL -> "b";
             case READY_MASTER_SKILL -> "m";
             case LEGACY_PROJECTION_SKILL -> "l";
             default -> throw new IllegalArgumentException("Unsupported rotating scenario Skill: " + skillId);
@@ -1436,6 +1454,154 @@ class RotatingBusinessScenarioInputFactory {
 
     private static String fulfillmentExceptionEvidence(String prefix, String purpose) {
         return "evidence:fulfillment-exception/sha256/"
+                + DigestUtil.sha256Hex(prefix + ":" + purpose);
+    }
+
+    private static ObjectNode crossborderFulfillmentComplianceLifecycle(
+            String prefix, String occurredAt, ObjectNode consumer, String operatorPrincipalId) {
+        boolean express = Math.floorMod(prefix.hashCode(), 2) == 0;
+        String runId = prefix + "-crossborder-direct-mail";
+        String correlationId = stableUuid(prefix + ":crossborder-correlation");
+        String caseId = ZERO_UUID;
+        String routeCode = express ? "CN_US_DIRECT_EXPRESS" : "CN_US_DIRECT_STANDARD";
+        String carrierCode = express ? "TEST_INTL_EXPRESS" : "TEST_POSTAL_PACKET";
+        String serviceLevel = express ? "EXPRESS_5D" : "STANDARD_10D";
+        int slaDays = express ? 5 : 10;
+        String declarationId = stableUuid(prefix + ":customs-declaration");
+        String bookingRef = "booking:" + prefix;
+        String trackingNumber = "CMUS" + DigestUtil.sha256Hex(prefix).substring(0, 12).toUpperCase();
+
+        ObjectNode input = JsonNodeFactory.instance.objectNode();
+        input.put("inTransitRunId", prefix + "-crossborder-order");
+        input.put("operatorPrincipalId", operatorPrincipalId);
+        input.set("consumer", consumer);
+        ArrayNode commands = input.putArray("commands");
+
+        commands.add(crossborderCommand(runId, correlationId, occurredAt, "CREATE_CASE")
+                .put("caseId", caseId)
+                .put("orderId", ZERO_UUID)
+                .put("fulfillmentId", ZERO_UUID)
+                .put("tradeMode", "DIRECT_MAIL")
+                .put("originCountry", "CN")
+                .put("destinationCountry", "US"));
+
+        ObjectNode assessment = JsonNodeFactory.instance.objectNode();
+        assessment.putArray("facts")
+                .add("订单已支付且已生成规范履约单")
+                .add("货物为测试服饰商品，数量与申报金额可追溯")
+                .add("目的地为美国，采用中国直邮测试通道");
+        assessment.putArray("options")
+                .add("CN_US_DIRECT_STANDARD")
+                .add("CN_US_DIRECT_EXPRESS");
+        assessment.put("recommendation", routeCode);
+        assessment.putArray("risks")
+                .add(express ? "EXPRESS_COST_PREMIUM" : "CUSTOMS_INSPECTION_DELAY")
+                .add("EXTERNAL_RULE_SOURCE_NOT_CONNECTED");
+        assessment.put("confidence", express ? 0.93 : 0.89);
+        assessment.putArray("missingFacts");
+        assessment.put("evidenceRef", crossborderEvidence(prefix, "bounded-compliance-assessment"));
+        commands.add(crossborderCommand(runId, correlationId, occurredAt,
+                        "RECORD_COMPLIANCE_ASSESSMENT")
+                .put("caseId", caseId)
+                .put("expectedVersion", 1)
+                .set("assessment", assessment));
+
+        commands.add(crossborderCommand(runId, correlationId, occurredAt, "SELECT_ROUTE")
+                .put("caseId", caseId)
+                .put("expectedVersion", 2)
+                .set("route", JsonNodeFactory.instance.objectNode()
+                        .put("routeCode", routeCode)
+                        .put("carrierCode", carrierCode)
+                        .put("serviceLevel", serviceLevel)
+                        .put("slaDays", slaDays)));
+
+        commands.add(crossborderCommand(runId, correlationId, occurredAt,
+                        "APPROVE_COMPLIANCE")
+                .put("caseId", caseId)
+                .put("expectedVersion", 3));
+
+        commands.add(crossborderCommand(runId, correlationId, occurredAt,
+                        "ASSEMBLE_DECLARATION")
+                .put("caseId", caseId)
+                .put("expectedVersion", 4)
+                .set("declaration", JsonNodeFactory.instance.objectNode()
+                        .put("declarationId", declarationId)
+                        .put("hsCode", "610910")
+                        .put("goodsDescription", "KNITTED COTTON T-SHIRT")
+                        .put("quantity", 1)
+                        .put("declaredAmountMinor", 39_800)
+                        .put("currency", "CNY")
+                        .put("evidenceRef", crossborderEvidence(prefix, "declaration-packet"))));
+
+        commands.add(crossborderCommand(runId, correlationId, occurredAt,
+                        "VALIDATE_THREE_DOCUMENTS")
+                .put("caseId", caseId)
+                .put("expectedVersion", 5)
+                .set("documents", JsonNodeFactory.instance.objectNode()
+                        .put("orderRef", crossborderEvidence(prefix, "order-document"))
+                        .put("paymentRef", crossborderEvidence(prefix, "payment-document"))
+                        .put("logisticsRef", crossborderEvidence(prefix, "logistics-document"))
+                        .put("validationEvidenceRef",
+                                crossborderEvidence(prefix, "three-document-validation"))));
+
+        commands.add(crossborderCommand(runId, correlationId, occurredAt, "BOOK_CARRIER")
+                .put("caseId", caseId)
+                .put("expectedVersion", 6)
+                .set("booking", JsonNodeFactory.instance.objectNode()
+                        .put("bookingRef", bookingRef)
+                        .put("carrierCode", carrierCode)
+                        .put("serviceLevel", serviceLevel)));
+
+        commands.add(crossborderCommand(runId, correlationId, occurredAt, "RECORD_LABEL")
+                .put("caseId", caseId)
+                .put("expectedVersion", 7)
+                .set("label", JsonNodeFactory.instance.objectNode()
+                        .put("labelRef", crossborderEvidence(prefix, "carrier-label"))
+                        .put("trackingNumber", trackingNumber)));
+
+        commands.add(crossborderCommand(runId, correlationId, occurredAt, "HANDOVER")
+                .put("caseId", caseId)
+                .put("expectedVersion", 8)
+                .put("handoverRef", crossborderEvidence(prefix, "export-handover")));
+
+        commands.add(crossborderCommand(runId, correlationId, occurredAt, "SUBMIT_CUSTOMS")
+                .put("caseId", caseId)
+                .put("expectedVersion", 9)
+                .put("customsDeclarationRef",
+                        crossborderEvidence(prefix, "customs-submission-receipt")));
+
+        commands.add(crossborderCommand(runId, correlationId, occurredAt,
+                        "RECORD_CUSTOMS_RELEASE")
+                .put("caseId", caseId)
+                .put("expectedVersion", 10)
+                .put("customsReleaseRef",
+                        crossborderEvidence(prefix, express
+                                ? "customs-direct-release" : "customs-inspection-release")));
+
+        commands.add(crossborderCommand(runId, correlationId, occurredAt, "RECORD_DELIVERY")
+                .put("caseId", caseId)
+                .put("expectedVersion", 11)
+                .put("deliveryEvidenceRef", crossborderEvidence(prefix, "last-mile-delivery")));
+
+        commands.add(crossborderCommand(runId, correlationId, occurredAt, "CLOSE_CASE")
+                .put("caseId", caseId)
+                .put("expectedVersion", 12)
+                .put("closeReason", "DELIVERED_AND_CUSTOMS_RELEASED"));
+        return input;
+    }
+
+    private static ObjectNode crossborderCommand(
+            String runId, String correlationId, String occurredAt, String operation) {
+        return JsonNodeFactory.instance.objectNode()
+                .put("operation", operation)
+                .put("idempotencyKey", "pending-crossborder-command")
+                .put("runId", runId)
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt);
+    }
+
+    private static String crossborderEvidence(String prefix, String purpose) {
+        return "evidence:crossborder/sha256/"
                 + DigestUtil.sha256Hex(prefix + ":" + purpose);
     }
 

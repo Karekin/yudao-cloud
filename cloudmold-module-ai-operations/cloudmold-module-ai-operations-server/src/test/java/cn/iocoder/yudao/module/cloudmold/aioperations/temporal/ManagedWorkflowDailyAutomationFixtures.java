@@ -34,6 +34,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.finance.close-readiness.v1",
             "skill.cloudmold.finance.close-lifecycle.v1",
             "skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1",
+            "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1",
             "skill.cloudmold.inventory.stockout-diagnosis.v1",
             "skill.cloudmold.listing.lifecycle-readback.v1",
             "skill.cloudmold.merchant.onboarding-lifecycle.v1",
@@ -82,6 +83,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             ,"skill.cloudmold.quality.inspection-recall-lifecycle.v1"
             ,"skill.cloudmold.consumer.in-transit-order-scenario.v1"
             ,"skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1"
+            ,"skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1"
     );
 
     private static final Set<String> R3_SKILL_IDS = Set.of(
@@ -102,6 +104,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             ,"skill.cloudmold.quality.inspection-recall-lifecycle.v1"
             ,"skill.cloudmold.consumer.in-transit-order-scenario.v1"
             ,"skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1"
+            ,"skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1"
     );
 
     private static final Map<String, String> NON_DEFAULT_VERSIONS = Map.of(

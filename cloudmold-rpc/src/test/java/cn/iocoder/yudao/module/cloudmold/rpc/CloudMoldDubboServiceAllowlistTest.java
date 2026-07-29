@@ -28,6 +28,8 @@ class CloudMoldDubboServiceAllowlistTest {
                         "cn.iocoder.yudao.module.cloudmold.fulfillment.api.exception.FulfillmentExceptionCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.finance.api.FinanceCloseCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.finance.api.FinanceCloseQueryApi",
+                        "cn.iocoder.yudao.module.cloudmold.crossborder.api.CrossBorderCommandApi",
+                        "cn.iocoder.yudao.module.cloudmold.crossborder.api.CrossBorderQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoWarehouseInboundQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.order.api.workflow.OrderWorkflowFactsApi",
                         "cn.iocoder.yudao.module.cloudmold.payment.api.PaymentWorkflowFactsApi",

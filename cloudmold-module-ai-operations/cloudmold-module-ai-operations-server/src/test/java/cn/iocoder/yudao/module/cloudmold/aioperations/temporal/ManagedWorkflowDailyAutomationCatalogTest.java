@@ -76,7 +76,7 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                 .hasSize(6);
         assertThat(ManagedWorkflowDailyAutomationFixtures.workflows())
                 .filteredOn(workflow -> "R3".equals(workflow.getRiskLevel()))
-                .hasSize(17);
+                .hasSize(18);
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .filter(ManagedWorkflowDailyAutomationCatalog::canRunWithoutBusinessInput))
                 .containsExactly(
@@ -89,7 +89,7 @@ class ManagedWorkflowDailyAutomationCatalogTest {
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("ROTATING_BUSINESS_SCENARIO"::equals)
-                .hasSize(20);
+                .hasSize(21);
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("DOMAIN_BACKLOG"::equals)
@@ -105,6 +105,10 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                 "skill.cloudmold.supply-planning.sop-lifecycle.v1"))
                 .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
                         "supply-planning", "supply-planning.sop-release"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "crossborder-operations", "crossborder.fulfillment-compliance"));
     }
 
     @Test

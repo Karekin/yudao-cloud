@@ -235,6 +235,40 @@ class ManagedSkillTaskBusinessOutcomePresenterTest {
     }
 
     @Test
+    void shouldDescribeCrossborderCaseAsReleasedDeliveredAndClosed() {
+        ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
+                task("skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1"),
+                List.of(
+                        step("wait_paid_in_transit_order", """
+                                {"status":"SUCCEEDED","outputs":{
+                                  "order_place":{"orderId":"order-1","orderNo":"O-200"},
+                                  "fulfillment_create":{"fulfillmentId":"fulfillment-1",
+                                    "fulfillmentNo":"F-200"}}}
+                                """),
+                        step("verify_crossborder_case_closed", """
+                                {"caseId":"case-1","caseNo":"CB-100","tradeMode":"DIRECT_MAIL",
+                                 "route":{"routeCode":"CN_US_DIRECT_EXPRESS"},
+                                 "customsStatus":"RELEASED",
+                                 "deliveryStatus":"DELIVERED","status":"CLOSED"}
+                                """)));
+
+        assertThat(outcome.getHeadline())
+                .isEqualTo("跨境履约案件 CB-100 已清关、妥投并关单");
+        assertThat(outcome.getSummary()).contains("AI 路线推荐", "海关放行", "CN→US");
+        assertThat(outcome.getMetrics()).extracting("label", "value")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("运输路线", "CN_US_DIRECT_EXPRESS"),
+                        org.assertj.core.groups.Tuple.tuple("海关状态", "已放行"),
+                        org.assertj.core.groups.Tuple.tuple("配送状态", "已送达"),
+                        org.assertj.core.groups.Tuple.tuple("案件状态", "已关闭"));
+        assertThat(outcome.getBusinessObjects()).extracting("objectType", "businessId")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("CROSSBORDER_CASE", "case-1"),
+                        org.assertj.core.groups.Tuple.tuple("ORDER", "order-1"),
+                        org.assertj.core.groups.Tuple.tuple("FULFILLMENT", "fulfillment-1"));
+    }
+
+    @Test
     void shouldDescribeFullChainByCompletedChildFlows() {
         ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
                 task("skill.cloudmold.commerce.full-chain-hsf.v1"),

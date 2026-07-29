@@ -40,6 +40,7 @@
         <module>cloudmold-module-order</module>
         <module>cloudmold-module-payment</module>
         <module>cloudmold-module-fulfillment</module>
+        <module>cloudmold-module-crossborder</module>
         <module>cloudmold-module-aftersales</module>
         <module>cloudmold-module-promotion</module>
         <module>cloudmold-module-engagement</module>

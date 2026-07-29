@@ -156,6 +156,8 @@ class AgentApprovalResponsibilityResolverTest {
                 .containsExactly("quality", "operations-lead");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("fulfillment.exception-resolution"))
                 .containsExactly("customer-service", "operations-lead");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("crossborder.fulfillment-compliance"))
+                .containsExactly("risk", "legal");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("commerce.autonomous-day"))
                 .containsExactly("customer-service", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("consumer.journey"))

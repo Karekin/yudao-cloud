@@ -1,0 +1,17 @@
+package cn.iocoder.yudao.module.cloudmold.crossborder.api;
+
+public enum CrossBorderOperation {
+    CREATE_CASE,
+    RECORD_COMPLIANCE_ASSESSMENT,
+    SELECT_ROUTE,
+    APPROVE_COMPLIANCE,
+    ASSEMBLE_DECLARATION,
+    VALIDATE_THREE_DOCUMENTS,
+    BOOK_CARRIER,
+    RECORD_LABEL,
+    HANDOVER,
+    SUBMIT_CUSTOMS,
+    RECORD_CUSTOMS_RELEASE,
+    RECORD_DELIVERY,
+    CLOSE_CASE
+}
