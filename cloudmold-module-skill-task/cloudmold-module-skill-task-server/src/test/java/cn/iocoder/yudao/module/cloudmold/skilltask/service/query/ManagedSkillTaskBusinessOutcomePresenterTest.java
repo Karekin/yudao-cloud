@@ -60,6 +60,70 @@ class ManagedSkillTaskBusinessOutcomePresenterTest {
     }
 
     @Test
+    void shouldDescribeOperationalOrderCancellationWithHonestPspBoundary() {
+        ManagedSkillTaskBusinessOutcomeView succeeded = presenter.present(
+                task("skill.cloudmold.commerce.order-cancellation-operational.v1"),
+                List.of(
+                        step("start_order_cancellation", """
+                                {"sagaId":"saga-1","cancellationMode":"PAID_UNSHIPPED",
+                                 "orderId":"order-id","orderNo":"O-100","status":"REQUESTED",
+                                 "activeStep":"CANCEL_FULFILLMENT","expectedReservationCount":1,
+                                 "releasedReservationCount":0,"expectedFulfillmentCount":1,
+                                 "cancelledFulfillmentCount":0,"paymentId":"payment-1",
+                                 "paymentStatus":"CAPTURED","fulfillmentId":"fulfillment-1",
+                                 "fulfillmentStatus":"CANCELLATION_PENDING"}
+                                """),
+                        step("wait_order_cancellation", """
+                                {"workflowType":"OrderCancellation","status":"SUCCEEDED",
+                                 "phase":"CANCELLED","summary":"订单取消补偿已完成：1/1 个库存预占已释放，1/1 个履约单已关闭。",
+                                 "artifacts":[
+                                   {"type":"ORDER","id":"order-id","status":"CANCELLED","label":"订单 O-100"},
+                                   {"type":"PAYMENT","id":"payment-1","status":"REFUNDED","label":"退款支付"}
+                                 ]}
+                                """)));
+
+        assertThat(succeeded.getHeadline()).isEqualTo("订单 O-100 已完成取消补偿闭环");
+        assertThat(succeeded.getSummary()).contains("1/1 个库存预占已释放", "真实 PSP 退款回执仍需外部权威");
+        assertThat(succeeded.getMetrics()).extracting("label", "value")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("取消模式", "已支付未发货"),
+                        org.assertj.core.groups.Tuple.tuple("支付状态", "已扣款"));
+        assertThat(succeeded.getBusinessObjects()).extracting("objectType", "businessId")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("CANCELLATION_SAGA", "saga-1"),
+                        org.assertj.core.groups.Tuple.tuple("ORDER", "order-id"),
+                        org.assertj.core.groups.Tuple.tuple("PAYMENT", "payment-1"),
+                        org.assertj.core.groups.Tuple.tuple("FULFILLMENT", "fulfillment-1"));
+    }
+
+    @Test
+    void shouldDescribeOperationalOrderCancellationManualReviewWithoutClaimingSuccess() {
+        Task task = task("skill.cloudmold.commerce.order-cancellation-operational.v1");
+        task.setStatus("NEEDS_REVIEW");
+        task.setTerminalResultSha256(null);
+        ManagedSkillTaskBusinessOutcomeView review = presenter.present(
+                task,
+                List.of(
+                        step("start_order_cancellation", """
+                                {"sagaId":"saga-2","cancellationMode":"UNPAID_RESERVED",
+                                 "orderId":"order-id","orderNo":"O-200","status":"REQUESTED",
+                                 "activeStep":"RELEASE_RESERVATIONS","expectedReservationCount":2,
+                                 "releasedReservationCount":1}
+                                """),
+                        step("wait_order_cancellation", "NEEDS_REVIEW", """
+                                {"workflowType":"OrderCancellation","status":"MANUAL_REVIEW",
+                                 "phase":"RELEASE_RESERVATIONS",
+                                 "summary":"订单取消停在人工复核，已保留当前补偿检查点和业务产物。",
+                                 "blockers":["CANCELLATION_MANUAL_REVIEW:PAYMENT_REFUND_TIMEOUT"]}
+                                """)));
+
+        assertThat(review.getHeadline()).isEqualTo("订单 O-200 进入取消补偿人工复核");
+        assertThat(review.getSummary()).contains("人工复核", "PAYMENT_REFUND_TIMEOUT");
+        assertThat(review.getMetrics()).extracting("label", "value")
+                .contains(org.assertj.core.groups.Tuple.tuple("业务状态", "需人工复核"));
+    }
+
+    @Test
     void shouldDescribeProductToListingAsPendingChannelConfirmationWhenNoChannelFactExists() {
         ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
                 task("skill.cloudmold.commerce.product-to-listing.v1", """
@@ -206,10 +270,14 @@ class ManagedSkillTaskBusinessOutcomePresenterTest {
     }
 
     private static Step step(String code, String resultJson) {
+        return step(code, "SUCCEEDED", resultJson);
+    }
+
+    private static Step step(String code, String status, String resultJson) {
         Step step = new Step();
         step.setTaskId("task-1");
         step.setStepCode(code);
-        step.setStatus("SUCCEEDED");
+        step.setStatus(status);
         step.setResultJson(resultJson);
         return step;
     }

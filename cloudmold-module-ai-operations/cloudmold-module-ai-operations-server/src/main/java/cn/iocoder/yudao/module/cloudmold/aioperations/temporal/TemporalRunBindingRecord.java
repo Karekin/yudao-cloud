@@ -18,6 +18,8 @@ public class TemporalRunBindingRecord {
     private String skillTaskId;
     private String status;
     private String errorCode;
+    /** 业务关联键，补货场景为 recommendationId；进入 WAITING_EVENT 时物化，供事件桥接反查 */
+    private String businessReferenceId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

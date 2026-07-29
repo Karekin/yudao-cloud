@@ -85,6 +85,8 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
             case RELEASE_SUPPLY_PLAN -> releaseSupplyPlan(tenantId, command, now);
             case CREATE_REPLENISHMENT -> createReplenishment(tenantId, command, now);
             case DECIDE_REPLENISHMENT -> decideReplenishment(tenantId, command, now);
+            case PROPOSE_REPLENISHMENT_EXECUTION ->
+                    proposeReplenishmentExecution(tenantId, command, now);
             case CONVERT_REPLENISHMENT -> convertReplenishment(tenantId, command, now);
             case OPEN_INVENTORY_ISSUE -> openInventoryIssue(tenantId, command, now);
             case RUN_INVENTORY_HEALTH_SCAN -> runInventoryHealthScan(tenantId, command, now);
@@ -629,6 +631,74 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                         "previous_status", "PROPOSED", "current_status", decision));
     }
 
+    private Outcome proposeReplenishmentExecution(Long tenantId, SupplyPlanningCommand command,
+                                                  LocalDateTime now) {
+        SupplyPlanningCommand.ReplenishmentExecutionProposalDefinition input =
+                nonNull(command.getReplenishmentExecutionProposal(),
+                        "replenishmentExecutionProposal is required");
+        String proposalId = valueOrUuid(input.getProposalId());
+        requireRef(input.getRecommendationId(), "recommendationId", 128);
+        requireRef(input.getProposedByPrincipalId(), "proposedByPrincipalId", 128);
+        String targetType = upper(input.getTargetType());
+        validateExecutionFields(targetType, input.getMappingEvidenceSha256(),
+                input.getSupplierId(), input.getAccountId(), input.getErpProductId(),
+                input.getErpProductUnitId(), input.getUnitCostMinor(), input.getTaxPercent(),
+                input.getSourceWarehouseId(), input.getTargetWarehouseId(), input.getWmsSkuId());
+        requireCode(input.getPolicyCode(), "policyCode");
+        require(upper(input.getPolicyCode()).length() <= 64,
+                "policyCode exceeds 64 characters");
+        requireSha256(input.getPolicySha256(), "policySha256");
+
+        Replenishment recommendation = nonNull(mapper.selectReplenishmentForUpdate(
+                        tenantId, input.getRecommendationId()),
+                "replenishment recommendation not found");
+        requireExpectedVersion(input.getExpectedRecommendationVersion(),
+                recommendation.getVersion());
+        require("APPROVED".equals(recommendation.getStatus()),
+                "execution proposal requires an approved replenishment recommendation");
+        require(mapper.selectReadyReplenishmentExecutionProposalForUpdate(
+                        tenantId, recommendation.getRecommendationId()) == null,
+                "replenishment recommendation already has a ready execution proposal");
+
+        ReplenishmentExecutionProposal proposal = new ReplenishmentExecutionProposal()
+                .setProposalId(proposalId).setTenantId(tenantId)
+                .setRecommendationId(recommendation.getRecommendationId())
+                .setExpectedRecommendationVersion(recommendation.getVersion())
+                .setTargetType(targetType)
+                .setMappingEvidenceSha256(input.getMappingEvidenceSha256())
+                .setSupplierId(input.getSupplierId()).setAccountId(input.getAccountId())
+                .setErpProductId(input.getErpProductId())
+                .setErpProductUnitId(input.getErpProductUnitId())
+                .setUnitCostMinor(input.getUnitCostMinor()).setTaxPercent(input.getTaxPercent())
+                .setSourceWarehouseId(input.getSourceWarehouseId())
+                .setTargetWarehouseId(input.getTargetWarehouseId()).setWmsSkuId(input.getWmsSkuId())
+                .setProposedByPrincipalId(input.getProposedByPrincipalId())
+                .setPolicyCode(upper(input.getPolicyCode())).setPolicySha256(input.getPolicySha256())
+                .setStatus("READY").setVersion(1L).setProposedAt(now)
+                .setCreatedAt(now).setUpdatedAt(now);
+        require(mapper.insertReplenishmentExecutionProposal(proposal) == 1,
+                "failed to persist replenishment execution proposal");
+        return outcome("supply_planning.replenishment_execution.proposed",
+                "replenishment_execution_proposal", proposalId, 1L, "READY",
+                payload("proposal_id", proposalId,
+                        "recommendation_id", recommendation.getRecommendationId(),
+                        "expected_recommendation_version", recommendation.getVersion(),
+                        "target_type", targetType,
+                        "mapping_evidence_sha256", input.getMappingEvidenceSha256(),
+                        "supplier_id", input.getSupplierId(), "account_id", input.getAccountId(),
+                        "erp_product_id", input.getErpProductId(),
+                        "erp_product_unit_id", input.getErpProductUnitId(),
+                        "unit_cost_minor", input.getUnitCostMinor(),
+                        "tax_percent", input.getTaxPercent(),
+                        "source_warehouse_id", input.getSourceWarehouseId(),
+                        "target_warehouse_id", input.getTargetWarehouseId(),
+                        "wms_sku_id", input.getWmsSkuId(),
+                        "proposed_by_principal_id", input.getProposedByPrincipalId(),
+                        "policy_code", proposal.getPolicyCode(),
+                        "policy_sha256", proposal.getPolicySha256(),
+                        "current_status", "READY", "execution_authorized", false));
+    }
+
     private Outcome convertReplenishment(Long tenantId, SupplyPlanningCommand command, LocalDateTime now) {
         SupplyPlanningCommand.ReplenishmentConversionDefinition input =
                 nonNull(command.getReplenishmentConversion(), "replenishmentConversion is required");
@@ -636,13 +706,21 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         requireRef(input.getRecommendationId(), "recommendationId", 128);
         requireRef(input.getConvertedByPrincipalId(), "convertedByPrincipalId", 128);
         String targetType = upper(input.getTargetType());
-        require(CONVERSION_TARGET_TYPES.contains(targetType), "unsupported replenishment targetType");
-        requireSha256(input.getMappingEvidenceSha256(), "mappingEvidenceSha256");
+        validateExecutionFields(targetType, input.getMappingEvidenceSha256(),
+                input.getSupplierId(), input.getAccountId(), input.getErpProductId(),
+                input.getErpProductUnitId(), input.getUnitCostMinor(), input.getTaxPercent(),
+                input.getSourceWarehouseId(), input.getTargetWarehouseId(), input.getWmsSkuId());
         Replenishment row = nonNull(mapper.selectReplenishmentForUpdate(
                 tenantId, input.getRecommendationId()), "replenishment recommendation not found");
         requireExpectedVersion(input.getExpectedVersion(), row.getVersion());
         require("APPROVED".equals(row.getStatus()),
                 "only an approved replenishment recommendation can be converted");
+        ReplenishmentExecutionProposal executionProposal =
+                mapper.selectReadyReplenishmentExecutionProposalForUpdate(
+                        tenantId, row.getRecommendationId());
+        if (executionProposal != null) {
+            requireExecutionProposalMatches(executionProposal, input);
+        }
         ReplenishmentExecutionPort.ExecutionResult execution = nonNull(
                 replenishmentExecutionPort.createDraft(
                         new ReplenishmentExecutionPort.ExecutionCommand(
@@ -723,6 +801,12 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         require(mapper.convertReplenishment(tenantId, row.getRecommendationId(),
                         row.getVersion(), now) == 1,
                 "replenishment conversion conflict");
+        if (executionProposal != null) {
+            require(mapper.consumeReplenishmentExecutionProposal(
+                            tenantId, executionProposal.getProposalId(),
+                            executionProposal.getVersion(), conversionId, now) == 1,
+                    "replenishment execution proposal consumption conflict");
+        }
         return outcome("supply_planning.replenishment.converted",
                 "replenishment_recommendation", row.getRecommendationId(),
                 row.getVersion() + 1, "CONVERTED",
@@ -731,6 +815,8 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                         "target_reference", targetReference, "requested_quantity",
                         row.getSuggestedQuantity(), "uom_code", row.getUomCode(),
                         "mapping_evidence_sha256", input.getMappingEvidenceSha256(),
+                        "proposal_id", executionProposal == null
+                                ? null : executionProposal.getProposalId(),
                         "external_document_no", execution.externalDocumentNo(),
                         "business_object_type", "PURCHASE_REQUEST".equals(targetType)
                                 ? canonicalPurchaseOrder.getAggregateType() : execution.documentType(),
@@ -1010,6 +1096,12 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                     command.getReplenishment().setDecisionPrincipalId(actorPrincipalId);
                 }
             }
+            case PROPOSE_REPLENISHMENT_EXECUTION -> {
+                if (command.getReplenishmentExecutionProposal() != null) {
+                    command.getReplenishmentExecutionProposal()
+                            .setProposedByPrincipalId(actorPrincipalId);
+                }
+            }
             case CONVERT_REPLENISHMENT -> {
                 if (command.getReplenishmentConversion() != null) {
                     command.getReplenishmentConversion().setConvertedByPrincipalId(actorPrincipalId);
@@ -1062,6 +1154,72 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
 
     private static void requirePositive(BigDecimal value, String field) {
         require(value != null && value.compareTo(BigDecimal.ZERO) > 0, field + " must be positive");
+    }
+
+    private static void validateExecutionFields(
+            String targetType, String mappingEvidenceSha256,
+            Long supplierId, Long accountId, Long erpProductId, Long erpProductUnitId,
+            Long unitCostMinor, BigDecimal taxPercent, Long sourceWarehouseId,
+            Long targetWarehouseId, Long wmsSkuId) {
+        require(CONVERSION_TARGET_TYPES.contains(targetType),
+                "unsupported replenishment targetType");
+        requireSha256(mappingEvidenceSha256, "mappingEvidenceSha256");
+        require(unitCostMinor != null && unitCostMinor >= 0,
+                "unitCostMinor must not be negative");
+        if ("PURCHASE_REQUEST".equals(targetType)) {
+            requirePositiveId(supplierId, "supplierId");
+            requirePositiveId(accountId, "accountId");
+            requirePositiveId(erpProductId, "erpProductId");
+            requirePositiveId(erpProductUnitId, "erpProductUnitId");
+            require(taxPercent != null && taxPercent.signum() >= 0
+                            && taxPercent.compareTo(new BigDecimal("100")) <= 0,
+                    "taxPercent must be between 0 and 100");
+            require(sourceWarehouseId == null && wmsSkuId == null,
+                    "purchase execution must not contain transfer-only references");
+            if (targetWarehouseId != null) {
+                requirePositiveId(targetWarehouseId, "targetWarehouseId");
+            }
+            return;
+        }
+        requirePositiveId(sourceWarehouseId, "sourceWarehouseId");
+        requirePositiveId(targetWarehouseId, "targetWarehouseId");
+        require(!sourceWarehouseId.equals(targetWarehouseId),
+                "source and target warehouse must differ");
+        requirePositiveId(wmsSkuId, "wmsSkuId");
+        require(supplierId == null && accountId == null && erpProductId == null
+                        && erpProductUnitId == null && taxPercent == null,
+                "transfer execution must not contain purchase-only references");
+    }
+
+    private static void requireExecutionProposalMatches(
+            ReplenishmentExecutionProposal proposal,
+            SupplyPlanningCommand.ReplenishmentConversionDefinition conversion) {
+        require(proposal.getExpectedRecommendationVersion().equals(conversion.getExpectedVersion()),
+                "execution proposal recommendation version no longer matches conversion");
+        require(proposal.getTargetType().equals(upper(conversion.getTargetType()))
+                        && proposal.getMappingEvidenceSha256()
+                        .equals(conversion.getMappingEvidenceSha256())
+                        && Objects.equals(proposal.getSupplierId(), conversion.getSupplierId())
+                        && Objects.equals(proposal.getAccountId(), conversion.getAccountId())
+                        && Objects.equals(proposal.getErpProductId(), conversion.getErpProductId())
+                        && Objects.equals(proposal.getErpProductUnitId(),
+                        conversion.getErpProductUnitId())
+                        && Objects.equals(proposal.getUnitCostMinor(), conversion.getUnitCostMinor())
+                        && decimalsEqual(proposal.getTaxPercent(), conversion.getTaxPercent())
+                        && Objects.equals(proposal.getSourceWarehouseId(),
+                        conversion.getSourceWarehouseId())
+                        && Objects.equals(proposal.getTargetWarehouseId(),
+                        conversion.getTargetWarehouseId())
+                        && Objects.equals(proposal.getWmsSkuId(), conversion.getWmsSkuId()),
+                "conversion fields do not match the ready execution proposal");
+    }
+
+    private static boolean decimalsEqual(BigDecimal left, BigDecimal right) {
+        return left == null ? right == null : right != null && left.compareTo(right) == 0;
+    }
+
+    private static void requirePositiveId(Long value, String field) {
+        require(value != null && value > 0, field + " must be positive");
     }
 
     private static void requireNonNegative(BigDecimal value, String field) {

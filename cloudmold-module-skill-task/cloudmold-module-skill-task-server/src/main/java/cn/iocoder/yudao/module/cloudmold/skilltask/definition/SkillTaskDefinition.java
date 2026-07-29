@@ -29,6 +29,16 @@ public class SkillTaskDefinition {
     private String skillVersion;
     @JsonProperty("risk_level")
     private String riskLevel;
+    /**
+     * BUSINESS_ROLE definitions are user-facing operating workflows.
+     * INTERNAL_SUBFLOW definitions remain reusable orchestration building blocks,
+     * but are not seeded or displayed as independent AI operators.
+     */
+    @Builder.Default
+    @JsonProperty("workflow_level")
+    private String workflowLevel = "BUSINESS_ROLE";
+    @JsonProperty("owner_role")
+    private String ownerRole;
     @JsonProperty("max_attempts")
     private Integer maxAttempts;
     private List<Step> steps;

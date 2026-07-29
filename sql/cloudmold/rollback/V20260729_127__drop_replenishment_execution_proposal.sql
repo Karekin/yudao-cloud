@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS cloudmold_replenishment_execution_proposal;

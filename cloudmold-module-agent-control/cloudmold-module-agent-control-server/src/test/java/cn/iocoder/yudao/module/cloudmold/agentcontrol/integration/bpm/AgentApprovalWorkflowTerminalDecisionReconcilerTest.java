@@ -32,7 +32,7 @@ class AgentApprovalWorkflowTerminalDecisionReconcilerTest {
     void approvedCandidateCallsCommandApiInsideCandidateTenant() {
         properties.setBatchSize(20);
         ApprovalWorkflowDecisionCandidate candidate = candidate(17L, "approval-1",
-                "BPM_APPROVED_PENDING_ATTESTATION", 200L, 3L, 5L);
+                "BPM_APPROVED_PENDING_ATTESTATION", 200L, 210L, 3L, 5L);
         when(mapper.selectApprovalWorkflowDecisionCandidates(20)).thenReturn(List.of(candidate));
         when(commands.execute(any(), eq(200L))).thenAnswer(invocation -> {
             assertThat(TenantContextHolder.getRequiredTenantId()).isEqualTo(17L);
@@ -56,7 +56,7 @@ class AgentApprovalWorkflowTerminalDecisionReconcilerTest {
     void rejectedCandidateCallsCommandApiWithRejectDecision() {
         properties.setBatchSize(20);
         ApprovalWorkflowDecisionCandidate candidate = candidate(23L, "approval-2",
-                "BPM_REJECTED", 300L, 4L, 6L);
+                "BPM_REJECTED", 300L, 310L, 4L, 6L);
         when(mapper.selectApprovalWorkflowDecisionCandidates(20)).thenReturn(List.of(candidate));
         when(commands.execute(any(), eq(300L))).thenReturn(AgentControlResult.builder()
                 .aggregateType("role_approval").aggregateId("approval-2").aggregateVersion(5L)
@@ -76,7 +76,7 @@ class AgentApprovalWorkflowTerminalDecisionReconcilerTest {
     void invalidCandidateIsDeferredWithoutCallingCommandApi() {
         properties.setBatchSize(20);
         ApprovalWorkflowDecisionCandidate candidate = candidate(17L, "approval-3",
-                "BPM_APPROVED_PENDING_ATTESTATION", null, 1L, 2L);
+                "BPM_APPROVED_PENDING_ATTESTATION", null, 210L, 1L, 2L);
         when(mapper.selectApprovalWorkflowDecisionCandidates(20)).thenReturn(List.of(candidate));
 
         reconciler.reconcile();
@@ -88,7 +88,7 @@ class AgentApprovalWorkflowTerminalDecisionReconcilerTest {
     void duplicateRestartUsesStableIdempotencyKey() {
         properties.setBatchSize(20);
         ApprovalWorkflowDecisionCandidate candidate = candidate(17L, "approval-4",
-                "BPM_APPROVED_PENDING_ATTESTATION", 200L, 7L, 9L);
+                "BPM_APPROVED_PENDING_ATTESTATION", 200L, 210L, 7L, 9L);
         when(mapper.selectApprovalWorkflowDecisionCandidates(20))
                 .thenReturn(List.of(candidate), List.of(candidate));
         when(commands.execute(any(), eq(200L))).thenReturn(AgentControlResult.builder()
@@ -108,11 +108,13 @@ class AgentApprovalWorkflowTerminalDecisionReconcilerTest {
 
     private static ApprovalWorkflowDecisionCandidate candidate(Long tenantId, String approvalId,
                                                                String observedStatus,
+                                                               Long approverUserId,
                                                                Long terminalOperatorUserId,
                                                                Long approvalVersion,
                                                                Long workOrderVersion) {
         return new ApprovalWorkflowDecisionCandidate().setTenantId(tenantId).setApprovalId(approvalId)
                 .setWorkOrderId("work-" + approvalId).setObservedStatus(observedStatus)
+                .setApproverUserId(approverUserId)
                 .setTerminalOperatorUserId(terminalOperatorUserId)
                 .setApprovalVersion(approvalVersion).setWorkOrderVersion(workOrderVersion);
     }

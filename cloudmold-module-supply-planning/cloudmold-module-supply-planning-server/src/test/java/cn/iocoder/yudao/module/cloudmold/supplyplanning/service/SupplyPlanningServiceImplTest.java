@@ -162,6 +162,21 @@ class SupplyPlanningServiceImplTest {
                         .setSuggestedQuantity(new BigDecimal("30")).setUomCode("EA")
                         .setNeedByDate(LocalDate.of(2026, 8, 10))
                         .setStatus("APPROVED").setVersion(2L));
+        when(mapper.selectReadyReplenishmentExecutionProposalForUpdate(
+                17L, "recommendation-01")).thenReturn(
+                new ReplenishmentExecutionProposal()
+                        .setProposalId("proposal-01").setTenantId(17L)
+                        .setRecommendationId("recommendation-01")
+                        .setExpectedRecommendationVersion(2L)
+                        .setTargetType("PURCHASE_REQUEST")
+                        .setMappingEvidenceSha256("c".repeat(64))
+                        .setSupplierId(11L).setAccountId(12L).setErpProductId(13L)
+                        .setErpProductUnitId(14L).setUnitCostMinor(1299L)
+                        .setTaxPercent(new BigDecimal("13"))
+                        .setProposedByPrincipalId(ACTOR)
+                        .setPolicyCode("REPLENISHMENT_EXECUTION_V1")
+                        .setPolicySha256("d".repeat(64))
+                        .setStatus("READY").setVersion(1L));
         when(replenishmentExecutionPort.createDraft(any())).thenReturn(
                 new ReplenishmentExecutionPort.ExecutionResult(
                         "YUDAO_ERP", "PURCHASE_ORDER", "781", "PO-20260725-01", "PREPARE",
@@ -181,6 +196,9 @@ class SupplyPlanningServiceImplTest {
                         .build());
         when(mapper.insertReplenishmentConversion(any())).thenReturn(1);
         when(mapper.convertReplenishment(eq(17L), eq("recommendation-01"), eq(2L), any()))
+                .thenReturn(1);
+        when(mapper.consumeReplenishmentExecutionProposal(
+                eq(17L), eq("proposal-01"), eq(1L), eq("conversion-01"), any()))
                 .thenReturn(1);
 
         SupplyPlanningResult result = execute(base(SupplyPlanningOperation.CONVERT_REPLENISHMENT)
@@ -226,6 +244,125 @@ class SupplyPlanningServiceImplTest {
                         && row.getDocumentStatus().equals("PREPARE")
                         && row.getNextWaitingEventCode().equals("SUPPLIER_CONFIRMATION")
                         && row.getStatus().equals("CREATED")));
+        verify(mapper).consumeReplenishmentExecutionProposal(
+                eq(17L), eq("proposal-01"), eq(1L), eq("conversion-01"), any());
+        verify(outbox).append(argThat(event ->
+                event.getEventType().equals("supply_planning.replenishment.converted")
+                        && "proposal-01".equals(
+                        event.getPayload().get("proposal_id"))));
+    }
+
+    @Test
+    void persistsGovernedExecutionProposalWithoutCreatingDownstreamDraft() {
+        when(mapper.selectReplenishmentForUpdate(17L, "recommendation-01")).thenReturn(
+                new Replenishment().setRecommendationId("recommendation-01").setTenantId(17L)
+                        .setPlanId("plan-01").setCanonicalSkuId("sku-01")
+                        .setWarehouseId("warehouse-01")
+                        .setSuggestedQuantity(new BigDecimal("30")).setUomCode("EA")
+                        .setNeedByDate(LocalDate.of(2026, 8, 10))
+                        .setStatus("APPROVED").setVersion(2L));
+        when(mapper.insertReplenishmentExecutionProposal(any())).thenReturn(1);
+
+        SupplyPlanningResult result = execute(
+                base(SupplyPlanningOperation.PROPOSE_REPLENISHMENT_EXECUTION)
+                        .replenishmentExecutionProposal(
+                                SupplyPlanningCommand.ReplenishmentExecutionProposalDefinition.builder()
+                                        .proposalId("proposal-01")
+                                        .recommendationId("recommendation-01")
+                                        .expectedRecommendationVersion(2L)
+                                        .targetType("PURCHASE_REQUEST")
+                                        .mappingEvidenceSha256("c".repeat(64))
+                                        .supplierId(11L).accountId(12L).erpProductId(13L)
+                                        .erpProductUnitId(14L).unitCostMinor(1299L)
+                                        .taxPercent(new BigDecimal("13"))
+                                        .proposedByPrincipalId("spoofed-principal")
+                                        .policyCode("REPLENISHMENT_EXECUTION_V1")
+                                        .policySha256("d".repeat(64)).build())
+                        .build());
+
+        assertThat(result.getAggregateType()).isEqualTo("replenishment_execution_proposal");
+        assertThat(result.getAggregateId()).isEqualTo("proposal-01");
+        assertThat(result.getStatus()).isEqualTo("READY");
+        verify(mapper).insertReplenishmentExecutionProposal(argThat(proposal ->
+                proposal.getTenantId().equals(17L)
+                        && proposal.getRecommendationId().equals("recommendation-01")
+                        && proposal.getExpectedRecommendationVersion().equals(2L)
+                        && proposal.getTargetType().equals("PURCHASE_REQUEST")
+                        && proposal.getProposedByPrincipalId().equals(ACTOR)
+                        && proposal.getStatus().equals("READY")
+                        && proposal.getVersion().equals(1L)));
+        verify(outbox).append(argThat(event ->
+                event.getEventType()
+                        .equals("supply_planning.replenishment_execution.proposed")
+                        && event.getAggregateId().equals("proposal-01")
+                        && Boolean.FALSE.equals(
+                        event.getPayload().get("execution_authorized"))));
+        verifyNoInteractions(replenishmentExecutionPort);
+        verifyNoInteractions(procurementCommandApi);
+    }
+
+    @Test
+    void rejectsTransferProposalContainingPurchaseOnlyReferences() {
+        SupplyPlanningCommand command =
+                base(SupplyPlanningOperation.PROPOSE_REPLENISHMENT_EXECUTION)
+                        .replenishmentExecutionProposal(
+                                SupplyPlanningCommand.ReplenishmentExecutionProposalDefinition.builder()
+                                        .proposalId("proposal-02")
+                                        .recommendationId("recommendation-01")
+                                        .expectedRecommendationVersion(2L)
+                                        .targetType("TRANSFER_REQUEST")
+                                        .mappingEvidenceSha256("c".repeat(64))
+                                        .supplierId(11L).unitCostMinor(100L)
+                                        .sourceWarehouseId(31L).targetWarehouseId(32L)
+                                        .wmsSkuId(41L)
+                                        .policyCode("REPLENISHMENT_EXECUTION_V1")
+                                        .policySha256("d".repeat(64)).build())
+                        .build();
+
+        assertThatThrownBy(() -> execute(command))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("transfer execution must not contain purchase-only references");
+        verify(mapper, never()).selectReplenishmentForUpdate(anyLong(), anyString());
+        verify(mapper, never()).insertReplenishmentExecutionProposal(any());
+        verifyNoInteractions(outbox);
+    }
+
+    @Test
+    void rejectsConversionThatDriftsFromReadyProposal() {
+        when(mapper.selectReplenishmentForUpdate(17L, "recommendation-01")).thenReturn(
+                new Replenishment().setRecommendationId("recommendation-01").setTenantId(17L)
+                        .setStatus("APPROVED").setVersion(2L));
+        when(mapper.selectReadyReplenishmentExecutionProposalForUpdate(
+                17L, "recommendation-01")).thenReturn(
+                new ReplenishmentExecutionProposal()
+                        .setProposalId("proposal-01").setRecommendationId("recommendation-01")
+                        .setExpectedRecommendationVersion(2L)
+                        .setTargetType("PURCHASE_REQUEST")
+                        .setMappingEvidenceSha256("c".repeat(64))
+                        .setSupplierId(11L).setAccountId(12L).setErpProductId(13L)
+                        .setErpProductUnitId(14L).setUnitCostMinor(1299L)
+                        .setTaxPercent(new BigDecimal("13")).setStatus("READY").setVersion(1L));
+
+        SupplyPlanningCommand command =
+                base(SupplyPlanningOperation.CONVERT_REPLENISHMENT)
+                        .replenishmentConversion(
+                                SupplyPlanningCommand.ReplenishmentConversionDefinition.builder()
+                                        .conversionId("conversion-drift")
+                                        .recommendationId("recommendation-01").expectedVersion(2L)
+                                        .targetType("PURCHASE_REQUEST")
+                                        .mappingEvidenceSha256("c".repeat(64))
+                                        .supplierId(11L).accountId(12L).erpProductId(13L)
+                                        .erpProductUnitId(14L).unitCostMinor(1300L)
+                                        .taxPercent(new BigDecimal("13")).build())
+                        .build();
+
+        assertThatThrownBy(() -> execute(command))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("conversion fields do not match the ready execution proposal");
+        verifyNoInteractions(replenishmentExecutionPort);
+        verify(mapper, never()).insertReplenishmentConversion(any());
+        verify(mapper, never()).consumeReplenishmentExecutionProposal(
+                anyLong(), anyString(), anyLong(), anyString(), any());
     }
 
     @Test

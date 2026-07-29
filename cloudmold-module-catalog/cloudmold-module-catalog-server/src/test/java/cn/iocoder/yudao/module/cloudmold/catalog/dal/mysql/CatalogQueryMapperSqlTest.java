@@ -29,4 +29,22 @@ class CatalogQueryMapperSqlTest {
                 "g.size_group_id");
         assertThatCode(() -> CCJSqlParserUtil.parse(sql)).doesNotThrowAnyException();
     }
+
+    @Test
+    void waveAggregateSqlShouldBeParsableByTenantInterceptor() throws NoSuchMethodException {
+        Method method = CatalogQueryMapper.class.getMethod("selectWaveAggregate",
+                Long.class, Integer.class, String.class, String.class);
+        Select select = method.getAnnotation(Select.class);
+        String sql = String.join("\n", select.value())
+                .replace("#{tenantId}", "?")
+                .replace("#{planningYear}", "?")
+                .replace("#{seasonCode}", "?")
+                .replace("#{waveCode}", "?");
+
+        assertThat(sql).contains(
+                "COUNT(DISTINCT s.style_id) AS style_count",
+                "COUNT(DISTINCT CASE WHEN p.status = 30 THEN p.spu_id END) AS active_spu_count",
+                "last_catalog_updated_at");
+        assertThatCode(() -> CCJSqlParserUtil.parse(sql)).doesNotThrowAnyException();
+    }
 }

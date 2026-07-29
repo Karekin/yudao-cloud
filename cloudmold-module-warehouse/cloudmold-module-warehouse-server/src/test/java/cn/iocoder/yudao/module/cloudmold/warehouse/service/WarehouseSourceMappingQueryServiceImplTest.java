@@ -102,4 +102,47 @@ class WarehouseSourceMappingQueryServiceImplTest {
         assertThat(result.getZoneId()).isEqualTo("zone-3");
         assertThat(result.getLocationId()).isEqualTo("location-3");
     }
+
+    @Test
+    void resolvesExplicitMappedZoneAndLocationInAMultiZoneWarehouse() {
+        when(mapper.selectEffective(eq(1L), eq("WMS"), eq("WAREHOUSE"), eq("30"), any()))
+                .thenReturn(List.of(new WarehouseSourceMappingDO().setMappingId("mapping-30")
+                        .setSourceSystem("WMS").setSourceType("WAREHOUSE").setSourceId("30")
+                        .setCanonicalType("LOCATION").setCanonicalId("location-a01")
+                        .setWarehouseId("warehouse-30").setZoneId("zone-sellable")
+                        .setLocationId("location-a01").setVersion(1L)));
+        when(warehouseMapper.selectCurrent(1L, "warehouse-30"))
+                .thenReturn(new WarehouseDO().setWarehouseId("warehouse-30").setStatus("ACTIVE"));
+        when(zoneMapper.selectCurrent(1L, "zone-sellable"))
+                .thenReturn(new WarehouseZoneDO().setZoneId("zone-sellable")
+                        .setWarehouseId("warehouse-30").setStatus("ACTIVE"));
+        when(locationMapper.selectCurrent(1L, "location-a01"))
+                .thenReturn(new WarehouseLocationDO().setLocationId("location-a01")
+                        .setWarehouseId("warehouse-30").setZoneId("zone-sellable")
+                        .setStatus("ACTIVE"));
+
+        var result = service.resolveReadyNetwork(
+                new WarehouseSourceReference("WMS", "WAREHOUSE", "30"), Instant.now());
+
+        assertThat(result.getZoneId()).isEqualTo("zone-sellable");
+        assertThat(result.getLocationId()).isEqualTo("location-a01");
+        verify(zoneMapper, never()).selectActiveByWarehouse(anyLong(), anyString());
+        verify(locationMapper, never()).selectActiveByWarehouse(anyLong(), anyString());
+    }
+
+    @Test
+    void rejectsIncompleteMappedNetworkSelector() {
+        when(mapper.selectEffective(eq(1L), eq("WMS"), eq("WAREHOUSE"), eq("31"), any()))
+                .thenReturn(List.of(new WarehouseSourceMappingDO().setMappingId("mapping-31")
+                        .setSourceSystem("WMS").setSourceType("WAREHOUSE").setSourceId("31")
+                        .setCanonicalType("WAREHOUSE").setCanonicalId("warehouse-31")
+                        .setWarehouseId("warehouse-31").setZoneId("zone-only").setVersion(1L)));
+        when(warehouseMapper.selectCurrent(1L, "warehouse-31"))
+                .thenReturn(new WarehouseDO().setWarehouseId("warehouse-31").setStatus("ACTIVE"));
+
+        assertThatThrownBy(() -> service.resolveReadyNetwork(
+                new WarehouseSourceReference("WMS", "WAREHOUSE", "31"), Instant.now()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("source mapping must select both Zone and Location");
+    }
 }

@@ -32,6 +32,10 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
     private final AdvertisingInteractionMapper interactionMapper;
     private final AdvertisingLedgerEntryMapper advertisingLedgerEntryMapper;
     private final PromotionExperimentResultMapper promotionExperimentResultMapper;
+    private final GrowthExperimentMapper growthExperimentMapper;
+    private final GrowthExperimentVariantMapper growthExperimentVariantMapper;
+    private final GrowthExperimentExposureMapper growthExperimentExposureMapper;
+    private final GrowthExperimentMetricSnapshotMapper growthExperimentMetricSnapshotMapper;
     private final OrderQueryApi orderQueryApi;
     private final OutboxAppender outboxAppender;
 
@@ -77,6 +81,13 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
             case RECORD_IMPRESSION, RECORD_CLICK, RECORD_ATTRIBUTION -> recordInteraction(tenantId, command);
             case RECORD_ADVERTISING_LEDGER_ENTRY -> recordAdvertisingLedgerEntry(tenantId, command);
             case UPSERT_PROMOTION_EXPERIMENT_RESULT -> upsertPromotionExperimentResult(tenantId, command, now);
+            case CREATE_GROWTH_EXPERIMENT -> createGrowthExperiment(tenantId, command);
+            case START_GROWTH_EXPERIMENT -> startGrowthExperiment(tenantId, command);
+            case RECORD_GROWTH_EXPERIMENT_EXPOSURE -> recordGrowthExperimentExposure(tenantId, command);
+            case RECORD_GROWTH_EXPERIMENT_METRIC_SNAPSHOT ->
+                    recordGrowthExperimentMetricSnapshot(tenantId, command);
+            case CONCLUDE_GROWTH_EXPERIMENT -> concludeGrowthExperiment(tenantId, command);
+            case CANCEL_GROWTH_EXPERIMENT -> cancelGrowthExperiment(tenantId, command);
         };
         appendEvent(tenantId, command, outcome);
         PromotionCommandResult result = outcome.result();
@@ -106,8 +117,18 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
                     advertisingLedgerEntryMapper.selectById(tenantId, aggregateId), "advertising ledger entry not found"));
             case "PROMOTION_EXPERIMENT_RESULT" -> experimentResultView(requireNonNull(
                     promotionExperimentResultMapper.selectById(tenantId, aggregateId), "promotion experiment result not found"));
+            case "PROMOTION_GROWTH_EXPERIMENT" -> getGrowthExperimentView(tenantId, aggregateId);
             default -> throw new IllegalArgumentException("unsupported aggregateType");
         };
+    }
+
+    private PromotionAggregateView getGrowthExperimentView(Long tenantId, String experimentId) {
+        GrowthExperimentDO experiment = requireNonNull(
+                growthExperimentMapper.selectById(tenantId, experimentId), "growth experiment not found");
+        return growthExperimentView(experiment,
+                growthExperimentVariantMapper.selectByExperiment(tenantId, experimentId),
+                growthExperimentMetricSnapshotMapper.selectLatestByVariant(
+                        tenantId, experimentId, experiment.getPrimaryMetricCode()), tenantId);
     }
 
     private Outcome createCampaign(Long tenantId, PromotionCommand command) {
@@ -479,6 +500,259 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
                 existing.getVersion() + 1, "MEASURED", experimentResultPayload(row));
     }
 
+    private Outcome createGrowthExperiment(Long tenantId, PromotionCommand command) {
+        PromotionCommand.GrowthExperimentDefinition input = requireNonNull(
+                command.getGrowthExperiment(), "growthExperiment is required");
+        requireText(input.getExperimentCode(), "experimentCode", 128);
+        requireText(input.getCampaignId(), "campaignId", 64);
+        requireText(input.getName(), "experiment name", 128);
+        requireText(input.getHypothesis(), "hypothesis", 512);
+        requireText(input.getPrimaryMetricCode(), "primaryMetricCode", 128);
+        require(input.getMinimumSampleSizePerVariant() != null
+                        && input.getMinimumSampleSizePerVariant() >= 30,
+                "minimumSampleSizePerVariant must be at least 30");
+        requireInterval(input.getStartsAt(), input.getEndsAt(), "growth experiment");
+        require(!input.getStartsAt().isBefore(command.getOccurredAt()),
+                "growth experiment must be created before startsAt");
+        require(growthExperimentMapper.selectByCode(tenantId, input.getExperimentCode()) == null,
+                "experimentCode already exists");
+        PromotionCampaignDO campaign = requireCampaign(tenantId, input.getCampaignId());
+        require(Set.of("DRAFT", "ACTIVE").contains(campaign.getStatus()),
+                "growth experiment campaign must be DRAFT or ACTIVE");
+
+        List<PromotionCommand.GrowthExperimentVariantDefinition> variants =
+                requireNonNull(input.getVariants(), "growth experiment variants are required");
+        require(variants.size() >= 2, "growth experiment requires at least two variants");
+        Set<String> codes = new HashSet<>();
+        int allocation = 0;
+        int controls = 0;
+        for (PromotionCommand.GrowthExperimentVariantDefinition variant : variants) {
+            requireText(variant.getVariantCode(), "variantCode", 64);
+            String code = normalized(variant.getVariantCode());
+            require(codes.add(code), "variantCode must be unique");
+            String kind = normalized(variant.getVariantKind());
+            require(Set.of("CONTROL", "TREATMENT").contains(kind), "invalid variantKind");
+            controls += "CONTROL".equals(kind) ? 1 : 0;
+            require(variant.getAllocationBasisPoints() != null
+                            && variant.getAllocationBasisPoints() > 0
+                            && variant.getAllocationBasisPoints() < 10000,
+                    "allocationBasisPoints must be between 1 and 9999");
+            allocation += variant.getAllocationBasisPoints();
+        }
+        require(controls == 1, "growth experiment requires exactly one CONTROL variant");
+        require(allocation == 10000, "variant allocationBasisPoints must total 10000");
+
+        String experimentId = valueOrUuid(input.getExperimentId());
+        LocalDateTime now = at(command.getOccurredAt());
+        GrowthExperimentDO row = new GrowthExperimentDO()
+                .setExperimentId(experimentId).setTenantId(tenantId)
+                .setExperimentCode(input.getExperimentCode()).setCampaignId(input.getCampaignId())
+                .setName(input.getName()).setHypothesis(input.getHypothesis())
+                .setPrimaryMetricCode(normalized(input.getPrimaryMetricCode()))
+                .setMinimumSampleSizePerVariant(input.getMinimumSampleSizePerVariant())
+                .setStatus("DRAFT").setStartsAt(at(input.getStartsAt())).setEndsAt(at(input.getEndsAt()))
+                .setVersion(1L).setCreatedAt(now).setUpdatedAt(now);
+        growthExperimentMapper.insert(row);
+        for (PromotionCommand.GrowthExperimentVariantDefinition variant : variants) {
+            growthExperimentVariantMapper.insert(new GrowthExperimentVariantDO()
+                    .setVariantId(UUID.randomUUID().toString()).setTenantId(tenantId)
+                    .setExperimentId(experimentId).setVariantCode(normalized(variant.getVariantCode()))
+                    .setVariantKind(normalized(variant.getVariantKind()))
+                    .setAllocationBasisPoints(variant.getAllocationBasisPoints()).setCreatedAt(now));
+        }
+        return outcome("promotion.growth_experiment.created", "promotion_growth_experiment",
+                experimentId, 1L, "DRAFT", growthExperimentPayload(row));
+    }
+
+    private Outcome startGrowthExperiment(Long tenantId, PromotionCommand command) {
+        PromotionCommand.GrowthExperimentDefinition input = requireNonNull(
+                command.getGrowthExperiment(), "growthExperiment is required");
+        requireText(input.getExperimentId(), "experimentId", 64);
+        GrowthExperimentDO row = requireNonNull(
+                growthExperimentMapper.selectForUpdate(tenantId, input.getExperimentId()),
+                "growth experiment not found");
+        requireVersion(row.getVersion(), input.getExpectedVersion());
+        require("DRAFT".equals(row.getStatus()), "growth experiment must be DRAFT");
+        requireWithin(command.getOccurredAt(), row.getStartsAt(), row.getEndsAt(), "growth experiment");
+        require("ACTIVE".equals(requireCampaign(tenantId, row.getCampaignId()).getStatus()),
+                "growth experiment campaign must be ACTIVE");
+        LocalDateTime occurredAt = at(command.getOccurredAt());
+        require(growthExperimentMapper.startCas(tenantId, row.getExperimentId(), row.getVersion(),
+                "RUNNING", occurredAt) == 1, "growth experiment version conflict");
+        row.setStatus("RUNNING").setStartedAt(occurredAt).setVersion(row.getVersion() + 1)
+                .setUpdatedAt(occurredAt);
+        return outcome("promotion.growth_experiment.started", "promotion_growth_experiment",
+                row.getExperimentId(), row.getVersion(), row.getStatus(), growthExperimentPayload(row));
+    }
+
+    private Outcome recordGrowthExperimentExposure(Long tenantId, PromotionCommand command) {
+        PromotionCommand.GrowthExperimentExposureDefinition input = requireNonNull(
+                command.getGrowthExperimentExposure(), "growthExperimentExposure is required");
+        requireText(input.getExposureKey(), "exposureKey", 128);
+        requireText(input.getExperimentId(), "experimentId", 64);
+        requireText(input.getVariantCode(), "variantCode", 64);
+        requireText(input.getPrincipalId(), "principalId", 256);
+        requireText(input.getAssignmentVersion(), "assignmentVersion", 64);
+        require(growthExperimentExposureMapper.selectByKey(tenantId, input.getExposureKey()) == null,
+                "exposureKey already exists");
+        GrowthExperimentDO experiment = requireNonNull(
+                growthExperimentMapper.selectById(tenantId, input.getExperimentId()),
+                "growth experiment not found");
+        require("RUNNING".equals(experiment.getStatus()), "growth experiment must be RUNNING");
+        requireWithin(command.getOccurredAt(), experiment.getStartsAt(), experiment.getEndsAt(),
+                "growth experiment");
+        String variantCode = normalized(input.getVariantCode());
+        require(growthExperimentVariantMapper.selectByCode(tenantId, experiment.getExperimentId(),
+                variantCode) != null, "growth experiment variant not found");
+        LocalDateTime occurredAt = at(command.getOccurredAt());
+        GrowthExperimentExposureDO row = new GrowthExperimentExposureDO()
+                .setExposureId(valueOrUuid(input.getExposureId())).setTenantId(tenantId)
+                .setExposureKey(input.getExposureKey()).setExperimentId(experiment.getExperimentId())
+                .setVariantCode(variantCode)
+                .setPrincipalHash(DigestUtil.sha256Hex(tenantId + ":" + input.getPrincipalId()))
+                .setAssignmentVersion(input.getAssignmentVersion()).setExposedAt(occurredAt)
+                .setCreatedAt(occurredAt);
+        growthExperimentExposureMapper.insert(row);
+        Map<String, Object> payload = payload("exposure_id", row.getExposureId());
+        put(payload, "exposure_key", row.getExposureKey());
+        put(payload, "experiment_id", row.getExperimentId());
+        put(payload, "variant_code", row.getVariantCode());
+        put(payload, "assignment_version", row.getAssignmentVersion());
+        put(payload, "exposed_at", instant(row.getExposedAt()));
+        return outcome("promotion.growth_experiment.exposure_recorded",
+                "promotion_growth_experiment_exposure", row.getExposureId(), 1L, "RECORDED", payload);
+    }
+
+    private Outcome recordGrowthExperimentMetricSnapshot(Long tenantId, PromotionCommand command) {
+        PromotionCommand.GrowthExperimentMetricSnapshotDefinition input = requireNonNull(
+                command.getGrowthExperimentMetricSnapshot(), "growthExperimentMetricSnapshot is required");
+        requireText(input.getSnapshotKey(), "snapshotKey", 128);
+        requireText(input.getExperimentId(), "experimentId", 64);
+        requireText(input.getVariantCode(), "variantCode", 64);
+        requireText(input.getMetricCode(), "metricCode", 128);
+        requireText(input.getEvidenceRef(), "evidenceRef", 512);
+        require(growthExperimentMetricSnapshotMapper.selectByKey(tenantId, input.getSnapshotKey()) == null,
+                "snapshotKey already exists");
+        GrowthExperimentDO experiment = requireNonNull(
+                growthExperimentMapper.selectById(tenantId, input.getExperimentId()),
+                "growth experiment not found");
+        require("RUNNING".equals(experiment.getStatus()), "growth experiment must be RUNNING");
+        String variantCode = normalized(input.getVariantCode());
+        require(growthExperimentVariantMapper.selectByCode(tenantId, experiment.getExperimentId(),
+                variantCode) != null, "growth experiment variant not found");
+        require(normalized(input.getMetricCode()).equals(experiment.getPrimaryMetricCode()),
+                "metricCode must equal the experiment primary metric");
+        requireInterval(input.getMeasuredFrom(), input.getMeasuredTo(), "growth experiment metric snapshot");
+        require(!input.getMeasuredFrom().isBefore(experiment.getStartsAt().toInstant(ZoneOffset.UTC))
+                        && !input.getMeasuredTo().isAfter(command.getOccurredAt()),
+                "metric snapshot window must be inside observed experiment time");
+        require(input.getDataFreshUntil() != null
+                        && !input.getDataFreshUntil().isBefore(command.getOccurredAt()),
+                "metric snapshot data is stale");
+        int exposureCount = growthExperimentExposureMapper.countByVariant(
+                tenantId, experiment.getExperimentId(), variantCode);
+        require(input.getSampleCount() != null && input.getSampleCount() > 0
+                        && input.getSampleCount() <= exposureCount,
+                "sampleCount must be positive and cannot exceed recorded exposures");
+        require(input.getMetricValueMicros() != null && input.getMetricValueMicros() >= 0,
+                "metricValueMicros must be non-negative");
+        LocalDateTime now = at(command.getOccurredAt());
+        GrowthExperimentMetricSnapshotDO row = new GrowthExperimentMetricSnapshotDO()
+                .setSnapshotId(valueOrUuid(input.getSnapshotId())).setTenantId(tenantId)
+                .setSnapshotKey(input.getSnapshotKey()).setExperimentId(experiment.getExperimentId())
+                .setVariantCode(variantCode).setMetricCode(experiment.getPrimaryMetricCode())
+                .setMeasuredFrom(at(input.getMeasuredFrom())).setMeasuredTo(at(input.getMeasuredTo()))
+                .setSampleCount(input.getSampleCount()).setMetricValueMicros(input.getMetricValueMicros())
+                .setDataFreshUntil(at(input.getDataFreshUntil())).setEvidenceRef(input.getEvidenceRef())
+                .setCreatedAt(now);
+        growthExperimentMetricSnapshotMapper.insert(row);
+        return outcome("promotion.growth_experiment.metric_snapshot_recorded",
+                "promotion_growth_experiment_metric_snapshot", row.getSnapshotId(), 1L,
+                "RECORDED", growthExperimentMetricSnapshotPayload(row));
+    }
+
+    private Outcome concludeGrowthExperiment(Long tenantId, PromotionCommand command) {
+        PromotionCommand.GrowthExperimentConclusionDefinition input = requireNonNull(
+                command.getGrowthExperimentConclusion(), "growthExperimentConclusion is required");
+        requireText(input.getExperimentId(), "experimentId", 64);
+        requireText(input.getEvidenceRef(), "evidenceRef", 512);
+        requireText(input.getReason(), "reason", 512);
+        String decision = normalized(input.getDecision());
+        require(Set.of("CONTROL", "TREATMENT", "NO_WINNER").contains(decision),
+                "invalid growth experiment decision");
+        require(input.getConfidenceBasisPoints() != null
+                        && input.getConfidenceBasisPoints() >= 9500
+                        && input.getConfidenceBasisPoints() <= 10000,
+                "confidenceBasisPoints must be between 9500 and 10000");
+        String guardrailStatus = normalized(input.getGuardrailStatus());
+        require("PASSED".equals(guardrailStatus), "all experiment guardrails must be PASSED");
+        GrowthExperimentDO experiment = requireNonNull(
+                growthExperimentMapper.selectForUpdate(tenantId, input.getExperimentId()),
+                "growth experiment not found");
+        requireVersion(experiment.getVersion(), input.getExpectedVersion());
+        require("RUNNING".equals(experiment.getStatus()), "growth experiment must be RUNNING");
+        require(!command.getOccurredAt().isBefore(experiment.getEndsAt().toInstant(ZoneOffset.UTC)),
+                "growth experiment cannot conclude before endsAt");
+        List<GrowthExperimentVariantDO> variants =
+                growthExperimentVariantMapper.selectByExperiment(tenantId, experiment.getExperimentId());
+        List<GrowthExperimentMetricSnapshotDO> snapshots =
+                growthExperimentMetricSnapshotMapper.selectLatestByVariant(tenantId,
+                        experiment.getExperimentId(), experiment.getPrimaryMetricCode());
+        require(snapshots.size() == variants.size(),
+                "every experiment variant requires a primary metric snapshot");
+        Map<String, GrowthExperimentMetricSnapshotDO> byVariant = new HashMap<>();
+        for (GrowthExperimentMetricSnapshotDO snapshot : snapshots) {
+            byVariant.put(snapshot.getVariantCode(), snapshot);
+        }
+        for (GrowthExperimentVariantDO variant : variants) {
+            GrowthExperimentMetricSnapshotDO snapshot = byVariant.get(variant.getVariantCode());
+            require(snapshot != null, "missing metric snapshot for variant " + variant.getVariantCode());
+            require(snapshot.getSampleCount() >= experiment.getMinimumSampleSizePerVariant(),
+                    "minimum sample size not reached for variant " + variant.getVariantCode());
+            require(!snapshot.getDataFreshUntil().isBefore(at(command.getOccurredAt())),
+                    "metric snapshot is stale for variant " + variant.getVariantCode());
+            require(growthExperimentExposureMapper.countByVariant(tenantId, experiment.getExperimentId(),
+                            variant.getVariantCode()) >= snapshot.getSampleCount(),
+                    "metric sample exceeds recorded exposure evidence");
+        }
+        LocalDateTime occurredAt = at(command.getOccurredAt());
+        require(growthExperimentMapper.concludeCas(tenantId, experiment.getExperimentId(),
+                experiment.getVersion(), decision, input.getConfidenceBasisPoints(), guardrailStatus,
+                input.getEvidenceRef(), input.getReason(), occurredAt) == 1,
+                "growth experiment version conflict");
+        experiment.setStatus("CONCLUDED").setConcludedAt(occurredAt).setDecision(decision)
+                .setConfidenceBasisPoints(input.getConfidenceBasisPoints())
+                .setGuardrailStatus(guardrailStatus).setConclusionEvidenceRef(input.getEvidenceRef())
+                .setConclusionReason(input.getReason()).setVersion(experiment.getVersion() + 1)
+                .setUpdatedAt(occurredAt);
+        return outcome("promotion.growth_experiment.concluded", "promotion_growth_experiment",
+                experiment.getExperimentId(), experiment.getVersion(), experiment.getStatus(),
+                growthExperimentPayload(experiment));
+    }
+
+    private Outcome cancelGrowthExperiment(Long tenantId, PromotionCommand command) {
+        PromotionCommand.GrowthExperimentDefinition input = requireNonNull(
+                command.getGrowthExperiment(), "growthExperiment is required");
+        requireText(input.getExperimentId(), "experimentId", 64);
+        requireText(input.getReason(), "reason", 512);
+        GrowthExperimentDO experiment = requireNonNull(
+                growthExperimentMapper.selectForUpdate(tenantId, input.getExperimentId()),
+                "growth experiment not found");
+        requireVersion(experiment.getVersion(), input.getExpectedVersion());
+        require(Set.of("DRAFT", "RUNNING").contains(experiment.getStatus()),
+                "growth experiment must be DRAFT or RUNNING");
+        LocalDateTime occurredAt = at(command.getOccurredAt());
+        require(growthExperimentMapper.cancelCas(tenantId, experiment.getExperimentId(),
+                experiment.getVersion(), input.getReason(), occurredAt) == 1,
+                "growth experiment version conflict");
+        experiment.setStatus("CANCELLED").setConcludedAt(occurredAt)
+                .setConclusionReason(input.getReason()).setVersion(experiment.getVersion() + 1)
+                .setUpdatedAt(occurredAt);
+        return outcome("promotion.growth_experiment.cancelled", "promotion_growth_experiment",
+                experiment.getExperimentId(), experiment.getVersion(), experiment.getStatus(),
+                growthExperimentPayload(experiment));
+    }
+
     private void validateLineage(Long tenantId, String type,
                                  PromotionCommand.AdvertisingInteractionDefinition input) {
         if ("IMPRESSION".equals(type)) {
@@ -774,6 +1048,43 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
         return p;
     }
 
+    private static Map<String, Object> growthExperimentPayload(GrowthExperimentDO row) {
+        Map<String, Object> p = payload("experiment_id", row.getExperimentId());
+        put(p, "experiment_code", row.getExperimentCode());
+        put(p, "campaign_id", row.getCampaignId());
+        put(p, "name", row.getName());
+        put(p, "hypothesis", row.getHypothesis());
+        put(p, "primary_metric_code", row.getPrimaryMetricCode());
+        put(p, "minimum_sample_size_per_variant", row.getMinimumSampleSizePerVariant());
+        put(p, "status", row.getStatus());
+        put(p, "starts_at", instant(row.getStartsAt()));
+        put(p, "ends_at", instant(row.getEndsAt()));
+        put(p, "started_at", instant(row.getStartedAt()));
+        put(p, "concluded_at", instant(row.getConcludedAt()));
+        put(p, "decision", row.getDecision());
+        put(p, "confidence_basis_points", row.getConfidenceBasisPoints());
+        put(p, "guardrail_status", row.getGuardrailStatus());
+        put(p, "conclusion_evidence_ref", row.getConclusionEvidenceRef());
+        put(p, "conclusion_reason", row.getConclusionReason());
+        return p;
+    }
+
+    private static Map<String, Object> growthExperimentMetricSnapshotPayload(
+            GrowthExperimentMetricSnapshotDO row) {
+        Map<String, Object> p = payload("snapshot_id", row.getSnapshotId());
+        put(p, "snapshot_key", row.getSnapshotKey());
+        put(p, "experiment_id", row.getExperimentId());
+        put(p, "variant_code", row.getVariantCode());
+        put(p, "metric_code", row.getMetricCode());
+        put(p, "measured_from", instant(row.getMeasuredFrom()));
+        put(p, "measured_to", instant(row.getMeasuredTo()));
+        put(p, "sample_count", row.getSampleCount());
+        put(p, "metric_value_micros", row.getMetricValueMicros());
+        put(p, "data_fresh_until", instant(row.getDataFreshUntil()));
+        put(p, "evidence_ref", row.getEvidenceRef());
+        return p;
+    }
+
     private static PromotionAggregateView campaignView(PromotionCampaignDO row) {
         Map<String, Object> a = payload("campaign_kind", row.getCampaignKind()); put(a, "name", row.getName());
         put(a, "starts_at", instant(row.getStartsAt())); put(a, "ends_at", instant(row.getEndsAt()));
@@ -816,6 +1127,35 @@ public class PromotionServiceImpl implements PromotionCommandApi, PromotionQuery
         a.remove("experiment_code");
         return view("promotion_experiment_result", row.getExperimentId(), row.getExperimentCode(),
                 "MEASURED", row.getVersion(), a);
+    }
+
+    private PromotionAggregateView growthExperimentView(
+            GrowthExperimentDO row, List<GrowthExperimentVariantDO> variants,
+            List<GrowthExperimentMetricSnapshotDO> snapshots, Long tenantId) {
+        Map<String, Object> attributes = growthExperimentPayload(row);
+        attributes.remove("experiment_id");
+        attributes.remove("experiment_code");
+        List<Map<String, Object>> variantFacts = new ArrayList<>();
+        for (GrowthExperimentVariantDO variant : variants) {
+            Map<String, Object> fact = payload("variant_code", variant.getVariantCode());
+            put(fact, "variant_kind", variant.getVariantKind());
+            put(fact, "allocation_basis_points", variant.getAllocationBasisPoints());
+            put(fact, "exposure_count", growthExperimentExposureMapper.countByVariant(
+                    tenantId, row.getExperimentId(), variant.getVariantCode()));
+            snapshots.stream().filter(snapshot ->
+                            Objects.equals(snapshot.getVariantCode(), variant.getVariantCode()))
+                    .findFirst().ifPresent(snapshot -> {
+                        put(fact, "latest_sample_count", snapshot.getSampleCount());
+                        put(fact, "latest_metric_value_micros", snapshot.getMetricValueMicros());
+                        put(fact, "latest_measured_to", instant(snapshot.getMeasuredTo()));
+                        put(fact, "data_fresh_until", instant(snapshot.getDataFreshUntil()));
+                        put(fact, "metric_evidence_ref", snapshot.getEvidenceRef());
+                    });
+            variantFacts.add(fact);
+        }
+        attributes.put("variants", variantFacts);
+        return view("promotion_growth_experiment", row.getExperimentId(), row.getExperimentCode(),
+                row.getStatus(), row.getVersion(), attributes);
     }
 
     private static PromotionAggregateView view(String type, String id, String code, String status, Long version,

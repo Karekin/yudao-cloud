@@ -9,6 +9,7 @@ import org.apache.dubbo.config.utils.SimpleReferenceCache;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "cloudmold.agent-control", name = "enabled", havingValue = "true")
@@ -20,6 +21,7 @@ public class AgentControlSkillTaskClientConfiguration {
     }
 
     @Bean
+    @Primary
     public SkillTaskQueryApi agentControlSkillTaskQueryApi(CloudMoldRpcProperties properties) {
         return reference(SkillTaskQueryApi.class, properties);
     }

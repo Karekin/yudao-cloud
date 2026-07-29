@@ -18,11 +18,13 @@
             <artifactId>cloudmold-rpc</artifactId>
             <version>${revision}</version>
         </dependency>
+        <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-agent-control-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-integration-yudao-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-skill-task-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-aftersales-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-ai-operations-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-catalog-api</artifactId><version>${revision}</version></dependency>
+        <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-commerce-behavior-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-customer-service-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-engagement-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-fulfillment-api</artifactId><version>${revision}</version></dependency>
@@ -37,6 +39,10 @@
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-order-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-payment-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-promotion-api</artifactId><version>${revision}</version></dependency>
+        <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-procurement-api</artifactId><version>${revision}</version></dependency>
+        <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-supplier-api</artifactId><version>${revision}</version></dependency>
+        <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-finance-api</artifactId><version>${revision}</version></dependency>
+        <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-quality-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-risk-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-token-platform-api</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>cn.iocoder.cloud</groupId><artifactId>cloudmold-module-supply-planning-api</artifactId><version>${revision}</version></dependency>

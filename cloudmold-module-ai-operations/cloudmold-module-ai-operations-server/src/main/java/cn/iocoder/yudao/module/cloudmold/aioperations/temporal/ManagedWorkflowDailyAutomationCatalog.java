@@ -1,0 +1,211 @@
+package cn.iocoder.yudao.module.cloudmold.aioperations.temporal;
+
+import cn.hutool.crypto.digest.DigestUtil;
+import cn.iocoder.yudao.module.cloudmold.aioperations.controller.admin.vo.TemporalScheduleCreateReqVO;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowView;
+
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * Daily automation policy for every managed SkillTask definition.
+ *
+ * <p>The Temporal Schedule always runs. Workflows that need a concrete business
+ * object use a discovery envelope and finish with {@code NO_ACTION_DUE} until a
+ * domain event or a future candidate scanner materializes a safe input. This is
+ * deliberately different from submitting an invalid {@code {}} payload.</p>
+ */
+final class ManagedWorkflowDailyAutomationCatalog {
+
+    static final String DAILY_DISCOVERY_INPUT = """
+            {"_cloudmoldAutomation":{"schemaVersion":"1.0","mode":"DAILY_DISCOVERY"}}
+            """.trim();
+
+    private static final long DAILY_INTERVAL_SECONDS = 86_400L;
+    private static final int DEFAULT_MAX_FAN_OUT = 100;
+
+    private static final Set<String> INPUT_FREE_WORKFLOWS = Set.of(
+            "skill.cloudmold.operations.daily-business-control.v1",
+            "skill.cloudmold.operations.weekly-business-review.v1"
+    );
+
+    private static final Set<String> ROTATING_BUSINESS_SCENARIOS = Set.of(
+            "skill.cloudmold.commerce.catalog-matrix.v1",
+            "skill.cloudmold.commerce.aftersale-saga.v1",
+            "skill.cloudmold.commerce.product-to-listing.v1",
+            "skill.cloudmold.commerce.full-chain-hsf.v1",
+            "skill.cloudmold.commerce.autonomous-day.v1",
+            "skill.cloudmold.consumer.shopping-journey.v1",
+            "skill.cloudmold.merchant.onboarding-lifecycle.v1",
+            "skill.cloudmold.engagement.promotion-campaign-operations.v1",
+            "skill.cloudmold.growth.experiment-lifecycle.v1",
+            "skill.cloudmold.supplier.sourcing-lifecycle.v1",
+            "skill.cloudmold.procurement.order-lifecycle.v1",
+            "skill.cloudmold.wms.operations.v1",
+            "skill.cloudmold.supply.replenishment-lifecycle.v1",
+            "skill.cloudmold.customer-service.resolution-lifecycle.v1",
+            "skill.cloudmold.commerce.reuse-ready-master.v1",
+            "skill.cloudmold.commerce.legacy-projection-plan.v1"
+    );
+
+    private static final Set<String> DOMAIN_BACKLOG_WORKFLOWS = Set.of(
+            "skill.cloudmold.supply-planning.prepare.v1"
+    );
+
+    private static final Map<String, ApprovalRoute> APPROVAL_ROUTES = Map.ofEntries(
+            Map.entry("skill.cloudmold.commerce.catalog-matrix.v1",
+                    new ApprovalRoute("merchandising", "catalog.define")),
+            Map.entry("skill.cloudmold.commerce.aftersale-saga.v1",
+                    new ApprovalRoute("customer-service", "aftersale.refund")),
+            Map.entry("skill.cloudmold.commerce.order-cancellation-operational.v1",
+                    new ApprovalRoute("customer-service", "customer-service.compensate")),
+            Map.entry("skill.cloudmold.agentcontrol.mission-lifecycle-stockout.v1",
+                    new ApprovalRoute("inventory-control", "mission.stockout.start")),
+            Map.entry("skill.cloudmold.commerce.reuse-ready-master.v1",
+                    new ApprovalRoute("merchant-operations", "merchant.activate")),
+            Map.entry("skill.cloudmold.commerce.full-chain-hsf.v1",
+                    new ApprovalRoute("operations-control", "commerce.full-chain")),
+            Map.entry("skill.cloudmold.commerce.product-to-listing.v1",
+                    new ApprovalRoute("merchandising", "catalog.publish")),
+            Map.entry("skill.cloudmold.commerce.autonomous-day.v1",
+                    new ApprovalRoute("operations-control", "commerce.autonomous-day")),
+            Map.entry("skill.cloudmold.consumer.shopping-journey.v1",
+                    new ApprovalRoute("operations-control", "consumer.journey")),
+            Map.entry("skill.cloudmold.merchant.onboarding-lifecycle.v1",
+                    new ApprovalRoute("merchant-operations", "merchant.onboarding")),
+            Map.entry("skill.cloudmold.engagement.promotion-campaign-operations.v1",
+                    new ApprovalRoute("growth-marketing", "campaign.operate")),
+            Map.entry("skill.cloudmold.growth.experiment-lifecycle.v1",
+                    new ApprovalRoute("growth-marketing", "experiment.conclude")),
+            Map.entry("skill.cloudmold.supplier.sourcing-lifecycle.v1",
+                    new ApprovalRoute("procurement", "supplier.award")),
+            Map.entry("skill.cloudmold.procurement.order-lifecycle.v1",
+                    new ApprovalRoute("procurement", "purchase-order.dispatch")),
+            Map.entry("skill.cloudmold.wms.operations.v1",
+                    new ApprovalRoute("warehouse-operations", "warehouse.physical-cycle")),
+            Map.entry("skill.cloudmold.supply.replenishment-lifecycle.v1",
+                    new ApprovalRoute("supply-planning", "replenishment.end-to-end")),
+            Map.entry("skill.cloudmold.customer-service.resolution-lifecycle.v1",
+                    new ApprovalRoute("customer-service", "ticket.resolve")),
+            Map.entry("skill.cloudmold.supply-planning.prepare.v1",
+                    new ApprovalRoute("supply-planning", "replenishment.convert"))
+    );
+
+    private ManagedWorkflowDailyAutomationCatalog() {
+    }
+
+    static TemporalScheduleCreateReqVO dailyRequest(ManagedSkillTaskWorkflowView workflow,
+                                                    AiOperationsTemporalSeedProperties properties) {
+        TemporalScheduleCreateReqVO request = new TemporalScheduleCreateReqVO();
+        request.setScheduleId(scheduleCode(workflow.getSkillId()));
+        request.setDisplayName(workflow.getDisplayName() + "（每日自动）");
+        request.setDescription("每天由 Temporal 执行到期工作发现；无可物化业务输入时安全返回 NO_ACTION_DUE，"
+                + "不发起审批、不写业务数据。");
+        request.setSkillId(workflow.getSkillId());
+        request.setSkillVersion(workflow.getSkillVersion());
+        request.setInputJson(DAILY_DISCOVERY_INPUT);
+        request.setIntervalSeconds(DAILY_INTERVAL_SECONDS);
+        request.setTimeZone(properties.getTimeZone());
+        request.setPaused(properties.isPaused());
+        if (Boolean.TRUE.equals(workflow.getApprovalRequired())) {
+            ApprovalRoute route = APPROVAL_ROUTES.get(workflow.getSkillId());
+            if (route == null) {
+                throw new IllegalStateException(
+                        "Approval route is missing for managed daily workflow: " + workflow.getSkillId());
+            }
+            request.setRoleCode(route.roleCode());
+            request.setActionCode(route.actionCode());
+        }
+        return request;
+    }
+
+    static TemporalDailyDispatchRequest dispatchRequest(
+            Long tenantId, String scheduleId, ManagedSkillTaskWorkflowView workflow,
+            AiOperationsTemporalSeedProperties properties) {
+        TemporalScheduleCreateReqVO schedule = dailyRequest(workflow, properties);
+        return TemporalDailyDispatchRequest.builder()
+                .tenantId(tenantId)
+                .scheduleId(scheduleId)
+                .skillId(workflow.getSkillId())
+                .skillVersion(workflow.getSkillVersion())
+                .inputStrategy(inputStrategy(workflow.getSkillId()))
+                .maxFanOut(DEFAULT_MAX_FAN_OUT)
+                .operatorUserId(properties.getOperatorUserId())
+                .operatorUserType(properties.getOperatorUserType())
+                .roleCode(schedule.getRoleCode())
+                .actionCode(schedule.getActionCode())
+                .approvalTimeoutSeconds(86_400L)
+                .businessEventTimeoutSeconds(300L)
+                .timeZone(properties.getTimeZone())
+                .build();
+    }
+
+    static String cronExpression(String skillId) {
+        int hash = Math.floorMod(skillId.hashCode(), 180);
+        int hour = 2 + hash / 60;
+        int minute = hash % 60;
+        return minute + " " + hour + " * * *";
+    }
+
+    static String inputStrategy(String skillId) {
+        if (INPUT_FREE_WORKFLOWS.contains(skillId)) {
+            return "TENANT_AGGREGATE";
+        }
+        if (ROTATING_BUSINESS_SCENARIOS.contains(skillId)) {
+            return "ROTATING_BUSINESS_SCENARIO";
+        }
+        if (DOMAIN_BACKLOG_WORKFLOWS.contains(skillId)) {
+            return "DOMAIN_BACKLOG";
+        }
+        return "EVENT_BACKLOG";
+    }
+
+    static String desiredPolicySha256(ManagedSkillTaskWorkflowView workflow,
+                                      AiOperationsTemporalSeedProperties properties) {
+        TemporalScheduleCreateReqVO request = dailyRequest(workflow, properties);
+        String canonical = workflow.getSkillId() + "|" + workflow.getSkillVersion()
+                + "|" + workflow.getDefinitionClosureSha256()
+                + "|" + cronExpression(workflow.getSkillId())
+                + "|" + inputStrategy(workflow.getSkillId())
+                + "|" + properties.getTimeZone()
+                + "|" + request.getRoleCode()
+                + "|" + request.getActionCode()
+                + "|" + DEFAULT_MAX_FAN_OUT;
+        return DigestUtil.sha256Hex(canonical);
+    }
+
+    static boolean isDailyDiscovery(String inputJson) {
+        return DAILY_DISCOVERY_INPUT.equals(inputJson);
+    }
+
+    static boolean canRunWithoutBusinessInput(String skillId) {
+        return INPUT_FREE_WORKFLOWS.contains(skillId);
+    }
+
+    static boolean isRotatingBusinessScenario(String skillId) {
+        return ROTATING_BUSINESS_SCENARIOS.contains(skillId);
+    }
+
+    static boolean isDomainBacklog(String skillId) {
+        return DOMAIN_BACKLOG_WORKFLOWS.contains(skillId);
+    }
+
+    static ApprovalRoute approvalRoute(String skillId) {
+        return APPROVAL_ROUTES.get(skillId);
+    }
+
+    private static String scheduleCode(String skillId) {
+        String code = skillId;
+        if (code.startsWith("skill.cloudmold.")) {
+            code = code.substring("skill.cloudmold.".length());
+        }
+        code = code.replaceAll("\\.v\\d+$", "")
+                .replaceAll("[^a-zA-Z0-9._-]", "-")
+                .replace('.', '-')
+                .toLowerCase();
+        return "managed-daily-" + code;
+    }
+
+    record ApprovalRoute(String roleCode, String actionCode) {
+    }
+}

@@ -8,8 +8,10 @@ trap 'rm -rf "${staging_dir}"' EXIT
 
 cd "${repo_root}"
 maven_profiles="${CLOUDMOLD_MAVEN_PROFILES:-cloudmold-agent-approval-bpm}"
-mvn -B -ntp -pl yudao-server -am -P"${maven_profiles}" \
-  -Dcloudmold.bpm.repackage.skip=true -DskipTests clean package
+if [[ "${CLOUDMOLD_SKIP_MAVEN:-false}" != "true" ]]; then
+  mvn -B -ntp -pl yudao-server -am -P"${maven_profiles}" \
+    -Dcloudmold.bpm.repackage.skip=true -DskipTests clean package
+fi
 
 mkdir -p "${staging_dir}/BOOT-INF/lib"
 replacements=()
@@ -23,6 +25,20 @@ while IFS= read -r -d '' original; do
     replacements+=("${nested}")
   fi
 done < <(find "${repo_root}" -maxdepth 6 -path '*/target/*.jar.original' -print0)
+
+# Plain library modules are not repackaged by Spring Boot and therefore have no
+# .jar.original sibling. Refresh those nested jars too; otherwise an incremental
+# module package followed by CLOUDMOLD_SKIP_MAVEN=true silently leaves stale code
+# inside the runnable monolith.
+while IFS= read -r -d '' original; do
+  [[ "${original}" == "${outer_jar}" ]] && continue
+  [[ -f "${original}.original" ]] && continue
+  nested="BOOT-INF/lib/$(basename "${original}")"
+  if unzip -Z1 "${outer_jar}" | grep -Fx "${nested}" >/dev/null; then
+    cp "${original}" "${staging_dir}/${nested}"
+    replacements+=("${nested}")
+  fi
+done < <(find "${repo_root}" -maxdepth 6 -path '*/target/*-SNAPSHOT.jar' -print0)
 
 if (( ${#replacements[@]} > 0 )); then
   zip -q -d "${outer_jar}" "${replacements[@]}"

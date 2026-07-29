@@ -51,17 +51,19 @@ public class AgentApprovalResponsibilityResolver {
                     candidate.getTenantId(), roleCode, now);
             require(roleGrants != null && !roleGrants.isEmpty(),
                     "R3 responsibility group has no effective tenant member: " + roleCode);
-            roleGrants.stream()
+            List<ActorRoleGrant> eligibleGrants = roleGrants.stream()
                     .sorted(Comparator.comparing(ActorRoleGrant::getActorUserId)
                             .thenComparing(ActorRoleGrant::getGrantId))
-                    .forEach(grant -> {
-                        validateGrant(candidate.getTenantId(), roleCode, grant, now);
-                        require(!forbiddenUsers.contains(grant.getActorUserId()),
-                                "R3 responsibility approver conflicts with requester, executor, or operating principal");
-                        require(assignedUsers.add(grant.getActorUserId()),
-                                "R3 responsibility groups must not resolve to the same user");
-                        grants.add(grant);
-                    });
+                    .peek(grant -> validateGrant(candidate.getTenantId(), roleCode, grant, now))
+                    .filter(grant -> !forbiddenUsers.contains(grant.getActorUserId()))
+                    .toList();
+            require(!eligibleGrants.isEmpty(),
+                    "R3 responsibility group has no independent effective tenant member: " + roleCode);
+            eligibleGrants.forEach(grant -> {
+                require(assignedUsers.add(grant.getActorUserId()),
+                        "R3 responsibility groups must not resolve to the same user");
+                grants.add(grant);
+            });
         }
         List<Long> approverUserIds = grants.stream().map(ActorRoleGrant::getActorUserId).toList();
         String authoritySha256 = authoritySha256(candidate, roleCodes, grants);

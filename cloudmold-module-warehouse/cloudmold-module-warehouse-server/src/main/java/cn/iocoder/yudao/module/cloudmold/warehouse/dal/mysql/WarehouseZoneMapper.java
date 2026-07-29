@@ -10,6 +10,8 @@ import java.util.List;
 public interface WarehouseZoneMapper extends BaseMapperX<WarehouseZoneDO> {
     @Select("SELECT * FROM cloudmold_warehouse_zone WHERE tenant_id=#{tenantId} AND zone_id=#{zoneId} FOR UPDATE")
     WarehouseZoneDO selectForUpdate(@Param("tenantId") Long tenantId, @Param("zoneId") String zoneId);
+    @Select("SELECT * FROM cloudmold_warehouse_zone WHERE tenant_id=#{tenantId} AND zone_id=#{zoneId}")
+    WarehouseZoneDO selectCurrent(@Param("tenantId") Long tenantId, @Param("zoneId") String zoneId);
     @Select("SELECT * FROM cloudmold_warehouse_zone WHERE tenant_id=#{tenantId} AND warehouse_id=#{warehouseId} AND zone_code=#{code}")
     WarehouseZoneDO selectByCode(@Param("tenantId") Long tenantId, @Param("warehouseId") String warehouseId,
                                  @Param("code") String code);

@@ -90,6 +90,26 @@ class ManagedSkillTaskQueryServiceTest {
     }
 
     @Test
+    void shouldExposeOnlyBusinessRoleWorkflows() {
+        SkillTaskDefinition role = definition(
+                "skill.cloudmold.commerce.product-to-listing.v1", "1.1.0", "R3");
+        role.setWorkflowLevel("BUSINESS_ROLE");
+        role.setOwnerRole("category-operations");
+        SkillTaskDefinition readback = definition(
+                "skill.cloudmold.listing.lifecycle-readback.v1", "1.0.0", "R1");
+        readback.setWorkflowLevel("INTERNAL_SUBFLOW");
+        when(registry.all()).thenReturn(List.of(readback, role));
+
+        List<ManagedSkillTaskWorkflowView> workflows = service.listManagedWorkflows();
+
+        assertThat(workflows).singleElement().satisfies(item -> {
+            assertThat(item.getSkillId()).isEqualTo(role.getSkillId());
+            assertThat(item.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+            assertThat(item.getOwnerRole()).isEqualTo("category-operations");
+        });
+    }
+
+    @Test
     void shouldDescribeNewBusinessWorkflowsWithTruthfulCompletionBoundary() {
         SkillTaskDefinition productToListing = definition(
                 "skill.cloudmold.commerce.product-to-listing.v1", "1.0.0", "R3");
@@ -109,6 +129,100 @@ class ManagedSkillTaskQueryServiceTest {
                         org.assertj.core.groups.Tuple.tuple(
                                 "补货单准备",
                                 "将已批准的补货建议转换为真实采购或调拨草稿，并明确后续等待的供应商或仓储事件。"));
+    }
+
+    @Test
+    void shouldDescribeEveryManagedReadbackWorkflowWithoutApproval() {
+        List<String> skillIds = List.of(
+                "skill.cloudmold.operations.daily-business-control.v1",
+                "skill.cloudmold.operations.weekly-business-review.v1",
+                "skill.cloudmold.merchant.onboarding-readback.v1",
+                "skill.cloudmold.engagement.promotion-campaign-readback.v1",
+                "skill.cloudmold.engagement.growth-experiment-readback.v1",
+                "skill.cloudmold.commerce.order-to-cash-readback.v1",
+                "skill.cloudmold.commerce.order-cancellation-readback.v1",
+                "skill.cloudmold.commerce.fulfillment-exception-readback.v1",
+                "skill.cloudmold.commerce.return-refund-readback.v1",
+                "skill.cloudmold.customer-service.resolution-readback.v1",
+                "skill.cloudmold.quality.recall-readback.v1",
+                "skill.cloudmold.risk.dispute-readback.v1",
+                "skill.cloudmold.payment.reconciliation-readback.v1",
+                "skill.cloudmold.procurement.supplier-confirmation-readback.v1",
+                "skill.cloudmold.supplier.sourcing-decision-readback.v1",
+                "skill.cloudmold.finance.close-readiness.v1",
+                "skill.cloudmold.listing.lifecycle-readback.v1",
+                "skill.cloudmold.warehouse.allocation-transfer-readback.v1",
+                "skill.cloudmold.warehouse.inbound-readback.v1");
+        when(registry.all()).thenReturn(skillIds.stream()
+                .map(skillId -> definition(skillId, "1.0.0", "R1"))
+                .toList());
+
+        List<ManagedSkillTaskWorkflowView> workflows = service.listManagedWorkflows();
+
+        assertThat(workflows).hasSize(19)
+                .allSatisfy(item -> {
+                    assertThat(item.getApprovalRequired()).isFalse();
+                    assertThat(item.getWriteStepCount()).isZero();
+                    assertThat(item.getDescription()).doesNotContain("已完成");
+                });
+        assertThat(workflows).extracting(ManagedSkillTaskWorkflowView::getDisplayName)
+                .containsExactlyInAnyOrder(
+                        "日经营控制",
+                        "周经营复盘",
+                        "商家入驻终态跟踪",
+                        "促销活动终态跟踪",
+                        "增长实验终态跟踪",
+                        "订单到回款终态跟踪",
+                        "订单取消终态跟踪",
+                        "履约异常终态跟踪",
+                        "退货退款终态跟踪",
+                        "客户问题解决终态跟踪",
+                        "质量召回终态跟踪",
+                        "风险争议终态跟踪",
+                        "支付对账终态跟踪",
+                        "供应商采购确认跟踪",
+                        "供应商寻源定标终态跟踪",
+                        "财务关账准备度跟踪",
+                        "商品刊登生命周期终态跟踪",
+                        "库存调拨终态跟踪",
+                        "仓库入库终态跟踪");
+    }
+
+    @Test
+    void shouldDescribeOperationalOrderCancellationWithHonestPspBoundary() {
+        SkillTaskDefinition definition = SkillTaskDefinition.builder()
+                .skillId("skill.cloudmold.commerce.order-cancellation-operational.v1")
+                .skillVersion("1.0.0")
+                .riskLevel("R3")
+                .maxAttempts(3)
+                .definitionSha256("d".repeat(64))
+                .definitionClosureSha256("c".repeat(64))
+                .steps(List.of(
+                        SkillTaskDefinition.Step.builder()
+                                .stepCode("start_order_cancellation")
+                                .stepOrder(1)
+                                .operationType("WRITE")
+                                .arguments(JsonNodeFactory.instance.arrayNode())
+                                .build(),
+                        SkillTaskDefinition.Step.builder()
+                                .stepCode("wait_order_cancellation")
+                                .stepOrder(2)
+                                .stepKind("WAIT_CAPABILITY")
+                                .operationType("READ")
+                                .arguments(JsonNodeFactory.instance.arrayNode())
+                                .build()))
+                .build();
+        when(registry.all()).thenReturn(List.of(definition));
+
+        List<ManagedSkillTaskWorkflowView> workflows = service.listManagedWorkflows();
+
+        assertThat(workflows).singleElement().satisfies(item -> {
+            assertThat(item.getDisplayName()).isEqualTo("订单取消补偿闭环");
+            assertThat(item.getDescription()).contains("真实订单取消补偿 Saga START", "真实 PSP");
+            assertThat(item.getRiskLevel()).isEqualTo("R3");
+            assertThat(item.getWriteStepCount()).isEqualTo(1);
+            assertThat(item.getApprovalRequired()).isTrue();
+        });
     }
 
     @Test

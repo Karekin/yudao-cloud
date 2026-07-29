@@ -20,6 +20,30 @@ public final class TemporalManagedWorkflowIds {
         return "req-" + normalize(request.getScheduleId()) + "-" + request.getTenantId();
     }
 
+    public static String dailyDispatchWorkflowId(TemporalDailyDispatchRequest request) {
+        String suffix = DigestUtil.sha256Hex(
+                request.getSkillId() + ":" + StrUtil.blankToDefault(request.getSkillVersion(), "latest"))
+                .substring(0, 12);
+        return "cm.aiops.dispatch.t" + request.getTenantId() + "."
+                + normalize(request.getScheduleId()) + "." + suffix;
+    }
+
+    public static String dailyDispatchRequestId(TemporalDailyDispatchRequest request) {
+        return "dispatch-" + normalize(request.getScheduleId()) + "-" + request.getTenantId();
+    }
+
+    public static String automationCandidateWorkflowId(
+            TemporalDailyDispatchRequest request, TemporalAutomationCandidate candidate,
+            String businessDate) {
+        String candidateKey = candidate.getCandidateId() == null
+                ? candidate.getBusinessKey() + ":" + businessDate
+                : candidate.getCandidateId();
+        String suffix = DigestUtil.sha256Hex(
+                request.getSkillId() + ":" + request.getSkillVersion() + ":" + candidateKey)
+                .substring(0, 24);
+        return "cm.aiops.run.t" + request.getTenantId() + "." + suffix;
+    }
+
     public static String workOrderId(String temporalRunId) {
         return "twr-" + stableSuffix(temporalRunId);
     }

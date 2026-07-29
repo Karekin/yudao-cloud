@@ -116,6 +116,34 @@ class OperationsBusinessControlWorkflowQueryServiceTest {
         assertThat(result.getSummary()).contains("已经过期");
     }
 
+    @Test
+    void dailyWaitsInsteadOfReportingHealthyWhenRequiredMetricIsMissing() throws Exception {
+        write("dashboard-snapshot.json", """
+                {
+                  "snapshot_id": "snap-daily-missing",
+                  "generated_at": "2026-07-28T08:00:00+08:00",
+                  "evidence_scope": "LOCAL_TEST",
+                  "tenant_label": "得物V1",
+                  "metrics": {
+                    "finance.net_revenue_yuan": {"value": 398, "unit": "yuan", "status": "runtime_local_test"},
+                    "commerce.order_count": {"value": 28, "unit": "count", "status": "runtime_local_test"},
+                    "commerce.reconciled_rate": {"value": 100, "unit": "percent", "status": "runtime_local_test"},
+                    "inventory.low_stock_balance_count": {"value": 0, "unit": "count", "status": "runtime_local_test"},
+                    "inventory.stockout_rate": {"value": 0, "unit": "percent", "status": "runtime_local_test"}
+                  }
+                }
+                """);
+        OperationsBusinessControlWorkflowQueryService service = new OperationsBusinessControlWorkflowQueryService(
+                properties(tempDir), new ObjectMapper(), CLOCK);
+
+        BusinessControlWorkflowResult result = service.inspectDaily();
+
+        assertThat(result.getStatus()).isEqualTo(BusinessControlWorkflowResult.Status.WAITING);
+        assertThat(result.getTerminal()).isFalse();
+        assertThat(result.getBlockers())
+                .containsExactly("KPI_METRIC_MISSING:service.resolution_sla_rate");
+    }
+
     private OperationsIntelligenceAnalyticsProperties properties(Path dir) {
         OperationsIntelligenceAnalyticsProperties properties = new OperationsIntelligenceAnalyticsProperties();
         properties.setDataDirectory(dir);

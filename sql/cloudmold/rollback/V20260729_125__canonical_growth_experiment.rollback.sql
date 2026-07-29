@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS cloudmold_promotion_growth_experiment_metric_snapshot;
+DROP TABLE IF EXISTS cloudmold_promotion_growth_experiment_exposure;
+DROP TABLE IF EXISTS cloudmold_promotion_growth_experiment_variant;
+DROP TABLE IF EXISTS cloudmold_promotion_growth_experiment;

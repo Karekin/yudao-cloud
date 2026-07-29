@@ -12,4 +12,6 @@ public class AiOperationsTemporalProperties {
     private String namespace = "default";
     private String taskQueue = "cloudmold-ai-operations";
     private long activityTimeoutSeconds = 60;
+    /** 业务事件等待兜底超时（秒）：事件驱动为主，此值仅在事件丢失时触发 child refresh 兜底 */
+    private long businessEventTimeoutSeconds = 300;
 }

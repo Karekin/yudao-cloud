@@ -50,7 +50,7 @@ class AgentApprovalResponsibilityResolverTest {
     }
 
     @Test
-    void rejectsSameUserAcrossResponsibilityGroupsOrOperatingPrincipal() {
+    void rejectsSameUserAcrossResponsibilityGroupsOrMissingIndependentMember() {
         when(mapper.selectEffectiveActorRoleGrantsByRole(17L, "buyer", NOW))
                 .thenReturn(List.of(grant(17L, "buyer", 210L, "grant-buyer", 1L)));
         when(mapper.selectEffectiveActorRoleGrantsByRole(17L, "finance", NOW))
@@ -62,7 +62,25 @@ class AgentApprovalResponsibilityResolverTest {
         when(mapper.selectEffectiveActorRoleGrantsByRole(17L, "finance", NOW))
                 .thenReturn(List.of(grant(17L, "finance", 200L, "grant-finance", 1L)));
         assertThatThrownBy(() -> resolver.resolve(candidate(), NOW))
-                .hasMessage("R3 responsibility approver conflicts with requester, executor, or operating principal");
+                .hasMessage("R3 responsibility group has no independent effective tenant member: finance");
+    }
+
+    @Test
+    void excludesRequesterExecutorAndOperatingPrincipalWhenIndependentMembersExist() {
+        when(mapper.selectEffectiveActorRoleGrantsByRole(17L, "buyer", NOW))
+                .thenReturn(List.of(
+                        grant(17L, "buyer", 100L, "grant-buyer-requester", 1L),
+                        grant(17L, "buyer", 210L, "grant-buyer-independent", 1L)));
+        when(mapper.selectEffectiveActorRoleGrantsByRole(17L, "finance", NOW))
+                .thenReturn(List.of(
+                        grant(17L, "finance", 200L, "grant-finance-principal", 1L),
+                        grant(17L, "finance", 220L, "grant-finance-independent", 1L)));
+
+        AgentApprovalResponsibilityResolver.Resolution resolution =
+                resolver.resolve(candidate(), NOW);
+
+        assertThat(resolution.roleCodes()).containsExactly("buyer", "finance");
+        assertThat(resolution.approverUserIds()).containsExactly(210L, 220L);
     }
 
     @Test
@@ -127,13 +145,23 @@ class AgentApprovalResponsibilityResolverTest {
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("buyer.execute-replenishment"))
                 .containsExactly("buyer", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("listing.batch-publish"))
-                .containsExactly("merchandising", "risk");
+                .containsExactly("risk", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("merchant.penalty"))
-                .containsExactly("merchant-operations", "risk", "legal");
+                .containsExactly("risk", "legal");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("customer-service.compensate"))
                 .containsExactly("customer-service", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("quality.recall"))
                 .containsExactly("quality", "risk", "operations-lead");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("commerce.autonomous-day"))
+                .containsExactly("customer-service", "finance");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("consumer.journey"))
+                .containsExactly("customer-service", "finance");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("supplier.award"))
+                .containsExactly("buyer", "finance");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("warehouse.physical-cycle"))
+                .containsExactly("inventory-control", "operations-control");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("mission.stockout.start"))
+                .containsExactly("risk", "finance");
         assertThatThrownBy(() -> AgentApprovalR3Policy.requiredRoleCodes("unknown.write"))
                 .hasMessageContaining("no responsibility policy");
     }

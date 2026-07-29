@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.cloudmold.quality.service;
 
+import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
 import cn.iocoder.yudao.module.cloudmold.inventory.api.*;
@@ -243,7 +244,13 @@ class QualityServiceImplTest {
                 command.getOperation() == InventoryLotOperation.RECALL
                         && command.getLotId().equals(lotId)
                         && command.getExpectedLotVersion().equals(7L)
-                        && command.getRecallReference().equals("quality-recall:recall-01")));
+                        && command.getIdempotencyKey()
+                                .equals("quality-recall:" + DigestUtil.sha256Hex("recall-01"))
+                        && command.getEvidenceRef().equals(
+                                "evidence:quality-recall/" + DigestUtil.sha256Hex("recall-01"))
+                        && command.getRecallReference().equals(command.getEvidenceRef())
+                        && command.getSourceEventId() == null
+                        && command.getTraceId().equals("run-001")));
         verify(mapper).insertRecallAction(argThat(row -> row.getLotId().equals(lotId)));
     }
 

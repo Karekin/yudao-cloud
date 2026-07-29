@@ -571,7 +571,8 @@ public interface AgentControlStoreMapper {
     @TenantIgnore
     @Select("""
             SELECT b.approval_id,b.tenant_id,b.work_order_id,b.status AS observed_status,
-                   b.terminal_operator_user_id,a.version AS approval_version,w.version AS work_order_version
+                   b.approver_user_id,b.terminal_operator_user_id,
+                   a.version AS approval_version,w.version AS work_order_version
             FROM cloudmold_agent_approval_workflow_binding b
             JOIN cloudmold_agent_approval a
               ON a.tenant_id=b.tenant_id AND a.approval_id=b.approval_id
@@ -815,6 +816,14 @@ public interface AgentControlStoreMapper {
             """)
     int insertMission(Mission value);
 
+    @Select("""
+            SELECT mission_id,tenant_id,mission_type,template_version,title,objective_json,correlation_id,status,
+                   supervisor_user_id,version,started_at,deadline_at,completed_at,updated_at
+            FROM cloudmold_agent_business_mission
+            WHERE tenant_id=#{tenantId} AND mission_id=#{missionId}
+            """)
+    Mission selectMission(@Param("tenantId") Long tenantId, @Param("missionId") String missionId);
+
     @Select("SELECT * FROM cloudmold_agent_business_mission WHERE tenant_id=#{tenantId} AND mission_id=#{missionId} FOR UPDATE")
     Mission selectMissionForUpdate(@Param("tenantId") Long tenantId, @Param("missionId") String missionId);
 
@@ -824,6 +833,14 @@ public interface AgentControlStoreMapper {
             VALUES (#{goalId},#{tenantId},#{missionId},#{goalCode},#{title},#{status},#{version},#{createdAt},#{updatedAt})
             """)
     int insertMissionGoal(MissionGoal value);
+
+    @Select("""
+            SELECT goal_id,tenant_id,mission_id,goal_code,title,status,version,created_at,updated_at
+            FROM cloudmold_agent_mission_goal
+            WHERE tenant_id=#{tenantId} AND mission_id=#{missionId}
+            ORDER BY created_at,goal_id
+            """)
+    List<MissionGoal> selectMissionGoals(@Param("tenantId") Long tenantId, @Param("missionId") String missionId);
 
     @Update("""
             UPDATE cloudmold_agent_mission_goal SET status='ACHIEVED',version=version+1,updated_at=#{now}
@@ -877,6 +894,18 @@ public interface AgentControlStoreMapper {
 
     @Select("SELECT * FROM cloudmold_agent_run_lease WHERE tenant_id=#{tenantId} AND work_order_id=#{workOrderId} FOR UPDATE")
     AgentRunLease selectRunLeaseForUpdate(@Param("tenantId") Long tenantId, @Param("workOrderId") String workOrderId);
+
+    @Select("""
+            SELECT work_order_id,tenant_id,role_code,action_code,title,business_context_json,status,
+                   requester_user_id,assignee_user_id,approval_id,action_policy_id,action_policy_version,
+                   risk_level,execution_required,skill_id,skill_version,skill_definition_closure_sha256,
+                   execution_input_sha256,mission_id,goal_id,parent_work_order_id,deadline_at,ready_at,
+                   waiting_reason_code,active_run_id,version,created_at,updated_at,completed_at
+            FROM cloudmold_agent_work_order
+            WHERE tenant_id=#{tenantId} AND mission_id=#{missionId}
+            ORDER BY created_at,work_order_id
+            """)
+    List<WorkOrder> selectMissionWorkOrders(@Param("tenantId") Long tenantId, @Param("missionId") String missionId);
 
     @Insert("""
             INSERT INTO cloudmold_agent_run_lease

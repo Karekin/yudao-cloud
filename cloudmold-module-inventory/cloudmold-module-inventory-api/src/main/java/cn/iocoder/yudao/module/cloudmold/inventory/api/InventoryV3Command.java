@@ -24,6 +24,16 @@ public class InventoryV3Command {
     private String lotId;
     private String stockStatus;
     private String qualityStatus;
+    /**
+     * 双账移动的目标库位。QUALITY_RELEASE 可省略（默认原库位），RELOCATE 必填。
+     */
+    private String targetLocationId;
+    /**
+     * 质检放行目标维度，仅 QUALITY_RELEASE 使用：
+     * stockStatus/qualityStatus 表示翻转的源维度（如 NON_SELLABLE/PENDING_QC），target* 表示翻入的目标维度（PASS→SELLABLE/QUALIFIED；FAIL→NON_SELLABLE/DAMAGED）。
+     */
+    private String targetStockStatus;
+    private String targetQualityStatus;
     private String baseUomCode;
     private BigDecimal quantity;
     /**

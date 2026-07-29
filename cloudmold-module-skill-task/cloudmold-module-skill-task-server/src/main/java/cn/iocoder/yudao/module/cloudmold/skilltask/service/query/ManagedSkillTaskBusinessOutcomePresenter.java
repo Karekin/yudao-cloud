@@ -24,37 +24,138 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ManagedSkillTaskBusinessOutcomePresenter {
 
-    private static final Map<String, String> SKILL_NAMES = Map.of(
-            "skill.cloudmold.catalog.inspect-active-sku.v1", "在售 SKU 查询",
-            "skill.cloudmold.inventory.stockout-diagnosis.v1", "尺码缺断码诊断",
-            "skill.cloudmold.commerce.catalog-matrix.v1", "商品款色码建档",
-            "skill.cloudmold.commerce.product-to-listing.v1", "自动铺品",
-            "skill.cloudmold.commerce.aftersale-saga.v1", "售后退款全链路",
-            "skill.cloudmold.commerce.legacy-projection-plan.v1", "旧系统投影预检",
-            "skill.cloudmold.commerce.reuse-ready-master.v1", "商家与仓网主数据准备",
-            "skill.cloudmold.commerce.terminal-readback.v1", "全链路终态核验",
-            "skill.cloudmold.commerce.full-chain-hsf.v1", "商品售后自治全链路"
+    private static final Map<String, String> SKILL_NAMES = Map.ofEntries(
+            Map.entry("skill.cloudmold.agentcontrol.mission-lifecycle-stockout.v1",
+                    "缺断码 Mission 生命周期"),
+            Map.entry("skill.cloudmold.catalog.inspect-active-sku.v1", "在售 SKU 查询"),
+            Map.entry("skill.cloudmold.catalog.assortment-wave-readiness.v1", "波段企划准备度"),
+            Map.entry("skill.cloudmold.inventory.stockout-diagnosis.v1", "尺码缺断码诊断"),
+            Map.entry("skill.cloudmold.listing.lifecycle-readback.v1", "商品刊登生命周期终态跟踪"),
+            Map.entry("skill.cloudmold.commerce.catalog-matrix.v1", "商品款色码建档"),
+            Map.entry("skill.cloudmold.commerce.product-to-listing.v1", "自动铺品"),
+            Map.entry("skill.cloudmold.commerce.autonomous-day.v1", "AI 自主经营日"),
+            Map.entry("skill.cloudmold.consumer.shopping-journey.v1", "消费者选购与服务全旅程"),
+            Map.entry("skill.cloudmold.commerce.aftersale-saga.v1", "售后退款全链路"),
+            Map.entry("skill.cloudmold.commerce.legacy-projection-plan.v1", "旧系统投影预检"),
+            Map.entry("skill.cloudmold.commerce.reuse-ready-master.v1", "商家与仓网主数据准备"),
+            Map.entry("skill.cloudmold.commerce.terminal-readback.v1", "全链路终态核验"),
+            Map.entry("skill.cloudmold.commerce.full-chain-hsf.v1", "商品售后自治全链路"),
+            Map.entry("skill.cloudmold.supply-planning.prepare.v1", "补货单准备"),
+            Map.entry("skill.cloudmold.operations.daily-business-control.v1", "日经营控制"),
+            Map.entry("skill.cloudmold.operations.weekly-business-review.v1", "周经营复盘"),
+            Map.entry("skill.cloudmold.merchant.onboarding-readback.v1", "商家入驻终态跟踪"),
+            Map.entry("skill.cloudmold.merchant.onboarding-lifecycle.v1", "商家入驻经营闭环"),
+            Map.entry("skill.cloudmold.engagement.promotion-campaign-operations.v1", "促销活动投放闭环"),
+            Map.entry("skill.cloudmold.growth.experiment-lifecycle.v1", "增长实验决策闭环"),
+            Map.entry("skill.cloudmold.supplier.sourcing-lifecycle.v1", "供应商寻源定标闭环"),
+            Map.entry("skill.cloudmold.procurement.order-lifecycle.v1", "采购订单履约闭环"),
+            Map.entry("skill.cloudmold.wms.operations.v1", "仓储收发调盘闭环"),
+            Map.entry("skill.cloudmold.supply.replenishment-lifecycle.v1", "智能补货执行闭环"),
+            Map.entry("skill.cloudmold.customer-service.resolution-lifecycle.v1", "客服咨询解决闭环"),
+            Map.entry("skill.cloudmold.engagement.promotion-campaign-readback.v1", "促销活动终态跟踪"),
+            Map.entry("skill.cloudmold.engagement.growth-experiment-readback.v1", "增长实验终态跟踪"),
+            Map.entry("skill.cloudmold.commerce.order-cancellation-operational.v1", "订单取消补偿闭环"),
+            Map.entry("skill.cloudmold.commerce.order-to-cash-readback.v1", "订单到回款终态跟踪"),
+            Map.entry("skill.cloudmold.commerce.order-cancellation-readback.v1", "订单取消终态跟踪"),
+            Map.entry("skill.cloudmold.commerce.fulfillment-exception-readback.v1", "履约异常终态跟踪"),
+            Map.entry("skill.cloudmold.commerce.return-refund-readback.v1", "退货退款终态跟踪"),
+            Map.entry("skill.cloudmold.customer-service.resolution-readback.v1", "客户问题解决终态跟踪"),
+            Map.entry("skill.cloudmold.quality.recall-readback.v1", "质量召回终态跟踪"),
+            Map.entry("skill.cloudmold.risk.dispute-readback.v1", "风险争议终态跟踪"),
+            Map.entry("skill.cloudmold.payment.reconciliation-readback.v1", "支付对账终态跟踪"),
+            Map.entry("skill.cloudmold.procurement.supplier-confirmation-readback.v1", "供应商采购确认跟踪"),
+            Map.entry("skill.cloudmold.supplier.sourcing-decision-readback.v1", "供应商寻源定标终态跟踪"),
+            Map.entry("skill.cloudmold.finance.close-readiness.v1", "财务关账准备度跟踪"),
+            Map.entry("skill.cloudmold.warehouse.allocation-transfer-readback.v1", "库存调拨终态跟踪"),
+            Map.entry("skill.cloudmold.warehouse.inbound-readback.v1", "仓库入库终态跟踪")
     );
 
-    private static final Map<String, String> SKILL_DESCRIPTIONS = Map.of(
-            "skill.cloudmold.catalog.inspect-active-sku.v1",
-            "查询当前租户指定 SKU 的规范商品与在售状态，不修改业务数据。",
-            "skill.cloudmold.inventory.stockout-diagnosis.v1",
-            "按 SPU 检查各尺码可售库存，识别缺货与低库存风险，不修改业务数据。",
-            "skill.cloudmold.commerce.catalog-matrix.v1",
-            "建立款式、SPU 与 6 个 SKU，并完成商品生命周期激活。",
-            "skill.cloudmold.commerce.product-to-listing.v1",
-            "串联规范商品建档、商家店铺准备、商品刊登审核发布与终态回读，缺少渠道回执时明确标记待渠道确认。",
-            "skill.cloudmold.commerce.aftersale-saga.v1",
-            "贯通发布、库存、下单支付、履约、退货质检、退款和库存恢复。",
-            "skill.cloudmold.commerce.legacy-projection-plan.v1",
-            "只读规划规范 SKU 向 Mall、ERP 与 WMS 的兼容投影，不执行旧系统写入。",
-            "skill.cloudmold.commerce.reuse-ready-master.v1",
-            "校验身份与 ERP 仓，创建并激活商家店铺，绑定可用仓网。",
-            "skill.cloudmold.commerce.terminal-readback.v1",
-            "只读核验商品、商家、刊登、订单、支付、履约、售后及仓网终态。",
-            "skill.cloudmold.commerce.full-chain-hsf.v1",
-            "依次编排商品建档、旧系统投影、商家仓网、售后 Saga 与终态核验。"
+    private static final Map<String, String> SKILL_DESCRIPTIONS = Map.ofEntries(
+            Map.entry("skill.cloudmold.agentcontrol.mission-lifecycle-stockout.v1",
+                    "在审批后创建固定缺断码处置 Mission 并回读真实工作图；不冒充通用 Mission Charter、预算、KPI 或动态 DAG。"),
+            Map.entry("skill.cloudmold.catalog.inspect-active-sku.v1",
+                    "查询当前租户指定 SKU 的规范商品与在售状态，不修改业务数据。"),
+            Map.entry("skill.cloudmold.catalog.assortment-wave-readiness.v1",
+                    "按年度、季节和波段汇总真实 Catalog 事实；趋势、价格带、款量、毛利或供给计划缺失时明确阻塞，不冒充完整企划案。"),
+            Map.entry("skill.cloudmold.inventory.stockout-diagnosis.v1",
+                    "按 SPU 检查各尺码可售库存，识别缺货与低库存风险，不修改业务数据。"),
+            Map.entry("skill.cloudmold.listing.lifecycle-readback.v1",
+                    "持续核验刊登发布、渠道回执、暂停、下架、归档及销售资格失效后的批量下架结果。"),
+            Map.entry("skill.cloudmold.commerce.catalog-matrix.v1",
+                    "建立款式、SPU 与 6 个 SKU，并完成商品生命周期激活。"),
+            Map.entry("skill.cloudmold.commerce.product-to-listing.v1",
+                    "串联规范商品建档、商家店铺准备、商品刊登审核发布与终态回读，缺少渠道回执时明确标记待渠道确认。"),
+            Map.entry("skill.cloudmold.commerce.autonomous-day.v1",
+                    "每日生成全新商品与刊登，再由独立消费者身份完成选购、支付履约、售后、客服和社区种草闭环。"),
+            Map.entry("skill.cloudmold.consumer.shopping-journey.v1",
+                    "模拟真实会员完成搜索、商详、收藏、加购、结算、下单支付、履约、售后、咨询与社区发布。"),
+            Map.entry("skill.cloudmold.commerce.aftersale-saga.v1",
+                    "贯通发布、库存、下单支付、履约、退货质检、退款和库存恢复。"),
+            Map.entry("skill.cloudmold.commerce.legacy-projection-plan.v1",
+                    "只读规划规范 SKU 向 Mall、ERP 与 WMS 的兼容投影，不执行旧系统写入。"),
+            Map.entry("skill.cloudmold.commerce.reuse-ready-master.v1",
+                    "校验身份与 ERP 仓，创建并激活商家店铺，绑定可用仓网。"),
+            Map.entry("skill.cloudmold.commerce.terminal-readback.v1",
+                    "只读核验商品、商家、刊登、订单、支付、履约、售后及仓网终态。"),
+            Map.entry("skill.cloudmold.commerce.full-chain-hsf.v1",
+                    "依次编排商品建档、旧系统投影、商家仓网、售后 Saga 与终态核验。"),
+            Map.entry("skill.cloudmold.supply-planning.prepare.v1",
+                    "将已批准的补货建议转换为真实采购或调拨草稿，并明确后续等待的供应商或仓储事件。"),
+            Map.entry("skill.cloudmold.operations.daily-business-control.v1",
+                    "只读汇总当日经营指标、异常与建议工单；事实不完整时保持待数据状态。"),
+            Map.entry("skill.cloudmold.operations.weekly-business-review.v1",
+                    "只读汇总周度目标偏差、异常与行动建议；事实不完整时保持待数据状态。"),
+            Map.entry("skill.cloudmold.merchant.onboarding-readback.v1",
+                    "持续回读商家申请、门店与授权终态，不代替人工审批或领域写入。"),
+            Map.entry("skill.cloudmold.merchant.onboarding-lifecycle.v1",
+                    "模拟招商运营完成资料建档、提交、审核、批准、商家激活、店铺激活与终态验收；每天创建全新的测试商家。"),
+            Map.entry("skill.cloudmold.engagement.promotion-campaign-operations.v1",
+                    "模拟活动运营完成活动启用、人群触达、渠道发送、送达、打开、点击、活动收尾与终态验收；每天生成全新活动。"),
+            Map.entry("skill.cloudmold.growth.experiment-lifecycle.v1",
+                    "模拟增长运营完成实验活动、分组、曝光、指标快照、护栏判断、显著性结论与终态验收；每天生成全新实验。"),
+            Map.entry("skill.cloudmold.supplier.sourcing-lifecycle.v1",
+                    "模拟采购寻源岗位完成双供应商准入、RFQ、双报价、样品评估、成本产能比较、定标与终态验收；每天生成全新寻源案例。"),
+            Map.entry("skill.cloudmold.procurement.order-lifecycle.v1",
+                    "基于最近一次真实定标结果创建采购订单，完成审批下发、供应商确认与终态验收；每天生成全新采购订单。"),
+            Map.entry("skill.cloudmold.wms.operations.v1",
+                    "模拟仓储运营完成双仓与商品造数、采购收货、仓间调拨、销售出库、零差异盘点和最终库存验收；每天生成全新业务单据。"),
+            Map.entry("skill.cloudmold.supply.replenishment-lifecycle.v1",
+                    "模拟补货运营完成需求分型、双供应商寻源定标、采购订单下发以及收货、调拨、出库、盘点和库存验收；自动轮换日常与大促补货。"),
+            Map.entry("skill.cloudmold.customer-service.resolution-lifecycle.v1",
+                    "模拟用户咨询与客服岗位完成建单、关联订单、消息接收、分派、处理、解决、满意度反馈、关单和终态验收；每天产生新的客服案例。"),
+            Map.entry("skill.cloudmold.engagement.promotion-campaign-readback.v1",
+                    "持续回读活动与投放结果；依赖数据未齐备时保持等待并展示阻塞项。"),
+            Map.entry("skill.cloudmold.engagement.growth-experiment-readback.v1",
+                    "持续回读增长实验结果；样本或归因未齐备时保持等待并展示阻塞项。"),
+            Map.entry("skill.cloudmold.commerce.order-cancellation-operational.v1",
+                    "提交真实订单取消补偿 Saga START，并持续回读至成功或人工复核；"
+                            + "PAID_UNSHIPPED 当前仅自动覆盖 INTERNAL_TEST 支付退款，真实 PSP 仍由外部权威负责。"),
+            Map.entry("skill.cloudmold.commerce.order-to-cash-readback.v1",
+                    "持续核验订单、库存、支付与履约事实，直至订单到回款链路形成终态。"),
+            Map.entry("skill.cloudmold.commerce.order-cancellation-readback.v1",
+                    "持续核验取消 Saga、库存释放与退款事实，异常或人工处理会明确留痕。"),
+            Map.entry("skill.cloudmold.commerce.fulfillment-exception-readback.v1",
+                    "持续核验订单履约异常的处理结果，未闭环时保持等待或人工处理状态。"),
+            Map.entry("skill.cloudmold.commerce.return-refund-readback.v1",
+                    "持续核验售后、退货质检、退款与库存恢复事实，直至闭环终态。"),
+            Map.entry("skill.cloudmold.customer-service.resolution-readback.v1",
+                    "持续回读客服工单和解决结果，不越过客服审批或领域写入边界。"),
+            Map.entry("skill.cloudmold.quality.recall-readback.v1",
+                    "持续回读质量召回动作及影响范围，证据不完整时保持等待并展示阻塞项。"),
+            Map.entry("skill.cloudmold.risk.dispute-readback.v1",
+                    "持续回读风险争议处置结果，未决或待人工裁定时不会误报成功。"),
+            Map.entry("skill.cloudmold.payment.reconciliation-readback.v1",
+                    "持续核验订单与支付对账结果，账实未一致时保持等待并展示阻塞项。"),
+            Map.entry("skill.cloudmold.procurement.supplier-confirmation-readback.v1",
+                    "从真实采购单创建事件持续核验供应商确认状态；仅覆盖采购确认，不冒充 RFQ、比价、样品或供应商准入。"),
+            Map.entry("skill.cloudmold.supplier.sourcing-decision-readback.v1",
+                    "持续核验正式 RFQ、至少两家供应商报价、准入、样品通过和定标结果；仅领域 AWARDED 终态视为成功。"),
+            Map.entry("skill.cloudmold.finance.close-readiness.v1",
+                    "持续核验渠道账单、对账差异、结算批次和已过账凭证；仅规范会计期间 CLOSED 终态视为成功。"),
+            Map.entry("skill.cloudmold.warehouse.allocation-transfer-readback.v1",
+                    "从已批准的补货转换事件持续核验真实 WMS 移库单；仅移库完成视为成功，作废明确进入失败终态。"),
+            Map.entry("skill.cloudmold.warehouse.inbound-readback.v1",
+                    "持续核验 ASN、收货与上架状态；仅上架完成视为成功，ASN 取消明确进入失败终态。")
     );
 
     private static final Map<String, String> COMPOSITION_SKILL_IDS = Map.of(
@@ -68,6 +169,7 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
     private static final Map<String, String> STEP_NAMES = Map.ofEntries(
             Map.entry("get-active-sku", "查询在售 SKU"),
             Map.entry("diagnose-size-stockout", "诊断尺码库存"),
+            Map.entry("inspect_listing_lifecycle", "核验商品刊登生命周期终态"),
             Map.entry("activate_style", "启用商品款式"),
             Map.entry("submit_spu", "提交 SPU 审核"),
             Map.entry("approve_spu", "审批通过 SPU"),
@@ -80,6 +182,29 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("listing_risk", "风险审核刊登"),
             Map.entry("listing_publish", "发布商品刊登"),
             Map.entry("listing_terminal_readback", "回读刊登终态"),
+            Map.entry("consumer_principal", "核验模拟消费者身份"),
+            Map.entry("listing_published", "核验商品可选购"),
+            Map.entry("session_start", "进入商城"),
+            Map.entry("session_link", "识别会员身份"),
+            Map.entry("search_requested", "搜索商品"),
+            Map.entry("search_exposed", "浏览搜索结果"),
+            Map.entry("search_clicked", "点击搜索商品"),
+            Map.entry("pdp_viewed", "查看商品详情"),
+            Map.entry("favorite_added", "收藏商品"),
+            Map.entry("cart_added", "加入购物车"),
+            Map.entry("checkout_started", "发起结算"),
+            Map.entry("payment_attribution", "归因成交转化"),
+            Map.entry("ticket_create", "发起客服咨询"),
+            Map.entry("ticket_link_order", "关联咨询订单"),
+            Map.entry("ticket_message", "发送咨询消息"),
+            Map.entry("ticket_assign", "分配客服"),
+            Map.entry("ticket_start", "客服开始处理"),
+            Map.entry("ticket_resolve", "解决客户问题"),
+            Map.entry("ticket_feedback", "记录客户评价"),
+            Map.entry("ticket_close", "关闭客服工单"),
+            Map.entry("community_create", "创建社区种草内容"),
+            Map.entry("community_submit", "提交社区内容审核"),
+            Map.entry("community_publish", "发布社区种草内容"),
             Map.entry("inventory_receive", "商品入库"),
             Map.entry("order_place", "创建订单"),
             Map.entry("inventory_reserve", "预占库存"),
@@ -102,6 +227,42 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("merchant_submit", "提交商家审核"),
             Map.entry("merchant_review", "完成商家审核"),
             Map.entry("merchant_approve", "批准商家入驻"),
+            Map.entry("merchant_terminal_readback", "验收商家与店铺经营终态"),
+            Map.entry("campaign_activate", "启用促销触达活动"),
+            Map.entry("delivery_queue", "创建用户触达任务"),
+            Map.entry("provider_send", "执行渠道发送"),
+            Map.entry("delivery_receipt", "记录用户送达"),
+            Map.entry("open_receipt", "记录用户打开"),
+            Map.entry("click_receipt", "记录用户点击"),
+            Map.entry("campaign_complete", "完成促销活动"),
+            Map.entry("campaign_terminal_readback", "验收活动投放终态"),
+            Map.entry("growth_campaign_create", "创建增长实验活动"),
+            Map.entry("growth_campaign_activate", "启用增长实验活动"),
+            Map.entry("experiment_create", "设计增长实验"),
+            Map.entry("experiment_start", "启动实验分流"),
+            Map.entry("control_exposure", "记录对照组曝光"),
+            Map.entry("treatment_exposure", "记录实验组曝光"),
+            Map.entry("control_metric", "计算对照组指标"),
+            Map.entry("treatment_metric", "计算实验组指标"),
+            Map.entry("experiment_conclude", "形成实验决策"),
+            Map.entry("experiment_terminal_readback", "验收增长实验终态"),
+            Map.entry("supplier_a_register", "登记候选供应商 A"),
+            Map.entry("supplier_a_submit", "提交供应商 A 准入"),
+            Map.entry("supplier_a_approve", "批准供应商 A 准入"),
+            Map.entry("supplier_b_register", "登记候选供应商 B"),
+            Map.entry("supplier_b_submit", "提交供应商 B 准入"),
+            Map.entry("supplier_b_approve", "批准供应商 B 准入"),
+            Map.entry("rfq_create", "创建采购询价"),
+            Map.entry("quote_a_submit", "收集供应商 A 报价"),
+            Map.entry("quote_b_submit", "收集供应商 B 报价"),
+            Map.entry("sample_a_evaluate", "评估供应商 A 样品"),
+            Map.entry("sample_b_evaluate", "评估供应商 B 样品"),
+            Map.entry("supplier_award", "比较并定标供应商"),
+            Map.entry("sourcing_terminal_readback", "验收寻源定标终态"),
+            Map.entry("purchase_order_create", "创建采购订单"),
+            Map.entry("purchase_order_dispatch", "审批并下发采购订单"),
+            Map.entry("supplier_confirm_order", "供应商确认采购订单"),
+            Map.entry("procurement_terminal_readback", "验收采购订单终态"),
             Map.entry("merchant_activate", "激活商家"),
             Map.entry("shop_activate", "激活店铺"),
             Map.entry("warehouse_define", "创建仓库"),
@@ -132,12 +293,66 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("payment_refund_refunded", "核验退款到账"),
             Map.entry("warehouse", "核验仓库"),
             Map.entry("location", "核验库位"),
-            Map.entry("warehouse_source", "核验 ERP 仓库来源")
+            Map.entry("warehouse_source", "核验 ERP 仓库来源"),
+            Map.entry("inspect_daily_business_control", "回读日经营控制结果"),
+            Map.entry("inspect_weekly_business_review", "回读周经营复盘结果"),
+            Map.entry("inspect_merchant_onboarding", "回读商家入驻终态"),
+            Map.entry("inspect_promotion_campaign", "回读促销活动终态"),
+            Map.entry("inspect_growth_experiment", "回读增长实验终态"),
+            Map.entry("start_order_cancellation", "启动订单取消补偿"),
+            Map.entry("wait_order_cancellation", "等待订单取消补偿终态"),
+            Map.entry("inspect_order_to_cash", "回读订单到回款终态"),
+            Map.entry("inspect_order_cancellation", "回读订单取消终态"),
+            Map.entry("inspect_fulfillment_exception", "回读履约异常终态"),
+            Map.entry("inspect_return_refund", "回读退货退款终态"),
+            Map.entry("inspect_customer_resolution", "回读客户问题解决终态"),
+            Map.entry("inspect_quality_recall", "回读质量召回终态"),
+            Map.entry("inspect_risk_dispute", "回读风险争议终态"),
+            Map.entry("inspect_payment_reconciliation", "回读支付对账终态"),
+            Map.entry("inspect_supplier_confirmation", "回读供应商采购确认"),
+            Map.entry("inspect_supplier_sourcing_decision", "回读供应商寻源定标终态"),
+            Map.entry("inspect_finance_close", "回读财务关账终态"),
+            Map.entry("inspect_allocation_transfer", "回读库存调拨终态"),
+            Map.entry("inspect_warehouse_inbound", "回读仓库入库终态")
+            ,Map.entry("create_wms_merchant", "创建每日仓储商家")
+            ,Map.entry("create_source_warehouse", "创建收货源仓")
+            ,Map.entry("create_target_warehouse", "创建调拨目标仓")
+            ,Map.entry("create_item_category", "创建仓储商品分类")
+            ,Map.entry("create_item", "创建每日仓储商品")
+            ,Map.entry("resolve_sku", "解析仓储 SKU")
+            ,Map.entry("create_receipt", "创建采购收货单")
+            ,Map.entry("complete_receipt", "完成采购收货")
+            ,Map.entry("verify_receipt", "核验收货单终态")
+            ,Map.entry("create_movement", "创建仓间调拨单")
+            ,Map.entry("complete_movement", "完成仓间调拨")
+            ,Map.entry("verify_movement", "核验调拨终态")
+            ,Map.entry("create_shipment", "创建销售出库单")
+            ,Map.entry("complete_shipment", "完成销售出库")
+            ,Map.entry("verify_shipment", "核验出库终态")
+            ,Map.entry("create_inventory_check", "创建库存盘点单")
+            ,Map.entry("complete_inventory_check", "完成库存盘点")
+            ,Map.entry("verify_inventory_check", "核验盘点终态")
+            ,Map.entry("verify_final_source_inventory", "核验源仓最终库存")
+            ,Map.entry("verify_final_target_inventory", "核验目标仓最终库存")
+            ,Map.entry("submit_supplier_sourcing", "发起补货供应商寻源")
+            ,Map.entry("wait_supplier_sourcing", "等待供应商定标完成")
+            ,Map.entry("submit_purchase_order", "发起补货采购订单")
+            ,Map.entry("wait_purchase_order", "等待采购订单确认")
+            ,Map.entry("submit_physical_warehouse_cycle", "发起补货仓储作业")
+            ,Map.entry("wait_physical_warehouse_cycle", "等待仓储收发调盘闭环")
+            ,Map.entry("ticket_receive_message", "接收用户咨询消息")
+            ,Map.entry("ticket_assign_agent", "分派客服坐席")
+            ,Map.entry("ticket_start_processing", "开始处理咨询")
+            ,Map.entry("ticket_collect_feedback", "收集用户满意度反馈")
+            ,Map.entry("ticket_terminal_readback", "核验客服工单已关闭")
     );
 
     private final ObjectMapper objectMapper;
 
     public ManagedSkillTaskBusinessOutcomeView present(Task task, List<Step> steps) {
+        if ("skill.cloudmold.commerce.order-cancellation-operational.v1".equals(task.getSkillId())) {
+            return orderCancellationOperational(task, steps);
+        }
         if (!"SUCCEEDED".equals(task.getStatus())) {
             return nonSuccess(task, steps);
         }
@@ -219,6 +434,13 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
         if (step.getStepCode().startsWith("wait_") && text(result, "childTaskId") != null) {
             return "子流程已完成";
         }
+        if (text(result, "workflowType") != null && text(result, "summary") != null) {
+            return text(result, "summary");
+        }
+        if (text(result, "sagaId") != null) {
+            return "取消补偿 Saga " + text(result, "sagaId") + "："
+                    + valueOr(statusLabel(valueOr(text(result, "activeStep"), text(result, "status"))), "已受理");
+        }
         String skuCode = firstText(json(step.getRequestJson()), "skuCode");
         if (step.getStepCode().startsWith("define_")) {
             return Boolean.TRUE.equals(bool(result, "created"))
@@ -298,6 +520,9 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
         addObject(objects, seen, "AFTERSALE", "售后单",
                 text(result, "afterSaleId"), text(result, "afterSaleNo"),
                 valueOr(text(result, "caseStatus"), text(result, "status")));
+        addObject(objects, seen, "CANCELLATION_SAGA", "取消补偿 Saga",
+                text(result, "sagaId"), text(result, "sagaId"),
+                text(result, "status"));
         addObject(objects, seen, "MERCHANT", "商家",
                 text(result, "merchantId"), text(result, "merchantCode"),
                 text(result, "merchantStatus"));
@@ -315,6 +540,7 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                 text(result, "canonicalSkuId"),
                 valueOr(text(result, "skuCode"), firstText(request, "skuCode")),
                 text(result, "catalogStatus"));
+        appendWorkflowArtifacts(objects, seen, result.path("artifacts"));
         return objects;
     }
 
@@ -451,6 +677,53 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                 task);
     }
 
+    private ManagedSkillTaskBusinessOutcomeView orderCancellationOperational(Task task, List<Step> steps) {
+        JsonNode start = result(steps, "start_order_cancellation");
+        JsonNode wait = result(steps, "wait_order_cancellation");
+        boolean paidUnshipped = "PAID_UNSHIPPED".equals(text(start, "cancellationMode"));
+        String orderCode = valueOr(text(start, "orderNo"), text(start, "orderId"));
+        String headline = switch (task.getStatus()) {
+            case "SUCCEEDED" -> "订单 " + valueOr(orderCode, "目标订单") + " 已完成取消补偿闭环";
+            case "NEEDS_REVIEW" -> "订单 " + valueOr(orderCode, "目标订单") + " 进入取消补偿人工复核";
+            default -> "订单 " + valueOr(orderCode, "目标订单") + " 正在执行取消补偿";
+        };
+        String summary = valueOr(text(wait, "summary"),
+                valueOr(text(start, "reason"), "订单取消补偿已提交并由规范域持续回读。"));
+        if ("NEEDS_REVIEW".equals(task.getStatus())) {
+            String blocker = firstArrayText(wait.path("blockers"));
+            if (blocker != null) {
+                summary = summary + " 阻塞项：" + blocker + "。";
+            }
+        }
+        if (paidUnshipped) {
+            summary = summary + " 当前自动闭环仅覆盖规范域与 INTERNAL_TEST 支付退款；真实 PSP 退款回执仍需外部权威。";
+        }
+        List<ManagedSkillTaskOutcomeMetricView> metrics = new ArrayList<>();
+        metrics.add(metric("取消模式", paidUnshipped ? "已支付未发货" : "未支付已预占"));
+        metrics.add(metric("业务状态", statusLabel(valueOr(text(wait, "status"), task.getStatus()))));
+        metrics.add(metric("当前阶段", valueOr(text(wait, "phase"), valueOr(text(start, "activeStep"), "-"))));
+        if (start.hasNonNull("expectedReservationCount")) {
+            metrics.add(metric("预占释放",
+                    start.path("releasedReservationCount").asText("0")
+                            + "/" + start.path("expectedReservationCount").asText("0")));
+        }
+        if (start.hasNonNull("expectedFulfillmentCount")
+                && start.path("expectedFulfillmentCount").asInt(0) > 0) {
+            metrics.add(metric("履约关闭",
+                    start.path("cancelledFulfillmentCount").asText("0")
+                            + "/" + start.path("expectedFulfillmentCount").asText("0")));
+        }
+        if (StringUtils.hasText(text(start, "paymentStatus"))) {
+            metrics.add(metric("支付状态", statusLabel(text(start, "paymentStatus"))));
+        }
+        return outcome("ORDER_CANCELLATION",
+                headline,
+                summary,
+                metrics,
+                orderCancellationObjects(start, wait),
+                task);
+    }
+
     private ManagedSkillTaskBusinessOutcomeView projection(Task task, List<Step> steps) {
         int skuCount = countPrefix(steps, "plan_");
         int projectionCount = steps.stream().filter(step -> step.getStepCode().startsWith("plan_"))
@@ -542,6 +815,7 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             case "RUNNING" -> name + "正在执行";
             case "WAITING_APPROVAL" -> name + "等待审批";
             case "FAILED" -> name + "未完成";
+            case "NEEDS_REVIEW" -> name + "需人工复核";
             default -> name + "：" + statusLabel(task.getStatus());
         };
         return outcome("EXECUTION_STATUS", headline,
@@ -601,6 +875,19 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                 id, code, status));
     }
 
+    private static void appendWorkflowArtifacts(List<ManagedSkillTaskOutcomeObjectView> objects, Set<String> seen,
+                                                JsonNode artifacts) {
+        if (artifacts == null || !artifacts.isArray()) {
+            return;
+        }
+        artifacts.forEach(artifact -> addObject(objects, seen,
+                text(artifact, "type"),
+                valueOr(text(artifact, "label"), objectTypeLabel(text(artifact, "type"))),
+                text(artifact, "id"),
+                null,
+                text(artifact, "status")));
+    }
+
     private JsonNode result(List<Step> steps, String stepCode) {
         return steps.stream().filter(step -> stepCode.equals(step.getStepCode()))
                 .findFirst().map(this::resultNode).orElse(objectMapper.missingNode());
@@ -641,6 +928,14 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
         return text(node, field);
     }
 
+    private static String firstArrayText(JsonNode node) {
+        if (node != null && node.isArray() && !node.isEmpty()) {
+            String value = node.get(0).asText();
+            return StringUtils.hasText(value) ? value : null;
+        }
+        return null;
+    }
+
     private static Boolean bool(JsonNode node, String field) {
         return node != null && node.has(field) ? node.path(field).asBoolean() : null;
     }
@@ -665,6 +960,25 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
 
     private static int succeededCount(List<Step> steps) {
         return (int) steps.stream().filter(step -> "SUCCEEDED".equals(step.getStatus())).count();
+    }
+
+    private static List<ManagedSkillTaskOutcomeObjectView> orderCancellationObjects(JsonNode start, JsonNode wait) {
+        List<ManagedSkillTaskOutcomeObjectView> objects = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        addObject(objects, seen, "CANCELLATION_SAGA", "取消补偿 Saga",
+                text(start, "sagaId"), text(start, "sagaId"),
+                valueOr(text(wait, "status"), text(start, "status")));
+        addObject(objects, seen, "ORDER", "订单",
+                text(start, "orderId"), text(start, "orderNo"),
+                valueOr(text(wait, "status"), text(start, "orderStatusAtRequest")));
+        addObject(objects, seen, "PAYMENT", "支付单",
+                text(start, "paymentId"), text(start, "paymentId"),
+                text(start, "paymentStatus"));
+        addObject(objects, seen, "FULFILLMENT", "履约单",
+                text(start, "fulfillmentId"), text(start, "fulfillmentId"),
+                text(start, "fulfillmentStatus"));
+        appendWorkflowArtifacts(objects, seen, wait.path("artifacts"));
+        return objects;
     }
 
     private static String numericSuffix(String value) {
@@ -692,6 +1006,11 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             case "COLOR" -> "颜色";
             case "SIZE" -> "尺码";
             case "SIZE_GROUP" -> "尺码组";
+            case "ORDER" -> "订单";
+            case "PAYMENT" -> "支付单";
+            case "FULFILLMENT" -> "履约单";
+            case "AFTERSALE" -> "售后单";
+            case "CANCELLATION_SAGA" -> "取消补偿 Saga";
             default -> type;
         };
     }
@@ -708,10 +1027,17 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             case "COMPLETED", "RESOLVED", "CLOSED" -> "已完成";
             case "DELIVERED" -> "已签收";
             case "REFUNDED" -> "已退款";
+            case "CAPTURED" -> "已扣款";
+            case "CANCELLED" -> "已取消";
+            case "REQUESTED" -> "已受理";
+            case "RETRY_SCHEDULED" -> "等待重试";
+            case "CANCELLATION_PENDING" -> "取消处理中";
             case "APPROVED", "ACCEPTED" -> "已通过";
             case "READY" -> "已就绪";
             case "RUNNING" -> "运行中";
+            case "WAITING" -> "等待中";
             case "WAITING_APPROVAL" -> "等待审批";
+            case "NEEDS_REVIEW", "MANUAL_REVIEW" -> "需人工复核";
             case "FAILED" -> "失败";
             default -> status;
         };

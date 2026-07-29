@@ -27,6 +27,7 @@ public class SupplyPlanningCommand {
     private PlanScenarioDefinition planScenario;
     private ScenarioRecommendationDefinition scenarioRecommendation;
     private ReplenishmentDefinition replenishment;
+    private ReplenishmentExecutionProposalDefinition replenishmentExecutionProposal;
     private ReplenishmentConversionDefinition replenishmentConversion;
     private InventoryIssueDefinition inventoryIssue;
     private InventoryHealthScanDefinition inventoryHealthScan;
@@ -180,6 +181,30 @@ public class SupplyPlanningCommand {
         private Long targetWarehouseId;
         private Long wmsSkuId;
         private String convertedByPrincipalId;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ReplenishmentExecutionProposalDefinition {
+        private String proposalId;
+        private String recommendationId;
+        private Long expectedRecommendationVersion;
+        private String targetType;
+        private String mappingEvidenceSha256;
+        private Long supplierId;
+        private Long accountId;
+        private Long erpProductId;
+        private Long erpProductUnitId;
+        private Long unitCostMinor;
+        private BigDecimal taxPercent;
+        private Long sourceWarehouseId;
+        private Long targetWarehouseId;
+        private Long wmsSkuId;
+        private String proposedByPrincipalId;
+        private String policyCode;
+        private String policySha256;
     }
 
     @Data

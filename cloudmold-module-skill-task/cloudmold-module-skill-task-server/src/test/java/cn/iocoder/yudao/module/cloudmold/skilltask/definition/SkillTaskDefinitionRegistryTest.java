@@ -160,13 +160,57 @@ class SkillTaskDefinitionRegistryTest {
 
         SkillTaskDefinition definition = workspaceRegistry.require(
                 "skill.cloudmold.commerce.full-chain-hsf.v1", "1.2.1");
+        SkillTaskDefinition cancellation = workspaceRegistry.require(
+                "skill.cloudmold.commerce.order-cancellation-operational.v1", "1.0.0");
         assertThat(definition.getRiskLevel()).isEqualTo("R3");
         assertThat(definition.getSteps()).hasSize(10);
+        assertThat(cancellation.getRiskLevel()).isEqualTo("R3");
+        assertThat(cancellation.getSteps()).extracting(SkillTaskDefinition.Step::getStepKind)
+                .containsExactly("CAPABILITY", "WAIT_CAPABILITY");
+        SkillTaskDefinition financeClose = workspaceRegistry.require(
+                "skill.cloudmold.finance.close-readiness.v1", "1.0.0");
+        assertThat(financeClose.getSteps()).singleElement().satisfies(step -> {
+            assertThat(step.getCapabilityId())
+                    .isEqualTo("capability.cloudmold.finance.finance-close-query.require-period.v1");
+            assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("CLOSED");
+        });
         assertThat(workspaceRegistry.all()).extracting(SkillTaskDefinition::getSkillId)
                 .contains("skill.cloudmold.commerce.catalog-matrix.v1",
+                        "skill.cloudmold.commerce.order-cancellation-operational.v1",
                         "skill.cloudmold.commerce.product-to-listing.v1",
                         "skill.cloudmold.commerce.aftersale-saga.v1",
                         "skill.cloudmold.commerce.terminal-readback.v1");
+        List<String> readbackSkillIds = List.of(
+                "skill.cloudmold.operations.daily-business-control.v1",
+                "skill.cloudmold.operations.weekly-business-review.v1",
+                "skill.cloudmold.merchant.onboarding-readback.v1",
+                "skill.cloudmold.engagement.promotion-campaign-readback.v1",
+                "skill.cloudmold.engagement.growth-experiment-readback.v1",
+                "skill.cloudmold.commerce.order-to-cash-readback.v1",
+                "skill.cloudmold.commerce.order-cancellation-readback.v1",
+                "skill.cloudmold.commerce.fulfillment-exception-readback.v1",
+                "skill.cloudmold.commerce.return-refund-readback.v1",
+                "skill.cloudmold.customer-service.resolution-readback.v1",
+                "skill.cloudmold.quality.recall-readback.v1",
+                "skill.cloudmold.risk.dispute-readback.v1",
+                "skill.cloudmold.payment.reconciliation-readback.v1",
+                "skill.cloudmold.procurement.supplier-confirmation-readback.v1",
+                "skill.cloudmold.supplier.sourcing-decision-readback.v1",
+                "skill.cloudmold.finance.close-readiness.v1",
+                "skill.cloudmold.listing.lifecycle-readback.v1",
+                "skill.cloudmold.warehouse.allocation-transfer-readback.v1",
+                "skill.cloudmold.warehouse.inbound-readback.v1");
+        assertThat(workspaceRegistry.all())
+                .filteredOn(candidate -> readbackSkillIds.contains(candidate.getSkillId()))
+                .hasSize(19)
+                .allSatisfy(readback -> {
+                    assertThat(readback.getRiskLevel()).isEqualTo("R1");
+                    assertThat(readback.getSteps()).singleElement().satisfies(step -> {
+                        assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
+                        assertThat(step.getOperationType()).isEqualTo("READ");
+                        assertThat(step.getWaitSuccess()).isNotNull();
+                    });
+                });
     }
 
     private static Path findWorkspaceSkillRoot() {

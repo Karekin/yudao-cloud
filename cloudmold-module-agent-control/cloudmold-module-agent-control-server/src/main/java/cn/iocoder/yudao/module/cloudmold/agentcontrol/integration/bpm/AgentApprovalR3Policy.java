@@ -17,15 +17,26 @@ final class AgentApprovalR3Policy {
 
     static List<String> requiredRoleCodes(String actionCode) {
         String action = actionCode == null ? "" : actionCode.trim().toLowerCase(Locale.ROOT);
+        if (action.equals("commerce.autonomous-day")
+                || action.equals("commerce.full-chain")
+                || action.equals("consumer.journey")) {
+            return List.of("customer-service", "finance");
+        }
         if (startsWithAny(action, "buyer.", "purchase.", "procurement.", "replenishment.",
-                "supply-planning.")) {
+                "supply-planning.", "supplier.")) {
             return List.of("buyer", "finance");
         }
+        if (startsWithAny(action, "warehouse.", "wms.")) {
+            return List.of("inventory-control", "operations-control");
+        }
+        if (startsWithAny(action, "mission.stockout", "inventory.stockout")) {
+            return List.of("risk", "finance");
+        }
         if (startsWithAny(action, "catalog.", "product.", "listing.", "pricing.", "merchandising.")) {
-            return List.of("merchandising", "risk");
+            return List.of("risk", "finance");
         }
         if (startsWithAny(action, "merchant.", "merchant-operations.", "seller.", "shop.")) {
-            return List.of("merchant-operations", "risk", "legal");
+            return List.of("risk", "legal");
         }
         if (startsWithAny(action, "customer-service.", "after-sale.", "aftersale.", "refund.",
                 "compensation.", "payment.refund", "trade.refund")) {

@@ -3,11 +3,12 @@ package cn.iocoder.yudao.module.cloudmold.merchant.api.deposit;
 import lombok.Data;
 import lombok.experimental.Accessors;
 
+import java.io.Serializable;
 import java.time.Instant;
 
 @Data
 @Accessors(chain = true)
-public class MerchantDepositCommand {
+public class MerchantDepositCommand implements Serializable {
     private MerchantDepositOperation operation;
     private String idempotencyKey;
     private String runId;

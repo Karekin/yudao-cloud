@@ -12,6 +12,7 @@ import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
 
 import java.time.*;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.*;
@@ -29,11 +30,18 @@ class PromotionServiceImplTest {
     private final AdvertisingInteractionMapper interactionMapper = mock(AdvertisingInteractionMapper.class);
     private final AdvertisingLedgerEntryMapper advertisingLedgerEntryMapper = mock(AdvertisingLedgerEntryMapper.class);
     private final PromotionExperimentResultMapper promotionExperimentResultMapper = mock(PromotionExperimentResultMapper.class);
+    private final GrowthExperimentMapper growthExperimentMapper = mock(GrowthExperimentMapper.class);
+    private final GrowthExperimentVariantMapper growthExperimentVariantMapper = mock(GrowthExperimentVariantMapper.class);
+    private final GrowthExperimentExposureMapper growthExperimentExposureMapper = mock(GrowthExperimentExposureMapper.class);
+    private final GrowthExperimentMetricSnapshotMapper growthExperimentMetricSnapshotMapper =
+            mock(GrowthExperimentMetricSnapshotMapper.class);
     private final OrderQueryApi orderQueryApi = mock(OrderQueryApi.class);
     private final OutboxAppender outboxAppender = mock(OutboxAppender.class);
     private final PromotionServiceImpl service = new PromotionServiceImpl(operationMapper, campaignMapper,
             templateMapper, entitlementMapper, ledgerMapper, placementMapper, interactionMapper,
-            advertisingLedgerEntryMapper, promotionExperimentResultMapper, orderQueryApi, outboxAppender);
+            advertisingLedgerEntryMapper, promotionExperimentResultMapper, growthExperimentMapper,
+            growthExperimentVariantMapper, growthExperimentExposureMapper,
+            growthExperimentMetricSnapshotMapper, orderQueryApi, outboxAppender);
 
     @BeforeEach
     void setUp() {
@@ -325,6 +333,74 @@ class PromotionServiceImplTest {
                 .hasMessage("campaign is not editable");
         verify(campaignMapper, never()).updateFieldsCas(anyLong(), anyString(), anyLong(), anyString(),
                 anyString(), any(LocalDateTime.class), any(LocalDateTime.class), any(LocalDateTime.class));
+        verifyNoInteractions(outboxAppender);
+    }
+
+    @Test
+    void createsAuditableGrowthExperimentWithFixedAllocation() {
+        prepareNewOperation(PromotionOperation.CREATE_GROWTH_EXPERIMENT);
+        when(campaignMapper.selectForUpdate(7L, "campaign-1")).thenReturn(new PromotionCampaignDO()
+                .setCampaignId("campaign-1").setStatus("ACTIVE"));
+
+        PromotionCommand command = envelope(PromotionOperation.CREATE_GROWTH_EXPERIMENT)
+                .growthExperiment(PromotionCommand.GrowthExperimentDefinition.builder()
+                        .experimentId("experiment-1").experimentCode("EXP-1").campaignId("campaign-1")
+                        .name("结算页推荐实验").hypothesis("新推荐策略提高支付转化")
+                        .primaryMetricCode("PAYMENT_CONVERSION")
+                        .minimumSampleSizePerVariant(30)
+                        .startsAt(Instant.parse("2026-07-17T00:00:00Z"))
+                        .endsAt(Instant.parse("2026-07-19T00:00:00Z"))
+                        .variants(List.of(
+                                PromotionCommand.GrowthExperimentVariantDefinition.builder()
+                                        .variantCode("CONTROL").variantKind("CONTROL")
+                                        .allocationBasisPoints(5000).build(),
+                                PromotionCommand.GrowthExperimentVariantDefinition.builder()
+                                        .variantCode("TREATMENT").variantKind("TREATMENT")
+                                        .allocationBasisPoints(5000).build()))
+                        .build()).build();
+
+        PromotionCommandResult result = service.execute(command);
+
+        assertThat(result.getAggregateType()).isEqualTo("promotion_growth_experiment");
+        assertThat(result.getStatus()).isEqualTo("DRAFT");
+        verify(growthExperimentMapper).insert(argThat((GrowthExperimentDO row) ->
+                row.getExperimentId().equals("experiment-1")
+                        && row.getMinimumSampleSizePerVariant().equals(30)
+                        && row.getPrimaryMetricCode().equals("PAYMENT_CONVERSION")));
+        verify(growthExperimentVariantMapper, times(2)).insert(any(GrowthExperimentVariantDO.class));
+        verify(outboxAppender).append(argThat(event ->
+                event.getEventType().equals("promotion.growth_experiment.created")
+                        && event.getPayload().get("experiment_id").equals("experiment-1")));
+    }
+
+    @Test
+    void rejectsGrowthExperimentConclusionBelowMinimumSample() {
+        prepareNewOperation(PromotionOperation.CONCLUDE_GROWTH_EXPERIMENT);
+        when(growthExperimentMapper.selectForUpdate(7L, "experiment-1")).thenReturn(new GrowthExperimentDO()
+                .setExperimentId("experiment-1").setStatus("RUNNING").setVersion(2L)
+                .setEndsAt(LocalDateTime.parse("2026-07-15T00:00:00"))
+                .setPrimaryMetricCode("PAYMENT_CONVERSION").setMinimumSampleSizePerVariant(30));
+        when(growthExperimentVariantMapper.selectByExperiment(7L, "experiment-1")).thenReturn(List.of(
+                new GrowthExperimentVariantDO().setVariantCode("CONTROL"),
+                new GrowthExperimentVariantDO().setVariantCode("TREATMENT")));
+        when(growthExperimentMetricSnapshotMapper.selectLatestByVariant(
+                7L, "experiment-1", "PAYMENT_CONVERSION")).thenReturn(List.of(
+                new GrowthExperimentMetricSnapshotDO().setVariantCode("CONTROL").setSampleCount(20)
+                        .setDataFreshUntil(LocalDateTime.parse("2026-07-17T00:00:00")),
+                new GrowthExperimentMetricSnapshotDO().setVariantCode("TREATMENT").setSampleCount(20)
+                        .setDataFreshUntil(LocalDateTime.parse("2026-07-17T00:00:00"))));
+
+        PromotionCommand command = envelope(PromotionOperation.CONCLUDE_GROWTH_EXPERIMENT)
+                .growthExperimentConclusion(PromotionCommand.GrowthExperimentConclusionDefinition.builder()
+                        .experimentId("experiment-1").expectedVersion(2L).decision("TREATMENT")
+                        .confidenceBasisPoints(9700).guardrailStatus("PASSED")
+                        .evidenceRef("evidence://experiment/EXP-1/conclusion")
+                        .reason("治疗组通过预设门槛").build()).build();
+
+        assertThatThrownBy(() -> service.execute(command)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("minimum sample size not reached");
+        verify(growthExperimentMapper, never()).concludeCas(anyLong(), anyString(), anyLong(), anyString(),
+                anyInt(), anyString(), anyString(), anyString(), any(LocalDateTime.class));
         verifyNoInteractions(outboxAppender);
     }
 

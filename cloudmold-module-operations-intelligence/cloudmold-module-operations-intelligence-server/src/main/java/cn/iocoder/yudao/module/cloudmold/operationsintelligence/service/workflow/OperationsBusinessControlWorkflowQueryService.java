@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.cloudmold.operationsintelligence.service.workflow;
 
+import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.workflow.BusinessControlWorkflowResult;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.workflow.BusinessControlWorkflowResult.*;
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.workflow.DailyBusinessControlQueryPort;
@@ -7,7 +8,8 @@ import cn.iocoder.yudao.module.cloudmold.operationsintelligence.api.workflow.Wee
 import cn.iocoder.yudao.module.cloudmold.operationsintelligence.config.OperationsIntelligenceAnalyticsProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -18,20 +20,62 @@ import java.time.OffsetDateTime;
 import java.util.*;
 
 @Service
-@RequiredArgsConstructor
 public class OperationsBusinessControlWorkflowQueryService
         implements DailyBusinessControlQueryPort, WeeklyBusinessReviewQueryPort {
 
     private static final String DAILY = "DailyBusinessControlWorkflow";
     private static final String WEEKLY = "WeeklyBusinessReviewWorkflow";
+    private static final List<String> DAILY_METRICS = List.of(
+            "finance.net_revenue_yuan",
+            "commerce.order_count",
+            "commerce.reconciled_rate",
+            "inventory.low_stock_balance_count",
+            "inventory.stockout_rate",
+            "service.resolution_sla_rate");
+    private static final List<String> WEEKLY_METRICS = List.of(
+            "finance.contribution_margin_rate",
+            "commerce.reconciled_rate",
+            "inventory.turnover_days",
+            "inventory.sell_through_rate_30d",
+            "procurement.otif_rate",
+            "service.first_contact_resolution_rate",
+            "service.resolution_sla_rate");
 
     private final OperationsIntelligenceAnalyticsProperties properties;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final OperationsKpiSnapshotSource liveSnapshotSource;
+
+    @Autowired
+    public OperationsBusinessControlWorkflowQueryService(
+            OperationsIntelligenceAnalyticsProperties properties,
+            ObjectMapper objectMapper,
+            ObjectProvider<Clock> clockProvider,
+            OperationsKpiSnapshotSource liveSnapshotSource) {
+        this(properties, objectMapper, clockProvider.getIfAvailable(Clock::systemUTC), liveSnapshotSource);
+    }
+
+    OperationsBusinessControlWorkflowQueryService(
+            OperationsIntelligenceAnalyticsProperties properties,
+            ObjectMapper objectMapper,
+            Clock clock) {
+        this(properties, objectMapper, clock, null);
+    }
+
+    OperationsBusinessControlWorkflowQueryService(
+            OperationsIntelligenceAnalyticsProperties properties,
+            ObjectMapper objectMapper,
+            Clock clock,
+            OperationsKpiSnapshotSource liveSnapshotSource) {
+        this.properties = properties;
+        this.objectMapper = objectMapper;
+        this.clock = clock;
+        this.liveSnapshotSource = liveSnapshotSource;
+    }
 
     @Override
     public BusinessControlWorkflowResult inspectDaily() {
-        SnapshotContext snapshot = loadSnapshot();
+        SnapshotContext snapshot = loadSnapshot(DAILY_METRICS);
         if (snapshot.error != null) {
             return missingData(DAILY, "daily-business-control", "WAITING_KPI_SNAPSHOT",
                     "尚未接入权威 KPI 快照，无法生成每日经营总控结果。", List.of(snapshot.error));
@@ -63,6 +107,7 @@ public class OperationsBusinessControlWorkflowQueryService
                 "客服解决 SLA 未达标，存在待办积压或跨岗阻塞。",
                 "清理超时工单，补充责任人并升级跨团队阻塞。"));
         List<String> blockers = new ArrayList<>();
+        blockers.addAll(missingMetricBlockers(readings));
         List<String> nextActions = new ArrayList<>();
         if (isStale(snapshot, Duration.ofHours(36))) {
             blockers.add("KPI_SNAPSHOT_STALE:" + snapshot.generatedAt);
@@ -85,7 +130,7 @@ public class OperationsBusinessControlWorkflowQueryService
 
     @Override
     public BusinessControlWorkflowResult inspectWeekly() {
-        SnapshotContext snapshot = loadSnapshot();
+        SnapshotContext snapshot = loadSnapshot(WEEKLY_METRICS);
         if (snapshot.error != null) {
             return missingData(WEEKLY, "weekly-business-review", "WAITING_KPI_SNAPSHOT",
                     "尚未接入权威 KPI 快照，无法生成周经营复盘。", List.of(snapshot.error));
@@ -130,6 +175,7 @@ public class OperationsBusinessControlWorkflowQueryService
                 "客服 SLA 周达成率偏低，需压缩积压。",
                 "清理积压工单并明确责任人和时限。"));
         List<String> blockers = new ArrayList<>();
+        blockers.addAll(missingMetricBlockers(readings));
         List<String> nextActions = new ArrayList<>();
         if (isStale(snapshot, Duration.ofDays(8))) {
             blockers.add("KPI_SNAPSHOT_STALE:" + snapshot.generatedAt);
@@ -263,18 +309,44 @@ public class OperationsBusinessControlWorkflowQueryService
                 .build();
     }
 
-    private SnapshotContext loadSnapshot() {
+    private SnapshotContext loadSnapshot(Collection<String> metricIds) {
+        if (properties.isLiveQueryEnabled()) {
+            Long tenantId = TenantContextHolder.getTenantId();
+            if (tenantId == null) {
+                return SnapshotContext.error("TENANT_CONTEXT_MISSING");
+            }
+            if (liveSnapshotSource == null) {
+                return SnapshotContext.error("STARROCKS_KPI_SOURCE_UNAVAILABLE");
+            }
+            try {
+                return new SnapshotContext(liveSnapshotSource.load(tenantId, metricIds), loadCatalog(), null);
+            } catch (OperationsKpiSnapshotSource.KpiSnapshotSourceException exception) {
+                return SnapshotContext.error(exception.code());
+            } catch (IOException exception) {
+                return SnapshotContext.error("KPI_CATALOG_UNREADABLE");
+            }
+        }
         if (!Files.isRegularFile(properties.snapshotPath())) {
             return SnapshotContext.error("KPI_SNAPSHOT_NOT_FOUND");
         }
         try {
             JsonNode snapshot = objectMapper.readTree(Files.readString(properties.snapshotPath()));
-            JsonNode catalog = Files.isRegularFile(properties.catalogPath())
-                    ? objectMapper.readTree(Files.readString(properties.catalogPath())) : null;
-            return new SnapshotContext(snapshot, catalog, null);
+            return new SnapshotContext(snapshot, loadCatalog(), null);
         } catch (IOException ex) {
             return SnapshotContext.error("KPI_SNAPSHOT_UNREADABLE");
         }
+    }
+
+    private JsonNode loadCatalog() throws IOException {
+        return Files.isRegularFile(properties.catalogPath())
+                ? objectMapper.readTree(Files.readString(properties.catalogPath())) : null;
+    }
+
+    private static List<String> missingMetricBlockers(List<KpiReading> readings) {
+        return readings.stream()
+                .filter(reading -> "MISSING".equals(reading.getStatus()))
+                .map(reading -> "KPI_METRIC_MISSING:" + reading.getMetricId())
+                .toList();
     }
 
     private boolean isStale(SnapshotContext snapshot, Duration threshold) {

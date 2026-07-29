@@ -5,11 +5,13 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
+
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class QualityResult {
+public class QualityResult implements Serializable {
     private Long operationId;
     private boolean duplicate;
     private String aggregateType;

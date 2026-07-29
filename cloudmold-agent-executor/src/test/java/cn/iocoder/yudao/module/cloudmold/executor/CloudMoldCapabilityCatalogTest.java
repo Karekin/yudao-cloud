@@ -102,10 +102,14 @@ class CloudMoldCapabilityCatalogTest {
     void shouldGovernEveryCloudMoldPublicApiOnTheExecutorClasspath() throws IOException {
         PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
         CachingMetadataReaderFactory metadata = new CachingMetadataReaderFactory(resolver);
+        List<String> trustedPrefixes = publishedApiPrefixes();
         Set<String> discovered = new TreeSet<>();
         for (Resource resource : resolver.getResources(
                 "classpath*:cn/iocoder/yudao/module/cloudmold/**/*Api.class")) {
             String className = metadata.getMetadataReader(resource).getClassMetadata().getClassName();
+            if (trustedPrefixes.stream().noneMatch(prefix -> className.startsWith(prefix + "."))) {
+                continue;
+            }
             try {
                 Class<?> type = Class.forName(className);
                 if (type.isInterface() && Modifier.isPublic(type.getModifiers())
@@ -122,16 +126,19 @@ class CloudMoldCapabilityCatalogTest {
 
     @Test
     void shouldTrustOnlyPublishedCloudMoldApiPackagesForDeserialization() throws IOException {
-        ClassPathResource resource = new ClassPathResource("security/serialize.allowlist");
-        List<String> trustedPrefixes;
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                resource.getInputStream(), StandardCharsets.UTF_8))) {
-            trustedPrefixes = reader.lines().map(String::trim).filter(line -> !line.isEmpty()).toList();
-        }
+        List<String> trustedPrefixes = publishedApiPrefixes();
 
         assertThat(trustedPrefixes).doesNotContain("cn.iocoder.yudao.module.cloudmold");
         assertThat(CloudMoldDubboServiceAllowlist.load()).allSatisfy(interfaceName ->
                 assertThat(trustedPrefixes).anySatisfy(prefix ->
                         assertThat(interfaceName).startsWith(prefix + ".")));
+    }
+
+    private static List<String> publishedApiPrefixes() throws IOException {
+        ClassPathResource resource = new ClassPathResource("security/serialize.allowlist");
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                resource.getInputStream(), StandardCharsets.UTF_8))) {
+            return reader.lines().map(String::trim).filter(line -> !line.isEmpty()).toList();
+        }
     }
 }

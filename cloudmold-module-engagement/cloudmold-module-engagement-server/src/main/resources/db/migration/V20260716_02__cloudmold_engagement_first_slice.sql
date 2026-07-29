@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS cloudmold_engagement_community_content (
     author_principal_id CHAR(36) NOT NULL,
     content_type VARCHAR(16) NOT NULL,
     body_ref VARCHAR(512) NOT NULL,
-    status VARCHAR(16) NOT NULL,
+    status VARCHAR(32) NOT NULL,
     version BIGINT NOT NULL,
     source_system VARCHAR(64) NULL,
     source_type VARCHAR(64) NULL,

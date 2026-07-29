@@ -5,20 +5,21 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
 import java.util.List;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class QualityRecallWorkflowResult {
+public class QualityRecallWorkflowResult implements Serializable {
     public enum Status { PREPARE, WAITING, RUNNING, SUCCEEDED, FAILED }
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class Artifact {
+    public static class Artifact implements Serializable {
         private String type;
         private String id;
         private String status;

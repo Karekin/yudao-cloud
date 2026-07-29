@@ -418,7 +418,7 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
         payload.put("failure_message", command.getFailureMessage());
         payload.put("retryable", command.getRetryable());
         String eventType = command.getOutcome() == ListingChannelPublishReceiptOutcome.CONFIRMED_PUBLISHED
-                ? "listing.channel-publish.confirmed" : "listing.channel-publish.failed";
+                ? "listing.channel_publish.confirmed" : "listing.channel_publish.failed";
         outboxAppender.append(AppendDomainEventCommand.builder().eventType(eventType).schemaVersion(1)
                 .sourceSystem("cloudmold-listing").tenantId(tenantId).aggregateType("listing")
                 .aggregateId(header.getListingId()).aggregateVersion(header.getVersion()).eventSequence((short) 3)

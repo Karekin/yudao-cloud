@@ -97,6 +97,17 @@ public class SkillTaskDefinitionRegistry {
             definition.setSkillVersion(requireText(definition.getSkillVersion(), "skill_version", 64));
             String riskLevel = normalizeRisk(definition.getRiskLevel());
             definition.setRiskLevel(riskLevel);
+            String workflowLevel = definition.getWorkflowLevel() == null
+                    ? "BUSINESS_ROLE"
+                    : definition.getWorkflowLevel().trim().toUpperCase(Locale.ROOT);
+            if (!Set.of("BUSINESS_ROLE", "INTERNAL_SUBFLOW").contains(workflowLevel)) {
+                throw new IllegalArgumentException("workflow_level must be BUSINESS_ROLE or INTERNAL_SUBFLOW: "
+                        + definition.getSkillId());
+            }
+            definition.setWorkflowLevel(workflowLevel);
+            if (definition.getOwnerRole() != null) {
+                definition.setOwnerRole(requireText(definition.getOwnerRole(), "owner_role", 64));
+            }
             int maxAttempts = definition.getMaxAttempts() == null
                     ? properties.getDefaultMaxAttempts() : definition.getMaxAttempts();
             if (maxAttempts <= 0 || maxAttempts > 20) {

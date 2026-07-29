@@ -18,6 +18,11 @@ public class AiOperationsTemporalSeedProperties {
     private boolean enabled = false;
 
     /**
+     * 全量托管定义对账周期；启动时也会立即执行一次。
+     */
+    private long reconcileIntervalMs = 600_000L;
+
+    /**
      * 需要补齐/创建定时流的租户列表。
      */
     private List<String> tenantIdsRaw = new ArrayList<>();
@@ -31,6 +36,11 @@ public class AiOperationsTemporalSeedProperties {
      * 系统用户类型。
      */
     private int operatorUserType = 1;
+
+    /**
+     * 测试环境用于消费者旅程的有效会员用户编号。0 表示不生成消费者场景。
+     */
+    private long syntheticConsumerMemberUserId = 0L;
 
     /**
      * 定时任务 ID（会拼接为 cloudmold-t{tenantId}-{normalizedId}）。
@@ -65,7 +75,7 @@ public class AiOperationsTemporalSeedProperties {
     /**
      * 间隔秒数（默认 3600 秒）。
      */
-    private long intervalSeconds = 3600L;
+    private long intervalSeconds = 86_400L;
 
     /**
      * 时间时区。

@@ -63,7 +63,9 @@ public class AgentApprovalWorkflowTerminalDecisionReconciler implements Applicat
 
     private void decide(ApprovalWorkflowDecisionCandidate candidate) {
         String decision = decision(candidate);
-        if (decision == null || candidate.getTerminalOperatorUserId() == null
+        if (decision == null || candidate.getApproverUserId() == null
+                || candidate.getApproverUserId() <= 0
+                || candidate.getTerminalOperatorUserId() == null
                 || candidate.getTerminalOperatorUserId() <= 0
                 || candidate.getApprovalVersion() == null || candidate.getApprovalVersion() <= 0
                 || candidate.getWorkOrderVersion() == null || candidate.getWorkOrderVersion() <= 0) {
@@ -83,7 +85,7 @@ public class AgentApprovalWorkflowTerminalDecisionReconciler implements Applicat
                         .build())
                 .build();
         try {
-            commands.execute(command, candidate.getTerminalOperatorUserId());
+            commands.execute(command, candidate.getApproverUserId());
             for (AgentApprovalContinuationApi continuation : continuations) {
                 continuation.onApprovalDecision(candidate.getTenantId(), candidate.getWorkOrderId(),
                         candidate.getApprovalId(), decision);

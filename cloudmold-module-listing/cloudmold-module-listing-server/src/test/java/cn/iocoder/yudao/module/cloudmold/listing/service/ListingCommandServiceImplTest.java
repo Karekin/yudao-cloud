@@ -4,6 +4,7 @@ import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.catalog.api.CatalogSkuProjectionApi;
 import cn.iocoder.yudao.module.cloudmold.catalog.api.CatalogSkuProjectionView;
+import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventCommand;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventResult;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
 import cn.iocoder.yudao.module.cloudmold.identity.api.PrincipalValidationApi;
@@ -12,6 +13,7 @@ import cn.iocoder.yudao.module.cloudmold.listing.dal.dataobject.*;
 import cn.iocoder.yudao.module.cloudmold.listing.dal.mysql.*;
 import cn.iocoder.yudao.module.cloudmold.merchant.api.*;
 import org.junit.jupiter.api.*;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.*;
@@ -368,6 +370,9 @@ class ListingCommandServiceImplTest {
         assertThat(readback.getConfirmedAt()).isEqualTo(Instant.parse("2026-07-27T10:01:00Z"));
         assertThat(readback.getEvidenceRef()).isEqualTo("channel-evidence-1");
         assertThat(readback.getEvidenceSource()).isEqualTo("REAL_CHANNEL_RECEIPT");
+        ArgumentCaptor<AppendDomainEventCommand> event = ArgumentCaptor.forClass(AppendDomainEventCommand.class);
+        verify(outboxAppender).append(event.capture());
+        assertThat(event.getValue().getEventType()).isEqualTo("listing.channel_publish.confirmed");
     }
 
     @Test
@@ -388,6 +393,9 @@ class ListingCommandServiceImplTest {
         assertThat(readback.getFailureMessage()).isEqualTo("channel publish callback timed out");
         assertThat(readback.getRetryable()).isTrue();
         assertThat(readback.getEvidenceRef()).isEqualTo("channel-failure-evidence-1");
+        ArgumentCaptor<AppendDomainEventCommand> event = ArgumentCaptor.forClass(AppendDomainEventCommand.class);
+        verify(outboxAppender).append(event.capture());
+        assertThat(event.getValue().getEventType()).isEqualTo("listing.channel_publish.failed");
     }
 
     @Test

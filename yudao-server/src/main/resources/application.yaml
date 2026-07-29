@@ -35,6 +35,7 @@ cloudmold:
       seed:
         enabled: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_ENABLED:false}
         tenant-ids: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_TENANTS:}
+        synthetic-consumer-member-user-id: ${CLOUDMOLD_AI_OPERATIONS_SYNTHETIC_CONSUMER_MEMBER_USER_ID:0}
         operator-user-id: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_OPERATOR_ID:1}
         operator-user-type: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_OPERATOR_TYPE:1}
         schedule-id: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_SEED_SCHEDULE_ID:auto-shelf-hourly}

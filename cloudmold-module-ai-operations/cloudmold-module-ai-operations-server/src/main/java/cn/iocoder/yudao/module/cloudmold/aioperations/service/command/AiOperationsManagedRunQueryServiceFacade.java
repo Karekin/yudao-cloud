@@ -23,6 +23,11 @@ public class AiOperationsManagedRunQueryServiceFacade {
                 skillId, skillVersion);
     }
 
+    public java.util.List<ManagedSkillTaskWorkflowView> listWorkflowsAs(
+            Long operatorUserId, Integer operatorUserType) {
+        return queryService.listManagedWorkflowsAs(operatorUserId, operatorUserType);
+    }
+
     private ManagedSkillTaskWorkflowView requireWorkflow(
             java.util.List<ManagedSkillTaskWorkflowView> workflows,
             String skillId, String skillVersion) {

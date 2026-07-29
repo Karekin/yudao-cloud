@@ -17,6 +17,8 @@ public class ManagedSkillTaskWorkflowView implements Serializable {
     private String skillVersion;
     private String displayName;
     private String description;
+    private String workflowLevel;
+    private String ownerRole;
     private String riskLevel;
     private Integer maxAttempts;
     private Integer stepCount;

@@ -47,22 +47,39 @@ public class WarehouseSourceMappingQueryServiceImpl implements WarehouseSourceMa
     @Override
     public WarehouseNetworkView resolveReadyNetwork(WarehouseSourceReference source, Instant effectiveAt) {
         WarehouseSourceMappingView mapping = resolveActive(source, effectiveAt);
-        requireState("WAREHOUSE".equals(mapping.getCanonicalType())
+        requireState(("WAREHOUSE".equals(mapping.getCanonicalType())
+                        || "LOCATION".equals(mapping.getCanonicalType()))
                         && mapping.getWarehouseId() != null,
-                "source does not resolve to a canonical Warehouse");
+                "source does not resolve to a canonical Warehouse network");
         Long tenantId = TenantContextHolder.getRequiredTenantId();
         WarehouseDO warehouse = warehouseMapper.selectCurrent(tenantId, mapping.getWarehouseId());
         requireState(warehouse != null && "ACTIVE".equals(warehouse.getStatus()),
                 "canonical Warehouse is not ACTIVE");
-        List<WarehouseZoneDO> zones = zoneMapper.selectActiveByWarehouse(tenantId, warehouse.getWarehouseId());
-        List<WarehouseLocationDO> locations = locationMapper.selectActiveByWarehouse(
-                tenantId, warehouse.getWarehouseId());
-        requireState(zones != null && zones.size() == 1,
-                "canonical Warehouse must have exactly one ACTIVE Zone");
-        requireState(locations != null && locations.size() == 1,
-                "canonical Warehouse must have exactly one ACTIVE Location");
-        WarehouseZoneDO zone = zones.get(0);
-        WarehouseLocationDO location = locations.get(0);
+        WarehouseZoneDO zone;
+        WarehouseLocationDO location;
+        if (mapping.getZoneId() != null || mapping.getLocationId() != null) {
+            requireState(mapping.getZoneId() != null && mapping.getLocationId() != null,
+                    "source mapping must select both Zone and Location");
+            zone = zoneMapper.selectCurrent(tenantId, mapping.getZoneId());
+            location = locationMapper.selectCurrent(tenantId, mapping.getLocationId());
+            requireState(zone != null && "ACTIVE".equals(zone.getStatus())
+                            && warehouse.getWarehouseId().equals(zone.getWarehouseId()),
+                    "mapped canonical Zone is not ACTIVE in the resolved Warehouse");
+            requireState(location != null && "ACTIVE".equals(location.getStatus())
+                            && warehouse.getWarehouseId().equals(location.getWarehouseId()),
+                    "mapped canonical Location is not ACTIVE in the resolved Warehouse");
+        } else {
+            List<WarehouseZoneDO> zones =
+                    zoneMapper.selectActiveByWarehouse(tenantId, warehouse.getWarehouseId());
+            List<WarehouseLocationDO> locations = locationMapper.selectActiveByWarehouse(
+                    tenantId, warehouse.getWarehouseId());
+            requireState(zones != null && zones.size() == 1,
+                    "canonical Warehouse must have exactly one ACTIVE Zone");
+            requireState(locations != null && locations.size() == 1,
+                    "canonical Warehouse must have exactly one ACTIVE Location");
+            zone = zones.get(0);
+            location = locations.get(0);
+        }
         requireState(zone.getZoneId().equals(location.getZoneId()),
                 "canonical Location does not belong to the resolved Zone");
         return WarehouseNetworkView.builder().mappingId(mapping.getMappingId())

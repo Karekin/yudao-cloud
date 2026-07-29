@@ -529,15 +529,20 @@ public class QualityServiceImpl implements QualityCommandApi {
         require(Objects.equals(task.getCanonicalSkuId(), lot.getCanonicalSkuId()),
                 "inspection task SKU does not match governed inventory Lot");
         require("ACTIVE".equals(lot.getStatus()), "quality recall requires an active inventory Lot");
+        String inventoryCommandKey = "quality-recall:" + DigestUtil.sha256Hex(id);
+        String inventoryEvidenceRef = "evidence:quality-recall/" + DigestUtil.sha256Hex(id);
+        String traceId = command.getRunId() == null
+                ? command.getCorrelationId() : command.getRunId();
         InventoryLotResult lotRecall = inventoryLotCommandApi.execute(new InventoryLotCommand()
                 .setOperation(InventoryLotOperation.RECALL)
-                .setIdempotencyKey("quality-recall:" + id)
-                .setSourceEventId("quality-recall:" + id)
-                .setRunId(command.getRunId())
+                .setIdempotencyKey(inventoryCommandKey)
+                .setRunId(traceId)
                 .setLotId(lot.getLotId())
                 .setExpectedLotVersion(lot.getVersion())
                 .setReasonCode(upper(input.getReasonCode()))
-                .setRecallReference("quality-recall:" + id)
+                .setEvidenceRef(inventoryEvidenceRef)
+                .setRecallReference(inventoryEvidenceRef)
+                .setTraceId(traceId)
                 .setCorrelationId(command.getCorrelationId())
                 .setCausationId(command.getCausationId())
                 .setOccurredAt(command.getOccurredAt()));

@@ -28,7 +28,7 @@ class AiOperationsTemporalSeedPropertiesTest {
     }
 
     @Test
-    void shouldDefaultHourlySeedToGovernedProductToListingWorkflow() {
+    void shouldDefaultSeedPropertiesToDailyShanghaiReconciliation() {
         AiOperationsTemporalSeedProperties properties = new AiOperationsTemporalSeedProperties();
 
         assertThat(properties.getSkillId())
@@ -36,7 +36,9 @@ class AiOperationsTemporalSeedPropertiesTest {
         assertThat(properties.getSkillVersion()).isEqualTo("1.0.0");
         assertThat(properties.getRoleCode()).isEqualTo("merchandising");
         assertThat(properties.getActionCode()).isEqualTo("catalog.publish");
-        assertThat(properties.getIntervalSeconds()).isEqualTo(3600L);
+        assertThat(properties.getIntervalSeconds()).isEqualTo(86_400L);
+        assertThat(properties.getTimeZone()).isEqualTo("Asia/Shanghai");
+        assertThat(properties.getReconcileIntervalMs()).isEqualTo(600_000L);
     }
 
     private static AiOperationsTemporalSeedProperties bind(Map<String, Object> values) {

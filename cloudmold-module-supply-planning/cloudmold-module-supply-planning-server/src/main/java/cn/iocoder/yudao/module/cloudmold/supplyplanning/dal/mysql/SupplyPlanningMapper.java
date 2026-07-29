@@ -1,6 +1,7 @@
 package cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.mysql;
 
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.ReplenishmentExecutionView;
+import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.ReplenishmentExecutionProposalView;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.dataobject.SupplyPlanningRecords.*;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.service.query.SupplyPlanningWorkItem;
 import org.apache.ibatis.annotations.*;
@@ -313,6 +314,124 @@ public interface SupplyPlanningMapper {
                             @Param("decision") String decision,
                             @Param("decisionPrincipalId") String decisionPrincipalId,
                             @Param("now") LocalDateTime now);
+
+    @Insert("""
+            INSERT INTO cloudmold_replenishment_execution_proposal
+              (proposal_id,tenant_id,recommendation_id,expected_recommendation_version,target_type,
+               mapping_evidence_sha256,supplier_id,account_id,erp_product_id,erp_product_unit_id,
+               unit_cost_minor,tax_percent,source_warehouse_id,target_warehouse_id,wms_sku_id,
+               proposed_by_principal_id,policy_code,policy_sha256,status,version,proposed_at,
+               created_at,updated_at)
+            VALUES (#{proposalId},#{tenantId},#{recommendationId},#{expectedRecommendationVersion},
+                    #{targetType},#{mappingEvidenceSha256},#{supplierId},#{accountId},#{erpProductId},
+                    #{erpProductUnitId},#{unitCostMinor},#{taxPercent},#{sourceWarehouseId},
+                    #{targetWarehouseId},#{wmsSkuId},#{proposedByPrincipalId},#{policyCode},
+                    #{policySha256},#{status},#{version},#{proposedAt},#{createdAt},#{updatedAt})
+            """)
+    int insertReplenishmentExecutionProposal(ReplenishmentExecutionProposal value);
+
+    @Select("""
+            SELECT proposal_id,tenant_id,recommendation_id,expected_recommendation_version,target_type,
+                   mapping_evidence_sha256,supplier_id,account_id,erp_product_id,erp_product_unit_id,
+                   unit_cost_minor,tax_percent,source_warehouse_id,target_warehouse_id,wms_sku_id,
+                   proposed_by_principal_id,policy_code,policy_sha256,status,version,
+                   consumed_by_conversion_id,proposed_at,consumed_at,created_at,updated_at
+            FROM cloudmold_replenishment_execution_proposal
+            WHERE tenant_id=#{tenantId} AND recommendation_id=#{recommendationId}
+              AND status='READY'
+            LIMIT 1 FOR UPDATE
+            """)
+    ReplenishmentExecutionProposal selectReadyReplenishmentExecutionProposalForUpdate(
+            @Param("tenantId") Long tenantId,
+            @Param("recommendationId") String recommendationId);
+
+    @Update("""
+            UPDATE cloudmold_replenishment_execution_proposal
+            SET status='CONSUMED',version=version+1,consumed_by_conversion_id=#{conversionId},
+                consumed_at=#{now},updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND proposal_id=#{proposalId}
+              AND status='READY' AND version=#{expectedVersion}
+            """)
+    int consumeReplenishmentExecutionProposal(@Param("tenantId") Long tenantId,
+                                              @Param("proposalId") String proposalId,
+                                              @Param("expectedVersion") Long expectedVersion,
+                                              @Param("conversionId") String conversionId,
+                                              @Param("now") LocalDateTime now);
+
+    @Select("""
+            SELECT proposal.proposal_id proposalId,
+                   proposal.recommendation_id recommendationId,
+                   proposal.expected_recommendation_version expectedRecommendationVersion,
+                   proposal.target_type targetType,
+                   proposal.mapping_evidence_sha256 mappingEvidenceSha256,
+                   proposal.supplier_id supplierId,
+                   proposal.account_id accountId,
+                   proposal.erp_product_id erpProductId,
+                   proposal.erp_product_unit_id erpProductUnitId,
+                   proposal.unit_cost_minor unitCostMinor,
+                   proposal.tax_percent taxPercent,
+                   proposal.source_warehouse_id sourceWarehouseId,
+                   proposal.target_warehouse_id targetWarehouseId,
+                   proposal.wms_sku_id wmsSkuId,
+                   proposal.proposed_by_principal_id proposedByPrincipalId,
+                   proposal.policy_code policyCode,
+                   proposal.policy_sha256 policySha256,
+                   proposal.proposed_at proposedAt
+            FROM cloudmold_replenishment_execution_proposal proposal
+            JOIN cloudmold_replenishment_recommendation recommendation
+              ON recommendation.tenant_id=proposal.tenant_id
+             AND recommendation.recommendation_id=proposal.recommendation_id
+             AND recommendation.status='APPROVED'
+             AND recommendation.version=proposal.expected_recommendation_version
+            LEFT JOIN cloudmold_replenishment_conversion conversion
+              ON conversion.tenant_id=proposal.tenant_id
+             AND conversion.recommendation_id=proposal.recommendation_id
+            WHERE proposal.tenant_id=#{tenantId}
+              AND proposal.status='READY'
+              AND conversion.conversion_id IS NULL
+            ORDER BY proposal.proposed_at, proposal.proposal_id
+            LIMIT #{limit}
+            """)
+    List<ReplenishmentExecutionProposalView> selectReadyReplenishmentExecutionProposals(
+            @Param("tenantId") Long tenantId,
+            @Param("limit") int limit);
+
+    @Select("""
+            SELECT proposal.proposal_id proposalId,
+                   proposal.recommendation_id recommendationId,
+                   proposal.expected_recommendation_version expectedRecommendationVersion,
+                   proposal.target_type targetType,
+                   proposal.mapping_evidence_sha256 mappingEvidenceSha256,
+                   proposal.supplier_id supplierId,
+                   proposal.account_id accountId,
+                   proposal.erp_product_id erpProductId,
+                   proposal.erp_product_unit_id erpProductUnitId,
+                   proposal.unit_cost_minor unitCostMinor,
+                   proposal.tax_percent taxPercent,
+                   proposal.source_warehouse_id sourceWarehouseId,
+                   proposal.target_warehouse_id targetWarehouseId,
+                   proposal.wms_sku_id wmsSkuId,
+                   proposal.proposed_by_principal_id proposedByPrincipalId,
+                   proposal.policy_code policyCode,
+                   proposal.policy_sha256 policySha256,
+                   proposal.proposed_at proposedAt
+            FROM cloudmold_replenishment_execution_proposal proposal
+            JOIN cloudmold_replenishment_recommendation recommendation
+              ON recommendation.tenant_id=proposal.tenant_id
+             AND recommendation.recommendation_id=proposal.recommendation_id
+             AND recommendation.status='APPROVED'
+             AND recommendation.version=proposal.expected_recommendation_version
+            LEFT JOIN cloudmold_replenishment_conversion conversion
+              ON conversion.tenant_id=proposal.tenant_id
+             AND conversion.recommendation_id=proposal.recommendation_id
+            WHERE proposal.tenant_id=#{tenantId}
+              AND proposal.proposal_id=#{proposalId}
+              AND proposal.status='READY'
+              AND conversion.conversion_id IS NULL
+            """)
+    ReplenishmentExecutionProposalView selectReadyReplenishmentExecutionProposal(
+            @Param("tenantId") Long tenantId,
+            @Param("proposalId") String proposalId);
 
     @Insert("""
             INSERT INTO cloudmold_replenishment_conversion

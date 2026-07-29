@@ -138,6 +138,16 @@
         </dependency>
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-supplier-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>cloudmold-module-finance-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
             <artifactId>cloudmold-module-procurement-server</artifactId>
             <version>${revision}</version>
         </dependency>

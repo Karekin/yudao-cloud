@@ -2,13 +2,15 @@ package cn.iocoder.yudao.module.cloudmold.promotion.api;
 
 import lombok.*;
 
+import java.io.Serializable;
 import java.time.Instant;
+import java.util.List;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class PromotionCommand {
+public class PromotionCommand implements Serializable {
     private PromotionOperation operation;
     private String idempotencyKey;
     private String correlationId;
@@ -21,9 +23,13 @@ public class PromotionCommand {
     private AdvertisingInteractionDefinition advertisingInteraction;
     private AdvertisingLedgerDefinition advertisingLedger;
     private PromotionExperimentResultDefinition promotionExperimentResult;
+    private GrowthExperimentDefinition growthExperiment;
+    private GrowthExperimentExposureDefinition growthExperimentExposure;
+    private GrowthExperimentMetricSnapshotDefinition growthExperimentMetricSnapshot;
+    private GrowthExperimentConclusionDefinition growthExperimentConclusion;
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
-    public static class CampaignDefinition {
+    public static class CampaignDefinition implements Serializable {
         private String campaignId;
         private String campaignCode;
         private String campaignKind;
@@ -34,7 +40,7 @@ public class PromotionCommand {
     }
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
-    public static class CouponTemplateDefinition {
+    public static class CouponTemplateDefinition implements Serializable {
         private String templateId;
         private String templateCode;
         private String campaignId;
@@ -53,7 +59,7 @@ public class PromotionCommand {
     }
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
-    public static class CouponEntitlementDefinition {
+    public static class CouponEntitlementDefinition implements Serializable {
         private String entitlementId;
         private String entitlementCode;
         private String templateId;
@@ -64,7 +70,7 @@ public class PromotionCommand {
     }
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
-    public static class AdvertisingPlacementDefinition {
+    public static class AdvertisingPlacementDefinition implements Serializable {
         private String placementId;
         private String placementCode;
         private String campaignId;
@@ -79,7 +85,7 @@ public class PromotionCommand {
     }
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
-    public static class AdvertisingInteractionDefinition {
+    public static class AdvertisingInteractionDefinition implements Serializable {
         private String interactionId;
         private String deduplicationKey;
         private String placementId;
@@ -92,7 +98,7 @@ public class PromotionCommand {
     }
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
-    public static class AdvertisingLedgerDefinition {
+    public static class AdvertisingLedgerDefinition implements Serializable {
         private String ledgerEntryId;
         private String ledgerEntryCode;
         private String campaignId;
@@ -108,7 +114,7 @@ public class PromotionCommand {
     }
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
-    public static class PromotionExperimentResultDefinition {
+    public static class PromotionExperimentResultDefinition implements Serializable {
         private String experimentId;
         private String experimentCode;
         private String campaignId;
@@ -125,5 +131,64 @@ public class PromotionCommand {
         private String currencyCode;
         private String methodologyRef;
         private Long expectedVersion;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class GrowthExperimentDefinition implements Serializable {
+        private String experimentId;
+        private String experimentCode;
+        private String campaignId;
+        private String name;
+        private String hypothesis;
+        private String primaryMetricCode;
+        private Integer minimumSampleSizePerVariant;
+        private Instant startsAt;
+        private Instant endsAt;
+        private List<GrowthExperimentVariantDefinition> variants;
+        private Long expectedVersion;
+        private String reason;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class GrowthExperimentVariantDefinition implements Serializable {
+        private String variantCode;
+        private String variantKind;
+        private Integer allocationBasisPoints;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class GrowthExperimentExposureDefinition implements Serializable {
+        private String exposureId;
+        private String exposureKey;
+        private String experimentId;
+        private String variantCode;
+        private String principalId;
+        private String assignmentVersion;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class GrowthExperimentMetricSnapshotDefinition implements Serializable {
+        private String snapshotId;
+        private String snapshotKey;
+        private String experimentId;
+        private String variantCode;
+        private String metricCode;
+        private Instant measuredFrom;
+        private Instant measuredTo;
+        private Integer sampleCount;
+        private Long metricValueMicros;
+        private Instant dataFreshUntil;
+        private String evidenceRef;
+    }
+
+    @Data @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class GrowthExperimentConclusionDefinition implements Serializable {
+        private String experimentId;
+        private String decision;
+        private Integer confidenceBasisPoints;
+        private String guardrailStatus;
+        private String evidenceRef;
+        private Long expectedVersion;
+        private String reason;
     }
 }

@@ -73,12 +73,12 @@ class YudaoBpmApprovalAttestationGateTest {
                 .thenReturn(binding("BPM_APPROVED_PENDING_ATTESTATION"));
 
         assertThatThrownBy(() -> gate.assertDecisionAllowed(17L, 201L, approval, "APPROVE"))
-                .hasMessage("only the BPM-selected approver may finalize this decision");
+                .hasMessage("only the BPM-selected operating principal may finalize this decision");
 
         when(mapper.selectApprovalWorkflowBinding(17L, "approval-1"))
                 .thenReturn(binding("BPM_APPROVED_PENDING_ATTESTATION").setTerminalOperatorUserId(null));
         assertThatThrownBy(() -> gate.assertDecisionAllowed(17L, 200L, approval, "APPROVE"))
-                .hasMessage("BPM terminal task completer does not match the authenticated approver");
+                .hasMessage("BPM terminal task completer is missing");
 
         when(mapper.selectApprovalWorkflowBinding(17L, "approval-1"))
                 .thenReturn(binding("BPM_APPROVED_PENDING_ATTESTATION")
@@ -120,8 +120,10 @@ class YudaoBpmApprovalAttestationGateTest {
                 .thenReturn(new AgentApprovalResponsibilityResolver.Resolution(
                         List.of("buyer", "finance"), List.of(210L, 220L), "b".repeat(64)));
 
-        assertThatCode(() -> r3Gate.assertDecisionAllowed(17L, 210L, approval, "APPROVE"))
+        assertThatCode(() -> r3Gate.assertDecisionAllowed(17L, 200L, approval, "APPROVE"))
                 .doesNotThrowAnyException();
+        org.mockito.Mockito.verify(resolver).assertCurrent(
+                any(), any(), org.mockito.ArgumentMatchers.eq(210L), any(), any(), any(LocalDateTime.class));
 
         ApprovalWorkflowBinding rejected = binding("BPM_REJECTED").setRiskLevel("R3");
         when(mapper.selectApprovalWorkflowBinding(17L, "approval-1")).thenReturn(rejected);

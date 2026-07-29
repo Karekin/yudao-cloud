@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.cloudmold.catalog.dal.mysql;
 import cn.iocoder.yudao.module.cloudmold.catalog.service.query.CatalogSkuBarcodeItem;
 import cn.iocoder.yudao.module.cloudmold.catalog.service.query.CatalogSkuDetailVO;
 import cn.iocoder.yudao.module.cloudmold.catalog.service.query.CatalogSkuPageItem;
+import cn.iocoder.yudao.module.cloudmold.catalog.service.workflow.CatalogWaveAggregateRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -160,4 +161,31 @@ public interface CatalogQueryMapper {
             """)
     List<CatalogSkuBarcodeItem> selectSkuBarcodes(@Param("tenantId") Long tenantId,
                                                   @Param("skuId") String skuId);
+
+    @Select("""
+            SELECT COUNT(DISTINCT s.style_id) AS style_count,
+                   COUNT(DISTINCT CASE WHEN s.status = 10 THEN s.style_id END) AS active_style_count,
+                   COUNT(DISTINCT p.spu_id) AS spu_count,
+                   COUNT(DISTINCT CASE WHEN p.status = 30 THEN p.spu_id END) AS active_spu_count,
+                   COUNT(DISTINCT k.sku_id) AS sku_count,
+                   COUNT(DISTINCT CASE WHEN k.status = 10 THEN k.sku_id END) AS active_sku_count,
+                   DATE_FORMAT(MAX(GREATEST(
+                           COALESCE(s.updated_at, TIMESTAMP('1970-01-01 00:00:00')),
+                           COALESCE(p.updated_at, TIMESTAMP('1970-01-01 00:00:00')),
+                           COALESCE(k.updated_at, TIMESTAMP('1970-01-01 00:00:00'))
+                   )), '%Y-%m-%dT%H:%i:%sZ') AS last_catalog_updated_at
+            FROM cloudmold_catalog_style s
+            LEFT JOIN cloudmold_catalog_spu p
+              ON p.tenant_id = s.tenant_id AND p.style_id = s.style_id
+            LEFT JOIN cloudmold_catalog_sku k
+              ON k.tenant_id = p.tenant_id AND k.spu_id = p.spu_id
+            WHERE s.tenant_id = #{tenantId}
+              AND s.planning_year = #{planningYear}
+              AND s.season_code = #{seasonCode}
+              AND s.wave_code = #{waveCode}
+            """)
+    CatalogWaveAggregateRow selectWaveAggregate(@Param("tenantId") Long tenantId,
+                                                @Param("planningYear") Integer planningYear,
+                                                @Param("seasonCode") String seasonCode,
+                                                @Param("waveCode") String waveCode);
 }

@@ -41,6 +41,7 @@ public class AiOperationsTemporalConfiguration {
     @Bean(initMethod = "start", destroyMethod = "shutdown")
     public WorkerFactory aiOperationsTemporalWorkerFactory(
             WorkflowClient client, TemporalManagedRunActivitiesImpl activities,
+            TemporalDailyDispatchActivitiesImpl dispatchActivities,
             AiOperationsTemporalProperties properties) {
         WorkerFactory factory = WorkerFactory.newInstance(client);
         Worker worker = factory.newWorker(properties.getTaskQueue());
@@ -48,7 +49,8 @@ public class AiOperationsTemporalConfiguration {
         worker.registerWorkflowImplementationTypes(ApprovalGateChildWorkflowImpl.class);
         worker.registerWorkflowImplementationTypes(SkillTaskChildWorkflowImpl.class);
         worker.registerWorkflowImplementationTypes(BusinessEventWaitChildWorkflowImpl.class);
-        worker.registerActivitiesImplementations(activities);
+        worker.registerWorkflowImplementationTypes(TemporalManagedDailyDispatchWorkflowImpl.class);
+        worker.registerActivitiesImplementations(activities, dispatchActivities);
         return factory;
     }
 }

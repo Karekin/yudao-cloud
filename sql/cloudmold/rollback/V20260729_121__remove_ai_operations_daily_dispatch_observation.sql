@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS cloudmold_ai_ops_daily_dispatch_observation;

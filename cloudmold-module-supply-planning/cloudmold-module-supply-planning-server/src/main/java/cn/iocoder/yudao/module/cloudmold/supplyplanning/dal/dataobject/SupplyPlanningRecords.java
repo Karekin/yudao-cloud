@@ -205,6 +205,36 @@ public final class SupplyPlanningRecords {
 
     @Data
     @Accessors(chain = true)
+    public static class ReplenishmentExecutionProposal {
+        private String proposalId;
+        private Long tenantId;
+        private String recommendationId;
+        private Long expectedRecommendationVersion;
+        private String targetType;
+        private String mappingEvidenceSha256;
+        private Long supplierId;
+        private Long accountId;
+        private Long erpProductId;
+        private Long erpProductUnitId;
+        private Long unitCostMinor;
+        private BigDecimal taxPercent;
+        private Long sourceWarehouseId;
+        private Long targetWarehouseId;
+        private Long wmsSkuId;
+        private String proposedByPrincipalId;
+        private String policyCode;
+        private String policySha256;
+        private String status;
+        private Long version;
+        private String consumedByConversionId;
+        private LocalDateTime proposedAt;
+        private LocalDateTime consumedAt;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+    }
+
+    @Data
+    @Accessors(chain = true)
     public static class ReplenishmentConversion {
         private String conversionId;
         private Long tenantId;

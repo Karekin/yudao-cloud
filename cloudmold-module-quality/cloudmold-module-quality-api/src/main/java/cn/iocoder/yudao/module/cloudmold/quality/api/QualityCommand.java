@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
 import java.time.Instant;
 import java.time.LocalDate;
 
@@ -12,7 +13,7 @@ import java.time.LocalDate;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class QualityCommand {
+public class QualityCommand implements Serializable {
     private QualityOperation operation;
     private String idempotencyKey;
     private String runId;
@@ -29,7 +30,7 @@ public class QualityCommand {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class StandardDefinition {
+    public static class StandardDefinition implements Serializable {
         private String standardId;
         private String standardCode;
         private String categoryCode;
@@ -44,7 +45,7 @@ public class QualityCommand {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class CertificationDefinition {
+    public static class CertificationDefinition implements Serializable {
         private String certificationId;
         private String authenticatorPrincipalId;
         private String standardId;
@@ -60,7 +61,7 @@ public class QualityCommand {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class InspectionTaskDefinition {
+    public static class InspectionTaskDefinition implements Serializable {
         private String taskId;
         private String standardId;
         private String subjectType;
@@ -86,7 +87,7 @@ public class QualityCommand {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class CapaDefinition {
+    public static class CapaDefinition implements Serializable {
         private String capaId;
         private String inspectionTaskId;
         private String rootCauseCode;
@@ -100,7 +101,7 @@ public class QualityCommand {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class RecallActionDefinition {
+    public static class RecallActionDefinition implements Serializable {
         private String recallActionId;
         private String inspectionTaskId;
         private String reasonCode;

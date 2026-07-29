@@ -47,12 +47,11 @@ public class YudaoBpmApprovalAttestationGate implements AgentApprovalWorkflowAtt
                 : "BPM_REJECTED";
         require(expectedStatus.equals(binding.getStatus()),
                 "BPM workflow terminal status does not permit this Agent Control decision");
-        if (!"R3".equals(binding.getRiskLevel())) {
-            require(Objects.equals(binding.getApproverUserId(), operatorUserId),
-                    "only the BPM-selected approver may finalize this decision");
-        }
-        require(Objects.equals(binding.getTerminalOperatorUserId(), operatorUserId),
-                "BPM terminal task completer does not match the authenticated approver");
+        require(Objects.equals(binding.getApproverUserId(), operatorUserId),
+                "only the BPM-selected operating principal may finalize this decision");
+        require(binding.getTerminalOperatorUserId() != null
+                        && binding.getTerminalOperatorUserId() > 0,
+                "BPM terminal task completer is missing");
         WorkOrder workOrder = mapper.selectWorkOrder(tenantId, approval.getWorkOrderId());
         require(workOrder != null, "BPM approval work order is missing");
         require(Objects.equals(binding.getRoleCode(), workOrder.getRoleCode())
@@ -69,10 +68,12 @@ public class YudaoBpmApprovalAttestationGate implements AgentApprovalWorkflowAtt
         require(binding.getTerminalTaskId() != null && !binding.getTerminalTaskId().isBlank(),
                 "BPM terminal evidence does not identify the governed approval task");
         if ("R3".equals(binding.getRiskLevel())) {
-            responsibilityResolver.assertCurrent(binding, workOrder, operatorUserId,
+            responsibilityResolver.assertCurrent(binding, workOrder, binding.getTerminalOperatorUserId(),
                     binding.getTerminalTaskDefinitionKey(), decision,
                     LocalDateTime.now(ZoneOffset.UTC));
         } else {
+            require(Objects.equals(binding.getTerminalOperatorUserId(), operatorUserId),
+                    "BPM terminal task completer does not match the authenticated approver");
             require(Objects.equals(binding.getTerminalTaskDefinitionKey(),
                             YudaoBpmApprovalWorkflowAdapter.APPROVAL_TASK_KEY),
                     "BPM terminal evidence does not identify the governed approval task");

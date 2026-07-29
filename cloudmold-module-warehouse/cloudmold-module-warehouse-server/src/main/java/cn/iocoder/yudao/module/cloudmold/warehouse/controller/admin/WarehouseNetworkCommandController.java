@@ -20,12 +20,31 @@ public class WarehouseNetworkCommandController {
     private WarehouseNetworkCommandApi commandApi;
     @Resource
     private WarehouseSourceMappingQueryApi queryApi;
+    @Resource
+    private InboundCommandApi inboundCommandApi;
+    @Resource
+    private InboundQueryApi inboundQueryApi;
 
     @PostMapping("/command")
     @Operation(summary = "Execute one canonical warehouse network command")
     @PreAuthorize("@ss.hasPermission('cloudmold:warehouse:command')")
     public CommonResult<WarehouseNetworkCommandResult> execute(@RequestBody WarehouseNetworkCommand command) {
         return success(commandApi.execute(command));
+    }
+
+    @PostMapping("/inbound/command")
+    @Operation(summary = "Execute one canonical warehouse inbound command")
+    @PreAuthorize("@ss.hasPermission('cloudmold:warehouse:command')")
+    public CommonResult<InboundCommandResult> executeInbound(@RequestBody InboundCommand command) {
+        return success(inboundCommandApi.execute(command));
+    }
+
+    @GetMapping("/inbound/stage")
+    @Operation(summary = "Get the canonical inbound stage for one replenishment recommendation")
+    @PreAuthorize("@ss.hasPermission('cloudmold:warehouse:query')")
+    public CommonResult<InboundQueryApi.InboundStageView> getInboundStage(
+            @RequestParam("recommendationId") String recommendationId) {
+        return success(inboundQueryApi.requireInboundStage(recommendationId));
     }
 
     @PostMapping("/source/resolve-network")

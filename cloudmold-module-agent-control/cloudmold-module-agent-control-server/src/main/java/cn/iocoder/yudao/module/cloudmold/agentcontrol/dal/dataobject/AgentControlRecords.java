@@ -328,6 +328,7 @@ public final class AgentControlRecords {
         private Long tenantId;
         private String workOrderId;
         private String observedStatus;
+        private Long approverUserId;
         private Long terminalOperatorUserId;
         private Long approvalVersion;
         private Long workOrderVersion;

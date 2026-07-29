@@ -1,10 +1,13 @@
+cn.iocoder.yudao.module.cloudmold.agentcontrol.api.workflow
 cn.iocoder.yudao.module.cloudmold.aftersale.api
 cn.iocoder.yudao.module.cloudmold.aioperations.api
 cn.iocoder.yudao.module.cloudmold.catalog.api
+cn.iocoder.yudao.module.cloudmold.commercebehavior.api
 cn.iocoder.yudao.module.cloudmold.customerservice.api
 cn.iocoder.yudao.module.cloudmold.datacontract.api
 cn.iocoder.yudao.module.cloudmold.engagement.api
 cn.iocoder.yudao.module.cloudmold.fulfillment.api
+cn.iocoder.yudao.module.cloudmold.finance.api
 cn.iocoder.yudao.module.cloudmold.gamification.api
 cn.iocoder.yudao.module.cloudmold.identity.api
 cn.iocoder.yudao.module.cloudmold.integration.yudao.api
@@ -17,6 +20,9 @@ cn.iocoder.yudao.module.cloudmold.operationsintelligence.api
 cn.iocoder.yudao.module.cloudmold.order.api
 cn.iocoder.yudao.module.cloudmold.payment.api
 cn.iocoder.yudao.module.cloudmold.promotion.api
+cn.iocoder.yudao.module.cloudmold.procurement.api
+cn.iocoder.yudao.module.cloudmold.supplier.api
+cn.iocoder.yudao.module.cloudmold.quality.api
 cn.iocoder.yudao.module.cloudmold.risk.api
 cn.iocoder.yudao.module.cloudmold.skilltask.api
 cn.iocoder.yudao.module.cloudmold.supplyplanning.api

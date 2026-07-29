@@ -15,7 +15,9 @@ public class TemporalScheduleRecord {
     private String skillId;
     private String skillVersion;
     private String inputJson;
+    private String inputStrategy;
     private Long intervalSeconds;
+    private String cronExpression;
     private String timeZone;
     private String overlapPolicy;
     private Long operatorUserId;
@@ -25,6 +27,10 @@ public class TemporalScheduleRecord {
     private String status;
     private String temporalNamespace;
     private String temporalTaskQueue;
+    private String desiredPolicySha256;
+    private String definitionClosureSha256;
+    private LocalDateTime lastReconciledAt;
+    private String reconcileError;
     private Long version;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

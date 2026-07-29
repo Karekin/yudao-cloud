@@ -5,13 +5,18 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serial;
+import java.io.Serializable;
 import java.util.List;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class BusinessControlWorkflowResult {
+public class BusinessControlWorkflowResult implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     public enum Status { WAITING, NEEDS_DATA, RUNNING, SUCCEEDED, FAILED }
 
@@ -19,7 +24,10 @@ public class BusinessControlWorkflowResult {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class KpiReading {
+    public static class KpiReading implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
         private String metricId;
         private String metricName;
         private String status;
@@ -33,7 +41,10 @@ public class BusinessControlWorkflowResult {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class TargetDeviation {
+    public static class TargetDeviation implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
         private String metricId;
         private String metricName;
         private String direction;
@@ -49,7 +60,10 @@ public class BusinessControlWorkflowResult {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class Anomaly {
+    public static class Anomaly implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
         private String code;
         private String title;
         private String severity;
@@ -60,7 +74,10 @@ public class BusinessControlWorkflowResult {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class SuggestedWorkOrder {
+    public static class SuggestedWorkOrder implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
         private String code;
         private String title;
         private String ownerRole;
@@ -72,7 +89,10 @@ public class BusinessControlWorkflowResult {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class Artifact {
+    public static class Artifact implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
         private String type;
         private String id;
         private String status;

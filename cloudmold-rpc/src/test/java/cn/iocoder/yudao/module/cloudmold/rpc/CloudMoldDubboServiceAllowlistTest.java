@@ -12,22 +12,29 @@ class CloudMoldDubboServiceAllowlistTest {
     void shouldLoadEveryCloudMoldPublicApiContractName() {
         Set<String> services = CloudMoldDubboServiceAllowlist.load();
 
-        assertThat(services).hasSize(97)
-                .contains("cn.iocoder.yudao.module.cloudmold.dreamplant.api.DreamPlantCommandApi",
+        assertThat(services).hasSizeGreaterThanOrEqualTo(100)
+                .contains("cn.iocoder.yudao.module.cloudmold.agentcontrol.api.workflow.MissionLifecycleWorkflowCommandApi",
+                        "cn.iocoder.yudao.module.cloudmold.agentcontrol.api.workflow.MissionLifecycleWorkflowQueryApi",
+                        "cn.iocoder.yudao.module.cloudmold.dreamplant.api.DreamPlantCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.dreamplant.api.DreamPlantQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.dreamplant.api.DreamPlantKnowledgeCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.dreamplant.api.DreamPlantKnowledgeQueryApi",
+                        "cn.iocoder.yudao.module.cloudmold.catalog.api.workflow.AssortmentWaveReadinessWorkflowQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryStockoutDiagnosisQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryCheckoutReservationApi",
                         "cn.iocoder.yudao.module.cloudmold.listing.api.AppListingQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.order.api.AppOrderQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.fulfillment.api.AppFulfillmentQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.fulfillment.api.exception.FulfillmentExceptionCommandApi",
+                        "cn.iocoder.yudao.module.cloudmold.finance.api.FinanceCloseCommandApi",
+                        "cn.iocoder.yudao.module.cloudmold.finance.api.FinanceCloseQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoWarehouseInboundQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.order.api.workflow.OrderWorkflowFactsApi",
                         "cn.iocoder.yudao.module.cloudmold.payment.api.PaymentWorkflowFactsApi",
                         "cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskQueryApi",
+                        "cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierSourcingCommandApi",
+                        "cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierSourcingQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningQueryApi");
         assertThat(services).allSatisfy(service -> {

@@ -14,12 +14,17 @@ public class TemporalScheduleView {
     private String skillId;
     private String skillVersion;
     private Long intervalSeconds;
+    private String cronExpression;
+    private String inputStrategy;
     private String timeZone;
     private String status;
     private boolean paused;
     private String overlapPolicy;
     private String temporalNamespace;
     private String temporalTaskQueue;
+    private String definitionClosureSha256;
+    private Instant lastReconciledAt;
+    private String reconcileError;
     private Instant nextActionAt;
     private Instant lastActionAt;
 }
