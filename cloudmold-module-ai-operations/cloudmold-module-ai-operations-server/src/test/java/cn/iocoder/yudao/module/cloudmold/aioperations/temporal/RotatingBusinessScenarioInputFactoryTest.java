@@ -126,6 +126,16 @@ class RotatingBusinessScenarioInputFactoryTest {
 
         assertThat(json.path("runIds").path("product").asText())
                 .startsWith("d260729162-").endsWith("-product");
+        assertThat(json.path("operatorPrincipalId").asText()).isEqualTo("principal-1");
+        assertThat(json.path("operationsCommands")).hasSize(4);
+        assertThat(json.path("operationsCommands").get(0).path("operation").asText())
+                .isEqualTo("OPEN_ALERT");
+        assertThat(json.path("operationsCommands").get(0).path("alert")
+                .path("sourceType").asText()).isEqualTo("METRIC");
+        assertThat(json.path("operationsCommands").get(3).path("operation").asText())
+                .isEqualTo("RESOLVE_ALERT");
+        assertThat(json.path("operationsCommands").get(3).path("alert")
+                .path("expectedVersion").asLong()).isEqualTo(3L);
         assertThat(json.path("consumer").path("identityReference").path("sourceId").asText()).isEqualTo("286");
         assertThat(json.path("consumer").path("behaviorCommands")).hasSize(8);
         assertThat(json.path("consumer").path("commands")).hasSize(19);
@@ -549,11 +559,21 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(warehouse.path("shipment").path("bizOrderNo").asText()).startsWith("AISO");
         assertThat(replenishment.path("scenarioType").asText())
                 .isEqualTo("DAILY_REPLENISHMENT");
+        assertThat(replenishment.path("operatorPrincipalId").asText())
+                .isEqualTo("principal-owner");
+        assertThat(replenishment.path("operationsCommands")).hasSize(4);
+        assertThat(replenishment.path("operationsCommands").get(0).path("alert")
+                .path("category").asText()).isEqualTo("SUPPLY_OPERATIONS");
+        assertThat(replenishment.path("operationsCommands").get(3)
+                .path("operation").asText()).isEqualTo("RESOLVE_ALERT");
         assertThat(replenishment.path("sourcing").path("sourcingCase")
                 .path("targetQuantity").asInt()).isEqualTo(500);
         assertThat(replenishment.path("warehouse").path("quantities")
                 .path("receipt").asInt()).isEqualTo(10);
         assertThat(promotionReplenishment.path("scenarioType").asText())
+                .isEqualTo("PROMOTION_REPLENISHMENT");
+        assertThat(promotionReplenishment.path("operationsCommands").get(0)
+                .path("alert").path("subcategory").asText())
                 .isEqualTo("PROMOTION_REPLENISHMENT");
         assertThat(promotionReplenishment.path("procurement").path("purchaseOrder")
                 .path("orderedQuantity").asInt()).isEqualTo(2_000);
@@ -766,5 +786,8 @@ class RotatingBusinessScenarioInputFactoryTest {
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(
                 162L, "skill.cloudmold.commerce.reuse-ready-master.v1", "warehouse_network"))
                 .thenReturn("{\"warehouseId\":\"warehouse-1\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, "skill.cloudmold.commerce.reuse-ready-master.v1", "principal"))
+                .thenReturn("{\"principalId\":\"principal-1\"}");
     }
 }

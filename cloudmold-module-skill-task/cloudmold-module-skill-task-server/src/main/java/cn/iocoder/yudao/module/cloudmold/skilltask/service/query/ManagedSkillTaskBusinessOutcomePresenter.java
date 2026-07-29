@@ -97,7 +97,9 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("skill.cloudmold.commerce.product-to-listing.v1",
                     "串联规范商品建档、商家店铺准备、商品刊登审核发布与终态回读，缺少渠道回执时明确标记待渠道确认。"),
             Map.entry("skill.cloudmold.commerce.autonomous-day.v1",
-                    "每日生成全新商品与刊登，再由独立消费者身份完成选购、支付履约、售后、客服和社区种草闭环。"),
+                    "模拟综合运营控制岗位创建、通知并认领当日经营行动单，生成全新商品与刊登，"
+                            + "再由独立消费者完成选购、支付履约、售后、客服和社区种草；"
+                            + "仅在两条业务链全部成功后关闭经营行动单。"),
             Map.entry("skill.cloudmold.consumer.shopping-journey.v1",
                     "模拟真实会员完成搜索、商详、收藏、加购、结算、下单支付、履约、售后、咨询与社区发布。"),
             Map.entry("skill.cloudmold.commerce.aftersale-saga.v1",
@@ -131,7 +133,9 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("skill.cloudmold.wms.operations.v1",
                     "模拟仓储运营完成双仓与商品造数、采购收货、仓间调拨、销售出库、零差异盘点和最终库存验收；每天生成全新业务单据。"),
             Map.entry("skill.cloudmold.supply.replenishment-lifecycle.v1",
-                    "模拟补货运营完成需求分型、双供应商寻源定标、采购订单下发以及收货、调拨、出库、盘点和库存验收；自动轮换日常与大促补货。"),
+                    "模拟补货运营创建并认领日常或大促补货行动单，完成需求分型、双供应商寻源定标、"
+                            + "采购订单下发以及收货、调拨、出库、盘点和库存验收；"
+                            + "仅在三条业务链全部成功后关闭行动单。"),
             Map.entry("skill.cloudmold.supply-planning.sop-lifecycle.v1",
                     "模拟需求计划经理完成预测发布与偏差评估、精益和韧性双场景测算、AI 鲁棒方案推荐、会签发布、补货批准，并转换为真实 WMS 调拨草稿。"),
             Map.entry("skill.cloudmold.customer-service.resolution-lifecycle.v1",

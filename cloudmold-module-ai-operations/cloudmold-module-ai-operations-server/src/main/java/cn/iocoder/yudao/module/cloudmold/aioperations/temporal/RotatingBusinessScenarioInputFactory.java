@@ -331,7 +331,12 @@ class RotatingBusinessScenarioInputFactory {
                 }
                 output = consumer;
             } else {
-                output = autonomousDay(rotated, newPrefix, consumer);
+                JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
+                if (operator.path("principalId").asText().isBlank()) {
+                    return Optional.empty();
+                }
+                output = autonomousDay(rotated, newPrefix, occurredAt, consumer,
+                        operator.path("principalId").asText());
             }
         }
         return Optional.of(JsonUtils.toJsonString(output));
@@ -497,14 +502,71 @@ class RotatingBusinessScenarioInputFactory {
         return output;
     }
 
-    private static ObjectNode autonomousDay(ObjectNode fullChain, String prefix, ObjectNode consumer) {
+    private static ObjectNode autonomousDay(ObjectNode fullChain, String prefix, String occurredAt,
+                                            ObjectNode consumer, String operatorPrincipalId) {
         ObjectNode output = JsonNodeFactory.instance.objectNode();
         ObjectNode runIds = output.putObject("runIds");
         runIds.put("product", prefix + "-product");
         runIds.put("consumer", prefix + "-consumer");
+        output.put("operatorPrincipalId", operatorPrincipalId);
+        addRoleOperationsCase(output, prefix, occurredAt, operatorPrincipalId,
+                "AI_COMMERCE_DAY_", "commerce-day:", "commerce_day_",
+                "COMMERCE_OPERATIONS", "DAILY_FULL_CYCLE",
+                "DAILY_PLAN_DISPATCHED", "OPERATIONS_CONTROL_ASSIGNED",
+                "FULL_CYCLE_VERIFIED");
         output.set("product", productToListing(fullChain, prefix));
         output.set("consumer", consumer);
         return output;
+    }
+
+    private static void addRoleOperationsCase(
+            ObjectNode output, String prefix, String occurredAt, String operatorPrincipalId,
+            String alertCodePrefix, String sourceRefPrefix, String evidenceTokenPrefix,
+            String category, String subcategory, String noticeReasonCode,
+            String claimReasonCode, String resolveReasonCode) {
+        String alertId = stableUuid(prefix + ":commerce-operations-day");
+        String correlationId = stableUuid(prefix + ":commerce-operations-day-correlation");
+        String safeCodeSuffix = prefix.toUpperCase().replace('-', '_');
+        ArrayNode commands = output.putArray("operationsCommands");
+        commands.addObject()
+                .put("operation", "OPEN_ALERT")
+                .put("idempotencyKey", prefix + "-open-day")
+                .put("runId", prefix + "-operations-day")
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt)
+                .putObject("alert")
+                .put("alertId", alertId)
+                .put("alertCode", alertCodePrefix + safeCodeSuffix)
+                .put("sourceType", "METRIC")
+                .put("sourceRef", sourceRefPrefix + prefix)
+                .put("severity", "MEDIUM")
+                .put("category", category)
+                .put("subcategory", subcategory)
+                .put("evidenceRef", "restricted:" + evidenceTokenPrefix + safeCodeSuffix)
+                .put("titleSha256", DigestUtil.sha256Hex(category + ":" + prefix))
+                .put("actorPrincipalId", operatorPrincipalId);
+        addAlertTransition(commands, "NOTICE_ALERT", prefix + "-notice-day", alertId,
+                1L, operatorPrincipalId, noticeReasonCode, correlationId, occurredAt);
+        addAlertTransition(commands, "CLAIM_ALERT", prefix + "-claim-day", alertId,
+                2L, operatorPrincipalId, claimReasonCode, correlationId, occurredAt);
+        addAlertTransition(commands, "RESOLVE_ALERT", prefix + "-resolve-day", alertId,
+                3L, operatorPrincipalId, resolveReasonCode, correlationId, occurredAt);
+    }
+
+    private static void addAlertTransition(ArrayNode commands, String operation, String idempotencyKey,
+                                           String alertId, long expectedVersion, String actorPrincipalId,
+                                           String reasonCode, String correlationId, String occurredAt) {
+        commands.addObject()
+                .put("operation", operation)
+                .put("idempotencyKey", idempotencyKey)
+                .put("runId", idempotencyKey)
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt)
+                .putObject("alert")
+                .put("alertId", alertId)
+                .put("expectedVersion", expectedVersion)
+                .put("actorPrincipalId", actorPrincipalId)
+                .put("reasonCode", reasonCode);
     }
 
     private static ObjectNode merchantOnboarding(String prefix, String occurredAt, String ownerPrincipalId) {
@@ -912,6 +974,13 @@ class RotatingBusinessScenarioInputFactory {
         input.put("replenishmentReceiptRemark", promotion
                 ? "AI 大促补货采购到仓"
                 : "AI 日常补货采购到仓");
+        input.put("operatorPrincipalId", principalId);
+        addRoleOperationsCase(input, prefix, occurredAt, principalId,
+                "AI_REPLENISHMENT_", "replenishment-day:", "replenishment_",
+                "SUPPLY_OPERATIONS", promotion
+                        ? "PROMOTION_REPLENISHMENT" : "DAILY_REPLENISHMENT",
+                "REPLENISHMENT_PLAN_DISPATCHED", "REPLENISHMENT_OPERATOR_ASSIGNED",
+                "REPLENISHMENT_FLOW_VERIFIED");
         input.putObject("runIds")
                 .put("sourcing", prefix + "-sourcing")
                 .put("procurement", prefix + "-procurement")
