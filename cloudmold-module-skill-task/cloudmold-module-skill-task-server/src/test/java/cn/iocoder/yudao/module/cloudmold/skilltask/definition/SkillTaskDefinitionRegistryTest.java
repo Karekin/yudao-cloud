@@ -219,11 +219,30 @@ class SkillTaskDefinitionRegistryTest {
             assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
             assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("CLOSED");
         });
+        SkillTaskDefinition sopLifecycle = workspaceRegistry.require(
+                "skill.cloudmold.supply-planning.sop-lifecycle.v1", "1.0.0");
+        assertThat(sopLifecycle.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(sopLifecycle.getOwnerRole()).isEqualTo("supply-planning-manager");
+        assertThat(sopLifecycle.getRiskLevel()).isEqualTo("R3");
+        assertThat(sopLifecycle.getSteps()).hasSize(14);
+        assertThat(sopLifecycle.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(13);
+        assertThat(sopLifecycle.getSteps().get(13)).satisfies(step -> {
+            assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
+            assertThat(step.getCapabilityId()).isEqualTo(
+                    "capability.cloudmold.supplyplanning.supply-planning-query.require-replenishment-business-stage.v1");
+            assertThat(step.getWaitSuccess().path("/recommendationStatus").asText())
+                    .isEqualTo("CONVERTED");
+            assertThat(step.getWaitSuccess().path("/projectionDocumentStatus").asText())
+                    .isEqualTo("PREPARE");
+        });
         assertThat(workspaceRegistry.all()).extracting(SkillTaskDefinition::getSkillId)
                 .contains("skill.cloudmold.commerce.catalog-matrix.v1",
                         "skill.cloudmold.commerce.order-cancellation-operational.v1",
                         "skill.cloudmold.commerce.product-to-listing.v1",
                         "skill.cloudmold.commerce.aftersale-saga.v1",
+                        "skill.cloudmold.supply-planning.sop-lifecycle.v1",
                         "skill.cloudmold.commerce.terminal-readback.v1");
         List<String> readbackSkillIds = List.of(
                 "skill.cloudmold.operations.daily-business-control.v1",

@@ -34,11 +34,11 @@ class ProductToListingSkillDefinitionCompatibilityTest {
         SkillTaskDefinition productToListing = read(skillRoot.resolve("cloudmold-product-to-listing/skill-task.json"));
 
         var indexed = registry.validateAndIndex(List.of(catalog, master, productToListing));
-        SkillTaskDefinition definition = indexed.get("skill.cloudmold.commerce.product-to-listing.v1@1.0.0");
+        SkillTaskDefinition definition = indexed.get("skill.cloudmold.commerce.product-to-listing.v1@1.1.0");
 
         assertThat(definition).isNotNull();
         assertThat(definition.getRiskLevel()).isEqualTo("R3");
-        assertThat(definition.getSteps()).hasSize(11);
+        assertThat(definition.getSteps()).hasSize(12);
         assertThat(definition.getDefinitionSha256()).hasSize(64);
         assertThat(definition.getDefinitionClosureSha256()).hasSize(64);
     }

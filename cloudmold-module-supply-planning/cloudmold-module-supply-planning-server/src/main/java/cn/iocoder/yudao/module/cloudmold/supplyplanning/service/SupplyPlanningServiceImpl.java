@@ -501,6 +501,9 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                         "sensitivity_basis_points", recommended.sensitivityBasisPoints(),
                         "constraint_violations", recommended.constraintViolations(),
                         "solver_type", row.getSolverType(), "ranked_assessments", rationale,
+                        "business_object_type", "supply_plan_scenario",
+                        "business_object_id", recommended.scenarioId(),
+                        "business_status", "RECOMMENDED",
                         "current_status", "PROPOSED", "execution_authorized", false));
     }
 
@@ -578,6 +581,10 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                 payload("plan_id", plan.getPlanId(), "plan_code", plan.getPlanCode(),
                         "selected_scenario_id", scenario.getScenarioId(),
                         "recommendation_id", recommendationId,
+                        "business_object_type", recommendationId == null
+                                ? null : "replenishment_recommendation",
+                        "business_object_id", recommendationId,
+                        "business_status", recommendationId == null ? null : "PROPOSED",
                         "release_principal_id", input.getReleasePrincipalId(),
                         "previous_status", "APPROVED", "current_status", "RELEASED"));
     }

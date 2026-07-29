@@ -54,6 +54,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.warehouse.inbound-readback.v1"
             ,"skill.cloudmold.wms.operations.v1"
             ,"skill.cloudmold.supply.replenishment-lifecycle.v1"
+            ,"skill.cloudmold.supply-planning.sop-lifecycle.v1"
             ,"skill.cloudmold.customer-service.resolution-lifecycle.v1"
     );
 
@@ -75,6 +76,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.supply-planning.prepare.v1"
             ,"skill.cloudmold.wms.operations.v1"
             ,"skill.cloudmold.supply.replenishment-lifecycle.v1"
+            ,"skill.cloudmold.supply-planning.sop-lifecycle.v1"
             ,"skill.cloudmold.customer-service.resolution-lifecycle.v1"
             ,"skill.cloudmold.finance.close-lifecycle.v1"
             ,"skill.cloudmold.quality.inspection-recall-lifecycle.v1"
@@ -95,6 +97,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.supplier.sourcing-lifecycle.v1"
             ,"skill.cloudmold.wms.operations.v1"
             ,"skill.cloudmold.supply.replenishment-lifecycle.v1"
+            ,"skill.cloudmold.supply-planning.sop-lifecycle.v1"
             ,"skill.cloudmold.finance.close-lifecycle.v1"
             ,"skill.cloudmold.quality.inspection-recall-lifecycle.v1"
             ,"skill.cloudmold.consumer.in-transit-order-scenario.v1"

@@ -273,6 +273,40 @@ public interface AiOperationsTemporalMapper {
                                                      @Param("skillId") String skillId,
                                                      @Param("stepCode") String stepCode);
 
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("""
+            SELECT source_inventory.warehouse_id AS source_warehouse_id,
+                   target_warehouse.id AS target_warehouse_id,
+                   source_inventory.sku_id AS wms_sku_id
+            FROM wms_inventory source_inventory
+            JOIN wms_warehouse source_warehouse
+              ON source_warehouse.tenant_id=source_inventory.tenant_id
+             AND source_warehouse.id=source_inventory.warehouse_id
+             AND source_warehouse.deleted=0
+            JOIN wms_item_sku sku
+              ON sku.tenant_id=source_inventory.tenant_id
+             AND sku.id=source_inventory.sku_id
+             AND sku.deleted=0
+            JOIN wms_warehouse target_warehouse
+              ON target_warehouse.tenant_id=source_inventory.tenant_id
+             AND target_warehouse.id<>source_inventory.warehouse_id
+             AND target_warehouse.deleted=0
+            LEFT JOIN wms_inventory target_inventory
+              ON target_inventory.tenant_id=source_inventory.tenant_id
+             AND target_inventory.warehouse_id=target_warehouse.id
+             AND target_inventory.sku_id=source_inventory.sku_id
+             AND target_inventory.deleted=0
+            WHERE source_inventory.tenant_id=#{tenantId}
+              AND source_inventory.deleted=0
+              AND source_inventory.quantity>=5
+            ORDER BY CASE WHEN target_inventory.id IS NULL THEN 1 ELSE 0 END,
+                     source_inventory.quantity DESC,
+                     source_inventory.warehouse_id ASC,
+                     target_warehouse.id ASC
+            LIMIT 1
+            """)
+    WmsTransferSeedRecord selectWmsTransferSeed(@Param("tenantId") Long tenantId);
+
     @InterceptorIgnore(tenantLine = "true") // Every table is tenant-scoped explicitly; JSqlParser cannot parse BINARY NOT EXISTS.
     @Select("""
             <script>

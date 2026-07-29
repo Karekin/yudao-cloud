@@ -141,6 +141,9 @@ class SupplyPlanningServiceImplTest {
 
         assertThat(result.getStatus()).isEqualTo("RELEASED");
         assertThat(result.getAggregateVersion()).isEqualTo(3L);
+        assertThat(result.getBusinessObjectType()).isEqualTo("replenishment_recommendation");
+        assertThat(result.getBusinessObjectId()).isNotBlank();
+        assertThat(result.getBusinessStatus()).isEqualTo("PROPOSED");
         verify(mapper).insertReplenishment(argThat(row ->
                 row.getPlanId().equals("plan-01")
                         && row.getSuggestedQuantity().compareTo(new BigDecimal("30")) == 0
@@ -442,6 +445,9 @@ class SupplyPlanningServiceImplTest {
         assertThat(result.getAggregateType())
                 .isEqualTo("supply_plan_scenario_recommendation");
         assertThat(result.getStatus()).isEqualTo("PROPOSED");
+        assertThat(result.getBusinessObjectType()).isEqualTo("supply_plan_scenario");
+        assertThat(result.getBusinessObjectId()).isEqualTo("scenario-robust");
+        assertThat(result.getBusinessStatus()).isEqualTo("RECOMMENDED");
         verify(mapper).insertPlanScenarioRecommendation(argThat(row ->
                 row.getRecommendedScenarioId().equals("scenario-robust")
                         && row.getSolverType().equals("ROBUST_LEXICOGRAPHIC_V1")

@@ -64,6 +64,7 @@ class ManagedWorkflowAgentGovernanceSeeder {
             Map.entry("purchase-order.dispatch", List.of("buyer", "finance")),
             Map.entry("warehouse.physical-cycle", List.of("inventory-control", "operations-control")),
             Map.entry("replenishment.end-to-end", List.of("buyer", "finance")),
+            Map.entry("supply-planning.sop-release", List.of("buyer", "finance")),
             Map.entry("finance.period-close", List.of("risk", "operations-control")),
             Map.entry("quality.inspection-recall", List.of("quality", "operations-lead")),
             Map.entry("fulfillment.exception-resolution",

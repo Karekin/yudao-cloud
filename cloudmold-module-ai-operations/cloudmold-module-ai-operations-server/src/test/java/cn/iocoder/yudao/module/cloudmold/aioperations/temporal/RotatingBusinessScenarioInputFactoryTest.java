@@ -453,6 +453,98 @@ class RotatingBusinessScenarioInputFactoryTest {
     }
 
     @Test
+    void shouldBuildFreshSopScenarioWithRobustAlternativesAndRealWmsMapping() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.READY_MASTER_SKILL, "principal"))
+                .thenReturn("{\"principalId\":\"principal-planner\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL, "define_1"))
+                .thenReturn("{\"canonicalSkuId\":\"canonical-sku-1\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.WMS_OPERATIONS_SKILL,
+                "create_source_warehouse")).thenReturn("301");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.WMS_OPERATIONS_SKILL,
+                "create_target_warehouse")).thenReturn("302");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.WMS_OPERATIONS_SKILL,
+                "resolve_sku")).thenReturn("{\"skuId\":401}");
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
+                {
+                  "runIds":{"catalog":"base-cat"},
+                  "catalog":{},"master":{"identityReference":{},"warehouseReference":{}},
+                  "aftersale":{"commands":[]},"readback":{}
+                }
+                """);
+
+        JsonNode first = build(
+                RotatingBusinessScenarioInputFactory.SUPPLY_PLANNING_SOP_LIFECYCLE_SKILL);
+        JsonNode nextOccurrence = JsonUtils.parseTree(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.SUPPLY_PLANNING_SOP_LIFECYCLE_SKILL,
+                "2026-07-29", "temporal-run-2").orElseThrow());
+
+        assertThat(first.path("actorPrincipalId").asText()).isEqualTo("principal-planner");
+        assertThat(first.path("forecast").path("points")).hasSize(2);
+        assertThat(first.path("forecastEvaluation").path("actuals").get(0)
+                .path("bucketStart").asText()).isEqualTo("2026-07-22");
+        assertThat(first.path("supplyPlan").path("horizonStart").asText())
+                .isEqualTo("2026-07-30");
+        assertThat(first.path("scenarios").path("lean").path("onHandQuantity").asInt())
+                .isEqualTo(2);
+        assertThat(first.path("scenarios").path("resilient").path("onHandQuantity").asInt())
+                .isEqualTo(10);
+        assertThat(first.path("scenarioRecommendation").path("candidateScenarioIds"))
+                .hasSize(2);
+        assertThat(first.path("scenarioRecommendation")
+                .path("demandStressBasisPoints").asInt()).isEqualTo(12_000);
+        assertThat(first.path("executionProposal").path("targetType").asText())
+                .isEqualTo("TRANSFER_REQUEST");
+        assertThat(first.path("executionProposal").path("sourceWarehouseId").asLong())
+                .isEqualTo(301L);
+        assertThat(first.path("executionProposal").path("targetWarehouseId").asLong())
+                .isEqualTo(302L);
+        assertThat(first.path("executionProposal").path("wmsSkuId").asLong())
+                .isEqualTo(401L);
+        assertThat(first.path("forecast").path("forecastId").asText())
+                .isNotEqualTo(nextOccurrence.path("forecast").path("forecastId").asText());
+    }
+
+    @Test
+    void shouldBuildSopScenarioFromCurrentWmsAuthorityWhenNoPriorWmsWorkflowSucceeded() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.READY_MASTER_SKILL, "principal"))
+                .thenReturn("{\"principalId\":\"principal-planner\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL, "define_1"))
+                .thenReturn("{\"canonicalSkuId\":\"canonical-sku-1\"}");
+        when(mapper.selectWmsTransferSeed(162L)).thenReturn(new WmsTransferSeedRecord()
+                .setSourceWarehouseId(501L)
+                .setTargetWarehouseId(502L)
+                .setWmsSkuId(601L));
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
+                {
+                  "runIds":{"catalog":"base-cat"},
+                  "catalog":{},"master":{"identityReference":{},"warehouseReference":{}},
+                  "aftersale":{"commands":[]},"readback":{}
+                }
+                """);
+
+        JsonNode input = build(
+                RotatingBusinessScenarioInputFactory.SUPPLY_PLANNING_SOP_LIFECYCLE_SKILL);
+
+        assertThat(input.path("executionProposal").path("sourceWarehouseId").asLong())
+                .isEqualTo(501L);
+        assertThat(input.path("executionProposal").path("targetWarehouseId").asLong())
+                .isEqualTo(502L);
+        assertThat(input.path("executionProposal").path("wmsSkuId").asLong())
+                .isEqualTo(601L);
+    }
+
+    @Test
     void shouldBuildFreshQualityInspectionRecallWithIndependentReviewAndNewLot() {
         mockReadyMaster();
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(

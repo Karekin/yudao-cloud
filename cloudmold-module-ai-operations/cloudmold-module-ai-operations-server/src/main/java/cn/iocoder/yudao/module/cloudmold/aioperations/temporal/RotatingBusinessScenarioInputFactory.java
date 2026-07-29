@@ -50,6 +50,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.wms.operations.v1";
     static final String REPLENISHMENT_LIFECYCLE_SKILL =
             "skill.cloudmold.supply.replenishment-lifecycle.v1";
+    static final String SUPPLY_PLANNING_SOP_LIFECYCLE_SKILL =
+            "skill.cloudmold.supply-planning.sop-lifecycle.v1";
     static final String CUSTOMER_SERVICE_LIFECYCLE_SKILL =
             "skill.cloudmold.customer-service.resolution-lifecycle.v1";
     static final String FINANCE_CLOSE_LIFECYCLE_SKILL =
@@ -183,6 +185,43 @@ class RotatingBusinessScenarioInputFactory {
                     principal.path("principalId").asText(),
                     catalog.path("canonicalSkuId").asText(),
                     warehouse.path("warehouseId").asText());
+        } else if (SUPPLY_PLANNING_SOP_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            JsonNode catalog = result(tenantId, CATALOG_MATRIX_SKILL, "define_1");
+            JsonNode canonicalWarehouse = result(
+                    tenantId, READY_MASTER_SKILL, "warehouse_network");
+            JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
+            JsonNode sourceWarehouse = result(
+                    tenantId, WMS_OPERATIONS_SKILL, "create_source_warehouse");
+            JsonNode targetWarehouse = result(
+                    tenantId, WMS_OPERATIONS_SKILL, "create_target_warehouse");
+            JsonNode wmsSku = result(tenantId, WMS_OPERATIONS_SKILL, "resolve_sku");
+            long sourceWarehouseId = sourceWarehouse.asLong(0);
+            long targetWarehouseId = targetWarehouse.asLong(0);
+            long wmsSkuId = wmsSku.path("skuId").asLong(0);
+            if (sourceWarehouseId <= 0 || targetWarehouseId <= 0 || wmsSkuId <= 0
+                    || sourceWarehouseId == targetWarehouseId) {
+                WmsTransferSeedRecord seed = mapper.selectWmsTransferSeed(tenantId);
+                if (seed != null) {
+                    sourceWarehouseId = seed.getSourceWarehouseId() == null
+                            ? 0 : seed.getSourceWarehouseId();
+                    targetWarehouseId = seed.getTargetWarehouseId() == null
+                            ? 0 : seed.getTargetWarehouseId();
+                    wmsSkuId = seed.getWmsSkuId() == null ? 0 : seed.getWmsSkuId();
+                }
+            }
+            if (catalog.path("canonicalSkuId").asText().isBlank()
+                    || canonicalWarehouse.path("warehouseId").asText().isBlank()
+                    || principal.path("principalId").asText().isBlank()
+                    || sourceWarehouseId <= 0 || targetWarehouseId <= 0 || wmsSkuId <= 0
+                    || sourceWarehouseId == targetWarehouseId) {
+                return Optional.empty();
+            }
+            output = supplyPlanningSopLifecycle(
+                    newPrefix, occurredAt,
+                    catalog.path("canonicalSkuId").asText(),
+                    canonicalWarehouse.path("warehouseId").asText(),
+                    principal.path("principalId").asText(),
+                    sourceWarehouseId, targetWarehouseId, wmsSkuId);
         } else if (CUSTOMER_SERVICE_LIFECYCLE_SKILL.equals(targetSkillId)) {
             JsonNode customer = result(tenantId, CONSUMER_JOURNEY_SKILL, "consumer_principal");
             JsonNode order = result(tenantId, CONSUMER_JOURNEY_SKILL, "order_place");
@@ -279,6 +318,7 @@ class RotatingBusinessScenarioInputFactory {
             case PROCUREMENT_ORDER_SKILL -> "q";
             case WMS_OPERATIONS_SKILL -> "w";
             case REPLENISHMENT_LIFECYCLE_SKILL -> "r";
+            case SUPPLY_PLANNING_SOP_LIFECYCLE_SKILL -> "v";
             case CUSTOMER_SERVICE_LIFECYCLE_SKILL -> "k";
             case FINANCE_CLOSE_LIFECYCLE_SKILL -> "n";
             case QUALITY_INSPECTION_RECALL_LIFECYCLE_SKILL -> "j";
@@ -844,6 +884,139 @@ class RotatingBusinessScenarioInputFactory {
         input.set("procurement", procurement);
         input.set("warehouse", physical);
         return input;
+    }
+
+    private static ObjectNode supplyPlanningSopLifecycle(
+            String prefix, String occurredAt, String canonicalSkuId, String warehouseId,
+            String actorPrincipalId, long sourceWarehouseId, long targetWarehouseId,
+            long wmsSkuId) {
+        LocalDate date = Instant.parse(occurredAt).atZone(java.time.ZoneOffset.UTC).toLocalDate();
+        String runId = stableUuid(prefix + ":sop-run");
+        String correlationId = stableUuid(prefix + ":sop-correlation");
+        String forecastId = stableUuid(prefix + ":forecast");
+        String planId = stableUuid(prefix + ":supply-plan");
+        String leanScenarioId = stableUuid(prefix + ":scenario-lean");
+        String resilientScenarioId = stableUuid(prefix + ":scenario-resilient");
+
+        ObjectNode input = JsonNodeFactory.instance.objectNode();
+        input.put("runId", runId)
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt)
+                .put("actorPrincipalId", actorPrincipalId)
+                .put("conversionId", stableUuid(prefix + ":replenishment-conversion"));
+
+        ObjectNode forecast = input.putObject("forecast");
+        forecast.put("forecastId", forecastId)
+                .put("forecastCode", "AI-FC-" + prefix.toUpperCase())
+                .put("horizonStart", date.minusDays(7).toString())
+                .put("horizonEnd", date.plusDays(30).toString())
+                .put("bucketType", "DAY")
+                .put("modelRef", "AI_DEMAND_SENSING_V1")
+                .put("baselineSha256",
+                        DigestUtil.sha256Hex(prefix + ":forecast-baseline"));
+        ArrayNode points = forecast.putArray("points");
+        points.addObject()
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("warehouseId", warehouseId)
+                .put("bucketStart", date.minusDays(7).toString())
+                .put("forecastQuantity", 18)
+                .put("lowerQuantity", 15)
+                .put("upperQuantity", 24)
+                .put("uomCode", "EA");
+        points.addObject()
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("warehouseId", warehouseId)
+                .put("bucketStart", date.plusDays(1).toString())
+                .put("forecastQuantity", 20)
+                .put("lowerQuantity", 16)
+                .put("upperQuantity", 30)
+                .put("uomCode", "EA");
+
+        ObjectNode forecastEvaluation = input.putObject("forecastEvaluation");
+        forecastEvaluation.put("evaluationId",
+                        stableUuid(prefix + ":forecast-evaluation"))
+                .put("forecastId", forecastId)
+                .put("actualsSha256",
+                        DigestUtil.sha256Hex(prefix + ":forecast-actuals"));
+        forecastEvaluation.putArray("actuals").addObject()
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("warehouseId", warehouseId)
+                .put("bucketStart", date.minusDays(7).toString())
+                .put("actualQuantity", 20)
+                .put("uomCode", "EA");
+
+        input.putObject("supplyPlan")
+                .put("planId", planId)
+                .put("planCode", "AI-SOP-" + prefix.toUpperCase())
+                .put("demandForecastId", forecastId)
+                .put("horizonStart", date.plusDays(1).toString())
+                .put("horizonEnd", date.plusDays(30).toString())
+                .put("targetServiceLevelBasisPoints", 9_500)
+                .put("budgetAmountMinor", 100_000)
+                .put("currencyCode", "CNY")
+                .put("constraintsSha256",
+                        DigestUtil.sha256Hex(prefix + ":sop-constraints"));
+
+        ObjectNode scenarios = input.putObject("scenarios");
+        scenarios.set("lean", supplyPlanScenario(
+                leanScenarioId, planId, "LEAN", canonicalSkuId, warehouseId,
+                20, 5, 2, 0, 10, prefix + ":lean"));
+        scenarios.set("resilient", supplyPlanScenario(
+                resilientScenarioId, planId, "RESILIENT", canonicalSkuId, warehouseId,
+                20, 5, 10, 10, 20, prefix + ":resilient"));
+
+        ObjectNode recommendation = input.putObject("scenarioRecommendation");
+        recommendation.put("recommendationId",
+                        stableUuid(prefix + ":scenario-recommendation"))
+                .put("planId", planId)
+                .put("expectedPlanVersion", 1)
+                .put("targetServiceLevelFloorBasisPoints", 9_500)
+                .put("maxProjectedCostMinor", 50_000)
+                .put("demandStressBasisPoints", 12_000)
+                .put("supplyAvailabilityBasisPoints", 8_000)
+                .put("policySha256",
+                        DigestUtil.sha256Hex(prefix + ":robust-scenario-policy"));
+        recommendation.putArray("candidateScenarioIds")
+                .add(leanScenarioId)
+                .add(resilientScenarioId);
+
+        input.putObject("executionProposal")
+                .put("proposalId", stableUuid(prefix + ":execution-proposal"))
+                .put("recommendationId", ZERO_UUID)
+                .put("expectedRecommendationVersion", 2)
+                .put("targetType", "TRANSFER_REQUEST")
+                .put("mappingEvidenceSha256",
+                        DigestUtil.sha256Hex(prefix + ":wms-transfer-mapping"))
+                .put("sourceWarehouseId", sourceWarehouseId)
+                .put("targetWarehouseId", targetWarehouseId)
+                .put("wmsSkuId", wmsSkuId)
+                .put("proposedByPrincipalId", actorPrincipalId)
+                .put("policyCode", "SOP_TRANSFER_V1")
+                .put("policySha256",
+                        DigestUtil.sha256Hex(prefix + ":sop-transfer-policy"));
+        return input;
+    }
+
+    private static ObjectNode supplyPlanScenario(
+            String scenarioId, String planId, String scenarioCode,
+            String canonicalSkuId, String warehouseId, int forecastQuantity,
+            int safetyStockQuantity, int onHandQuantity, int inboundQuantity,
+            int capacityQuantity, String evidenceSeed) {
+        return JsonNodeFactory.instance.objectNode()
+                .put("scenarioId", scenarioId)
+                .put("planId", planId)
+                .put("scenarioCode", scenarioCode)
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("warehouseId", warehouseId)
+                .put("forecastQuantity", forecastQuantity)
+                .put("safetyStockQuantity", safetyStockQuantity)
+                .put("onHandQuantity", onHandQuantity)
+                .put("inboundQuantity", inboundQuantity)
+                .put("capacityQuantity", capacityQuantity)
+                .put("minimumOrderQuantity", 1)
+                .put("unitCostMinor", 1_000)
+                .put("uomCode", "EA")
+                .put("parametersSha256", DigestUtil.sha256Hex(evidenceSeed));
     }
 
     private static ObjectNode customerServiceLifecycle(String prefix, String occurredAt,
