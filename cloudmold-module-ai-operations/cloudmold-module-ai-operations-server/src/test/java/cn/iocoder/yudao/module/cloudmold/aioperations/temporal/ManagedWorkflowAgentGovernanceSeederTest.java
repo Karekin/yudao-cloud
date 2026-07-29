@@ -60,13 +60,16 @@ class ManagedWorkflowAgentGovernanceSeederTest {
                 .setTenantId(162L).setRequesterUserId(226L)
                 .setApproverUserId(225L).setGovernanceUserId(227L).setStatus("ACTIVE"));
         when(mapper.countActiveAgentRole(162L, "customer-service")).thenReturn(1);
-        when(mapper.countEnabledAgentActionPolicy(
-                162L, "customer-service", "ticket.resolve")).thenReturn(1);
+        when(mapper.countMatchingEnabledAgentActionPolicy(
+                162L, "customer-service", "ticket.resolve", "R2",
+                "skill.cloudmold.customer-service.resolution-lifecycle.v1", "1.0.0",
+                "a".repeat(64))).thenReturn(1);
         when(mapper.countEffectiveAgentRoleGrant(
                 162L, 226L, "customer-service")).thenReturn(1);
         ManagedSkillTaskWorkflowView workflow = ManagedSkillTaskWorkflowView.builder()
                 .skillId("skill.cloudmold.customer-service.resolution-lifecycle.v1")
-                .riskLevel("R2").approvalRequired(true).build();
+                .skillVersion("1.0.0").riskLevel("R2").approvalRequired(true)
+                .definitionClosureSha256("a".repeat(64)).build();
 
         ManagedWorkflowAgentGovernanceSeeder.ReconcileResult result =
                 new ManagedWorkflowAgentGovernanceSeeder(commands, authority, mapper)

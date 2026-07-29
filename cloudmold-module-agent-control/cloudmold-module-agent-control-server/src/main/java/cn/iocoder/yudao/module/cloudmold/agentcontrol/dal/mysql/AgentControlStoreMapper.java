@@ -202,6 +202,20 @@ public interface AgentControlStoreMapper {
             """)
     int insertActionPolicy(RoleActionPolicy value);
 
+    @Update("""
+            UPDATE cloudmold_agent_role_action_policy
+            SET permission_mode=#{value.permissionMode},risk_level=#{value.riskLevel},
+                approval_required=#{value.approvalRequired},enabled=#{value.enabled},
+                execution_required=#{value.executionRequired},skill_id=#{value.skillId},
+                skill_version=#{value.skillVersion},
+                skill_definition_closure_sha256=#{value.skillDefinitionClosureSha256},
+                version=#{value.version},updated_at=#{value.updatedAt}
+            WHERE tenant_id=#{value.tenantId} AND policy_id=#{value.policyId}
+              AND version=#{expectedVersion}
+            """)
+    int updateActionPolicy(@Param("value") RoleActionPolicy value,
+                           @Param("expectedVersion") Long expectedVersion);
+
     @Select("""
             SELECT policy_id,tenant_id,role_code,action_code,permission_mode,risk_level,approval_required,
                    enabled,execution_required,skill_id,skill_version,skill_definition_closure_sha256,

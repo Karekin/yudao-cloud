@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.cloudmold.aioperations.temporal;
 
+import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentAuthorityCommand;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentAuthorityGovernanceApi;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentAuthorityOperation;
@@ -116,8 +117,10 @@ class ManagedWorkflowAgentGovernanceSeeder {
                 defineRole(route.roleCode(), approvalPolicy.getGovernanceUserId(), seedOccurredAt);
                 createdRoles++;
             }
-            if (mapper.countEnabledAgentActionPolicy(
-                    tenantId, route.roleCode(), route.actionCode()) == 0) {
+            if (mapper.countMatchingEnabledAgentActionPolicy(
+                    tenantId, route.roleCode(), route.actionCode(), workflow.getRiskLevel(),
+                    workflow.getSkillId(), workflow.getSkillVersion(),
+                    workflow.getDefinitionClosureSha256()) == 0) {
                 defineActionPolicy(route, workflow, approvalPolicy.getGovernanceUserId(), seedOccurredAt);
                 createdPolicies++;
             }
@@ -180,7 +183,10 @@ class ManagedWorkflowAgentGovernanceSeeder {
             Instant occurredAt) {
         agentCommands.execute(AgentControlCommand.builder()
                 .operation(AgentControlOperation.SET_ACTION_POLICY)
-                .idempotencyKey("aiops:managed-action:v1:" + workflow.getSkillId())
+                .idempotencyKey("aiops:managed-action:v2:" + DigestUtil.sha256Hex(
+                        route.roleCode() + ":" + route.actionCode() + ":" + workflow.getRiskLevel()
+                                + ":" + workflow.getSkillId() + ":" + workflow.getSkillVersion()
+                                + ":" + workflow.getDefinitionClosureSha256()).substring(0, 32))
                 .occurredAt(occurredAt)
                 .actionPolicy(AgentControlCommand.RoleActionPolicyDefinition.builder()
                         .roleCode(route.roleCode())

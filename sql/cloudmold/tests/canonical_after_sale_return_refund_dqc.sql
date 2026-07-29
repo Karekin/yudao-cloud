@@ -57,10 +57,12 @@ WHERE r.status='INSPECTION_ACCEPTED'
 
 SELECT COUNT(*) AS return_disposition_assessment_violation
 FROM cloudmold_return_inspection i
+JOIN cloudmold_return_fulfillment r
+  ON r.tenant_id=i.tenant_id AND r.return_fulfillment_id=i.return_fulfillment_id
 LEFT JOIN cloudmold_return_disposition_assessment a
   ON a.tenant_id=i.tenant_id AND a.assessment_id=i.disposition_assessment_id
 WHERE i.disposition_code IS NOT NULL
-  AND (a.assessment_id IS NULL OR a.after_sale_id<>i.after_sale_id
+  AND (a.assessment_id IS NULL OR a.after_sale_id<>r.after_sale_id
     OR a.return_fulfillment_id<>i.return_fulfillment_id
     OR a.recommended_disposition<>i.disposition_code
     OR a.quality_status<>i.quality_status

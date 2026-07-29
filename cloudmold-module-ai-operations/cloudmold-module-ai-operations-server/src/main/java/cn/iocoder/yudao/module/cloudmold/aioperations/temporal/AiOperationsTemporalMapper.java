@@ -51,6 +51,22 @@ public interface AiOperationsTemporalMapper {
                                       @Param("actionCode") String actionCode);
 
     @Select("""
+            SELECT COUNT(*) FROM cloudmold_agent_role_action_policy
+            WHERE tenant_id=#{tenantId} AND role_code=#{roleCode} AND action_code=#{actionCode}
+              AND enabled=1 AND permission_mode='ALLOW' AND approval_required=1 AND execution_required=1
+              AND risk_level=#{riskLevel} AND skill_id=#{skillId} AND skill_version=#{skillVersion}
+              AND skill_definition_closure_sha256=#{definitionClosureSha256}
+            """)
+    int countMatchingEnabledAgentActionPolicy(
+            @Param("tenantId") Long tenantId,
+            @Param("roleCode") String roleCode,
+            @Param("actionCode") String actionCode,
+            @Param("riskLevel") String riskLevel,
+            @Param("skillId") String skillId,
+            @Param("skillVersion") String skillVersion,
+            @Param("definitionClosureSha256") String definitionClosureSha256);
+
+    @Select("""
             SELECT COUNT(*) FROM cloudmold_agent_actor_role_grant
             WHERE tenant_id=#{tenantId} AND actor_user_id=#{actorUserId} AND role_code=#{roleCode}
               AND status='ACTIVE' AND valid_from <= UTC_TIMESTAMP(6) AND valid_until > UTC_TIMESTAMP(6)

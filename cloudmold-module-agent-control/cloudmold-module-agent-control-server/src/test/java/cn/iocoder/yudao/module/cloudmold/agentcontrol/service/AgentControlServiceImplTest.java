@@ -115,6 +115,56 @@ class AgentControlServiceImplTest {
     }
 
     @Test
+    void updatesAnExistingActionPolicyWithANewFrozenSkillBinding() {
+        LocalDateTime createdAt = LocalDateTime.of(2026, 7, 1, 0, 0);
+        RoleActionPolicy existing = new RoleActionPolicy()
+                .setPolicyId("policy-aftersale")
+                .setTenantId(17L)
+                .setRoleCode("customer-service")
+                .setActionCode("aftersale.refund")
+                .setPermissionMode("ALLOW")
+                .setRiskLevel("R3")
+                .setApprovalRequired(true)
+                .setEnabled(true)
+                .setExecutionRequired(true)
+                .setSkillId("skill.cloudmold.commerce.aftersale-saga.v1")
+                .setSkillVersion("1.2.0")
+                .setSkillDefinitionClosureSha256("a".repeat(64))
+                .setVersion(1L)
+                .setCreatedAt(createdAt)
+                .setUpdatedAt(createdAt);
+        when(mapper.selectActionPolicy(17L, "customer-service", "aftersale.refund"))
+                .thenReturn(existing);
+        when(mapper.updateActionPolicy(any(), eq(1L))).thenReturn(1);
+
+        AgentControlResult result = service.execute(base(
+                        AgentControlOperation.SET_ACTION_POLICY, "policy-upgrade-aftersale-1")
+                .actionPolicy(AgentControlCommand.RoleActionPolicyDefinition.builder()
+                        .roleCode("customer-service")
+                        .actionCode("aftersale.refund")
+                        .riskLevel("R3")
+                        .approvalRequired(true)
+                        .executionRequired(true)
+                        .skillId("skill.cloudmold.commerce.aftersale-saga.v1")
+                        .skillVersion("1.3.0")
+                        .skillDefinitionClosureSha256("b".repeat(64))
+                        .build())
+                .build(), 227L);
+
+        ArgumentCaptor<RoleActionPolicy> updated = ArgumentCaptor.forClass(RoleActionPolicy.class);
+        verify(mapper).updateActionPolicy(updated.capture(), eq(1L));
+        assertThat(updated.getValue())
+                .extracting(RoleActionPolicy::getPolicyId, RoleActionPolicy::getSkillVersion,
+                        RoleActionPolicy::getSkillDefinitionClosureSha256,
+                        RoleActionPolicy::getVersion, RoleActionPolicy::getCreatedAt)
+                .containsExactly("policy-aftersale", "1.3.0", "b".repeat(64), 2L, createdAt);
+        assertThat(result)
+                .extracting(AgentControlResult::getAggregateId, AgentControlResult::getAggregateVersion)
+                .containsExactly("policy-aftersale", 2L);
+        verify(mapper, never()).insertActionPolicy(any());
+    }
+
+    @Test
     void returnsTheFrozenBusinessContextForOneApproval() {
         AgentApprovalDetailView detail = AgentApprovalDetailView.builder()
                 .approvalId("approval-detail-1")

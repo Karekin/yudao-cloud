@@ -146,17 +146,25 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
                             && input.getSkillDefinitionClosureSha256() == null,
                     "non-executable policy must not declare a Skill binding");
         }
-        RoleActionPolicy row = new RoleActionPolicy().setPolicyId(valueOrUuid(input.getPolicyId()))
+        RoleActionPolicy existing = mapper.selectActionPolicy(
+                tenantId, input.getRoleCode(), input.getActionCode());
+        RoleActionPolicy row = new RoleActionPolicy()
+                .setPolicyId(existing == null ? valueOrUuid(input.getPolicyId()) : existing.getPolicyId())
                 .setTenantId(tenantId).setRoleCode(input.getRoleCode()).setActionCode(input.getActionCode())
                 .setPermissionMode("ALLOW").setRiskLevel(input.getRiskLevel())
                 .setApprovalRequired(input.getApprovalRequired()).setEnabled(true)
                 .setExecutionRequired(executionRequired).setSkillId(input.getSkillId())
                 .setSkillVersion(input.getSkillVersion())
                 .setSkillDefinitionClosureSha256(input.getSkillDefinitionClosureSha256())
-                .setVersion(1L)
-                .setCreatedAt(now).setUpdatedAt(now);
-        require(mapper.insertActionPolicy(row) == 1, "failed to persist role action policy");
-        return new Outcome("role_action_policy", row.getPolicyId(), 1L, "ENABLED",
+                .setVersion(existing == null ? 1L : existing.getVersion() + 1L)
+                .setCreatedAt(existing == null ? now : existing.getCreatedAt()).setUpdatedAt(now);
+        if (existing == null) {
+            require(mapper.insertActionPolicy(row) == 1, "failed to persist role action policy");
+        } else {
+            require(mapper.updateActionPolicy(row, existing.getVersion()) == 1,
+                    "role action policy update conflict");
+        }
+        return new Outcome("role_action_policy", row.getPolicyId(), row.getVersion(), "ENABLED",
                 "agent_control.action_policy.set");
     }
 
