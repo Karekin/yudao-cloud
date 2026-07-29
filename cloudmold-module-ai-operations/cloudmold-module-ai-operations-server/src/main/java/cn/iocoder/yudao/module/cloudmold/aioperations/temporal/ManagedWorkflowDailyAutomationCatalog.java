@@ -45,6 +45,7 @@ final class ManagedWorkflowDailyAutomationCatalog {
             "skill.cloudmold.supply.replenishment-lifecycle.v1",
             "skill.cloudmold.customer-service.resolution-lifecycle.v1",
             "skill.cloudmold.finance.close-lifecycle.v1",
+            "skill.cloudmold.quality.inspection-recall-lifecycle.v1",
             "skill.cloudmold.commerce.reuse-ready-master.v1",
             "skill.cloudmold.commerce.legacy-projection-plan.v1"
     );
@@ -90,6 +91,8 @@ final class ManagedWorkflowDailyAutomationCatalog {
                     new ApprovalRoute("customer-service", "ticket.resolve")),
             Map.entry("skill.cloudmold.finance.close-lifecycle.v1",
                     new ApprovalRoute("finance-operations", "finance.period-close")),
+            Map.entry("skill.cloudmold.quality.inspection-recall-lifecycle.v1",
+                    new ApprovalRoute("quality-operations", "quality.inspection-recall")),
             Map.entry("skill.cloudmold.supply-planning.prepare.v1",
                     new ApprovalRoute("supply-planning", "replenishment.convert"))
     );

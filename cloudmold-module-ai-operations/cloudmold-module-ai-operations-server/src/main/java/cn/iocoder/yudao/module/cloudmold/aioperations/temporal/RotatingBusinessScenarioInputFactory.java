@@ -54,6 +54,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.customer-service.resolution-lifecycle.v1";
     static final String FINANCE_CLOSE_LIFECYCLE_SKILL =
             "skill.cloudmold.finance.close-lifecycle.v1";
+    static final String QUALITY_INSPECTION_RECALL_LIFECYCLE_SKILL =
+            "skill.cloudmold.quality.inspection-recall-lifecycle.v1";
     static final String READY_MASTER_SKILL = "skill.cloudmold.commerce.reuse-ready-master.v1";
     static final String LEGACY_PROJECTION_SKILL = "skill.cloudmold.commerce.legacy-projection-plan.v1";
     private static final String ZERO_UUID = "00000000-0000-0000-0000-000000000000";
@@ -204,6 +206,34 @@ class RotatingBusinessScenarioInputFactory {
             }
             output = financeCloseLifecycle(newPrefix, occurredAt,
                     financeMakerUserId, financeCheckerUserId);
+        } else if (QUALITY_INSPECTION_RECALL_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
+            JsonNode warehouse = result(tenantId, READY_MASTER_SKILL, "warehouse_network");
+            JsonNode manager = result(tenantId, READY_MASTER_SKILL, "principal");
+            JsonNode catalog = result(tenantId, CATALOG_MATRIX_SKILL, "define_1");
+            TemporalApprovalPolicyRecord approvalPolicy = mapper.selectApprovalPolicy(tenantId);
+            Long primaryInspectorUserId =
+                    mapper.selectFirstEffectiveAgentRoleActor(tenantId, "finance");
+            Long independentReviewerUserId = approvalPolicy == null
+                    ? null : approvalPolicy.getGovernanceUserId();
+            if (merchant.path("merchantId").asText().isBlank()
+                    || warehouse.path("warehouseId").asText().isBlank()
+                    || warehouse.path("locationId").asText().isBlank()
+                    || manager.path("principalId").asText().isBlank()
+                    || catalog.path("canonicalSkuId").asText().isBlank()
+                    || primaryInspectorUserId == null || primaryInspectorUserId <= 0
+                    || independentReviewerUserId == null || independentReviewerUserId <= 0
+                    || primaryInspectorUserId.equals(independentReviewerUserId)) {
+                return Optional.empty();
+            }
+            output = qualityInspectionRecallLifecycle(
+                    newPrefix, occurredAt,
+                    merchant.path("merchantId").asText(),
+                    warehouse.path("warehouseId").asText(),
+                    warehouse.path("locationId").asText(),
+                    catalog.path("canonicalSkuId").asText(),
+                    manager.path("principalId").asText(),
+                    primaryInspectorUserId, independentReviewerUserId);
         } else {
             if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
                 return Optional.empty();
@@ -239,6 +269,7 @@ class RotatingBusinessScenarioInputFactory {
             case REPLENISHMENT_LIFECYCLE_SKILL -> "r";
             case CUSTOMER_SERVICE_LIFECYCLE_SKILL -> "k";
             case FINANCE_CLOSE_LIFECYCLE_SKILL -> "n";
+            case QUALITY_INSPECTION_RECALL_LIFECYCLE_SKILL -> "j";
             case READY_MASTER_SKILL -> "m";
             case LEGACY_PROJECTION_SKILL -> "l";
             default -> throw new IllegalArgumentException("Unsupported rotating scenario Skill: " + skillId);
@@ -977,6 +1008,185 @@ class RotatingBusinessScenarioInputFactory {
                 .put("runId", runId)
                 .put("idempotencyKey", "pending-finance-command")
                 .put("occurredAt", occurredAt);
+    }
+
+    private static ObjectNode qualityInspectionRecallLifecycle(
+            String prefix, String occurredAt, String merchantId, String warehouseId,
+            String locationId, String canonicalSkuId, String managerPrincipalId,
+            long primaryInspectorUserId, long independentReviewerUserId) {
+        LocalDate date = Instant.parse(occurredAt).atZone(java.time.ZoneOffset.UTC).toLocalDate();
+        String runId = prefix + "-quality-recall";
+        String correlationId = stableUuid(prefix + ":quality-recall-correlation");
+        String inspectionTaskId = stableUuid(prefix + ":inspection-task");
+        String standardId = stableUuid(prefix + ":quality-standard");
+        String capaId = stableUuid(prefix + ":quality-capa");
+        String recallActionId = stableUuid(prefix + ":quality-recall");
+
+        ObjectNode input = JsonNodeFactory.instance.objectNode();
+        input.put("managerPrincipalId", managerPrincipalId);
+        input.set("primaryInspectorIdentityCommand", financeIdentityCommand(
+                runId, correlationId, occurredAt, primaryInspectorUserId));
+        input.set("independentReviewerIdentityCommand", financeIdentityCommand(
+                runId, correlationId, occurredAt, independentReviewerUserId));
+        input.set("lotCommand", JsonNodeFactory.instance.objectNode()
+                .put("operation", "REGISTER")
+                .put("idempotencyKey", "pending-quality-lot-command")
+                .put("runId", runId)
+                .put("ownerType", "MERCHANT")
+                .put("ownerId", merchantId)
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("lotCode", "AI-QLOT-" + prefix.toUpperCase())
+                .put("manufacturedOn", date.minusDays(30).toString())
+                .put("expiresOn", date.plusDays(365).toString())
+                .put("receivedAt", occurredAt)
+                .put("reasonCode", "AI_QUALITY_INSPECTION")
+                .put("evidenceRef", "evidence:quality/" + prefix)
+                .put("traceId", runId)
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt));
+        input.set("stockCommand", JsonNodeFactory.instance.objectNode()
+                .put("operation", "RECEIVE")
+                .put("idempotencyKey", "pending-quality-stock-command")
+                .put("ownerType", "MERCHANT")
+                .put("ownerId", merchantId)
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("warehouseId", warehouseId)
+                .put("locationId", locationId)
+                .put("lotId", ZERO_UUID)
+                .put("stockStatus", "SELLABLE")
+                .put("qualityStatus", "QUALIFIED")
+                .put("baseUomCode", "EA")
+                .put("quantity", 12)
+                .put("businessType", "QUALITY_INSPECTION")
+                .put("businessId", inspectionTaskId)
+                .put("businessItemId", recallActionId)
+                .put("businessNo", "AI-QC-" + prefix.toUpperCase())
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt));
+
+        ArrayNode commands = input.putArray("commands");
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "CREATE_STANDARD")
+                .set("standard", JsonNodeFactory.instance.objectNode()
+                        .put("standardId", standardId)
+                        .put("standardCode", "AI-QS-" + prefix.toUpperCase())
+                        .put("categoryCode", "APPAREL")
+                        .put("brandCode", "CLOUDMOLD")
+                        .put("applicableSkuId", canonicalSkuId)
+                        .put("contentSha256",
+                                DigestUtil.sha256Hex(prefix + ":quality-standard-content"))));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "PUBLISH_STANDARD")
+                .set("standard", JsonNodeFactory.instance.objectNode()
+                        .put("standardId", standardId)
+                        .put("expectedVersion", 1)
+                        .put("approverPrincipalId", ZERO_UUID)));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "CERTIFY_AUTHENTICATOR")
+                .set("certification", JsonNodeFactory.instance.objectNode()
+                        .put("certificationId", stableUuid(prefix + ":primary-certification"))
+                        .put("authenticatorPrincipalId", ZERO_UUID)
+                        .put("standardId", standardId)
+                        .put("certificationLevel", "EXPERT")
+                        .put("effectiveFrom", date.minusDays(1).toString())
+                        .put("effectiveTo", date.plusDays(365).toString())
+                        .put("evidenceSha256",
+                                DigestUtil.sha256Hex(prefix + ":primary-certification-evidence"))));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "CERTIFY_AUTHENTICATOR")
+                .set("certification", JsonNodeFactory.instance.objectNode()
+                        .put("certificationId", stableUuid(prefix + ":reviewer-certification"))
+                        .put("authenticatorPrincipalId", ZERO_UUID)
+                        .put("standardId", standardId)
+                        .put("certificationLevel", "SENIOR")
+                        .put("effectiveFrom", date.minusDays(1).toString())
+                        .put("effectiveTo", date.plusDays(365).toString())
+                        .put("evidenceSha256",
+                                DigestUtil.sha256Hex(prefix + ":reviewer-certification-evidence"))));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "CREATE_INSPECTION_TASK")
+                .set("inspectionTask", JsonNodeFactory.instance.objectNode()
+                        .put("taskId", inspectionTaskId)
+                        .put("standardId", standardId)
+                        .put("subjectType", "INBOUND_ITEM")
+                        .put("subjectRef", "AI-INBOUND-" + prefix.toUpperCase())
+                        .put("canonicalSkuId", canonicalSkuId)
+                        .put("lotId", ZERO_UUID)
+                        .put("warehouseId", warehouseId)
+                        .put("priority", "HIGH")));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "ASSIGN_INSPECTION_TASK")
+                .set("inspectionTask", JsonNodeFactory.instance.objectNode()
+                        .put("taskId", inspectionTaskId)
+                        .put("expectedVersion", 1)
+                        .put("authenticatorPrincipalId", ZERO_UUID)));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "START_INSPECTION_TASK")
+                .set("inspectionTask", JsonNodeFactory.instance.objectNode()
+                        .put("taskId", inspectionTaskId)
+                        .put("expectedVersion", 2)));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "DECIDE_INSPECTION_TASK")
+                .set("inspectionTask", JsonNodeFactory.instance.objectNode()
+                        .put("taskId", inspectionTaskId)
+                        .put("expectedVersion", 3)
+                        .put("decision", "FAIL")
+                        .put("defectCode", "MATERIAL_DEFECT")
+                        .put("evidenceRef", qualityEvidence(prefix, "primary-inspection"))));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "REQUEST_RECHECK")
+                .set("inspectionTask", JsonNodeFactory.instance.objectNode()
+                        .put("taskId", inspectionTaskId)
+                        .put("expectedVersion", 4)
+                        .put("recheckReasonCode", "AI_INDEPENDENT_RECHECK")
+                        .put("secondaryAuthenticatorPrincipalId", ZERO_UUID)));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "SUBMIT_RECHECK_DECISION")
+                .set("inspectionTask", JsonNodeFactory.instance.objectNode()
+                        .put("taskId", inspectionTaskId)
+                        .put("expectedVersion", 5)
+                        .put("decision", "FAIL")
+                        .put("defectCode", "MATERIAL_DEFECT")
+                        .put("evidenceRef", qualityEvidence(prefix, "independent-recheck"))));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "COMPLETE_INSPECTION_TASK")
+                .set("inspectionTask", JsonNodeFactory.instance.objectNode()
+                        .put("taskId", inspectionTaskId)
+                        .put("expectedVersion", 6)));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "OPEN_CAPA")
+                .set("capa", JsonNodeFactory.instance.objectNode()
+                        .put("capaId", capaId)
+                        .put("inspectionTaskId", inspectionTaskId)
+                        .put("rootCauseCode", "SUPPLIER_MATERIAL")
+                        .put("ownerPrincipalId", managerPrincipalId)
+                        .put("dueDate", date.plusDays(7).toString())));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "RESOLVE_CAPA")
+                .set("capa", JsonNodeFactory.instance.objectNode()
+                        .put("capaId", capaId)
+                        .put("expectedVersion", 1)
+                        .put("effectivenessEvidenceRef",
+                                qualityEvidence(prefix, "capa-effectiveness"))));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "OPEN_RECALL_ACTION")
+                .set("recallAction", JsonNodeFactory.instance.objectNode()
+                        .put("recallActionId", recallActionId)
+                        .put("inspectionTaskId", inspectionTaskId)
+                        .put("reasonCode", "MATERIAL_DEFECT")
+                        .put("ownerPrincipalId", managerPrincipalId)));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "ACKNOWLEDGE_RECALL_ACTION")
+                .set("recallAction", JsonNodeFactory.instance.objectNode()
+                        .put("recallActionId", recallActionId)
+                        .put("ownerPrincipalId", managerPrincipalId)
+                        .put("expectedVersion", 1)));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "RESOLVE_RECALL_ACTION")
+                .set("recallAction", JsonNodeFactory.instance.objectNode()
+                        .put("recallActionId", recallActionId)
+                        .put("ownerPrincipalId", managerPrincipalId)
+                        .put("expectedVersion", 2)
+                        .put("resolutionCode", "QUARANTINED_DESTROYED")));
+        return input;
+    }
+
+    private static ObjectNode qualityCommand(String runId, String correlationId,
+                                             String occurredAt, String operation) {
+        return JsonNodeFactory.instance.objectNode()
+                .put("operation", operation)
+                .put("idempotencyKey", "pending-quality-command")
+                .put("runId", runId)
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt);
+    }
+
+    private static String qualityEvidence(String prefix, String purpose) {
+        return "sha256:" + DigestUtil.sha256Hex(prefix + ":" + purpose);
     }
 
     private static ObjectNode consumerJourney(ObjectNode fullChain, String prefix, String occurredAt,

@@ -384,6 +384,68 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .path("evidenceSha256").asText()).matches("[0-9a-f]{64}");
     }
 
+    @Test
+    void shouldBuildFreshQualityInspectionRecallWithIndependentReviewAndNewLot() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.READY_MASTER_SKILL, "principal"))
+                .thenReturn("{\"principalId\":\"11111111-1111-4111-8111-111111111111\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.READY_MASTER_SKILL, "warehouse_network"))
+                .thenReturn("""
+                        {"warehouseId":"22222222-2222-4222-8222-222222222222",
+                         "locationId":"33333333-3333-4333-8333-333333333333"}
+                        """);
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL, "define_1"))
+                .thenReturn("{\"canonicalSkuId\":\"44444444-4444-4444-8444-444444444444\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
+                {
+                  "runIds":{"catalog":"base-cat"},
+                  "catalog":{},"master":{"identityReference":{},"warehouseReference":{}},
+                  "aftersale":{"commands":[]},"readback":{}
+                }
+                """);
+        when(mapper.selectApprovalPolicy(162L)).thenReturn(new TemporalApprovalPolicyRecord()
+                .setTenantId(162L).setGovernanceUserId(227L).setStatus("ACTIVE"));
+        when(mapper.selectFirstEffectiveAgentRoleActor(162L, "finance")).thenReturn(228L);
+
+        JsonNode first = build(
+                RotatingBusinessScenarioInputFactory.QUALITY_INSPECTION_RECALL_LIFECYCLE_SKILL);
+        JsonNode second = JsonUtils.parseTree(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.QUALITY_INSPECTION_RECALL_LIFECYCLE_SKILL,
+                "2026-07-29", "temporal-run-2").orElseThrow());
+
+        assertThat(first.path("managerPrincipalId").asText())
+                .isEqualTo("11111111-1111-4111-8111-111111111111");
+        assertThat(first.path("primaryInspectorIdentityCommand").path("sourceId").asText())
+                .isEqualTo("228");
+        assertThat(first.path("independentReviewerIdentityCommand").path("sourceId").asText())
+                .isEqualTo("227");
+        assertThat(first.path("lotCommand").path("lotCode").asText()).startsWith("AI-QLOT-J260729162-");
+        assertThat(first.path("lotCommand").path("lotCode").asText())
+                .isNotEqualTo(second.path("lotCommand").path("lotCode").asText());
+        assertThat(first.path("stockCommand").path("quantity").asInt()).isEqualTo(12);
+        assertThat(first.path("stockCommand").path("locationId").asText())
+                .isEqualTo("33333333-3333-4333-8333-333333333333");
+        assertThat(first.path("commands")).hasSize(16);
+        assertThat(first.path("commands").get(0).path("operation").asText())
+                .isEqualTo("CREATE_STANDARD");
+        assertThat(first.path("commands").get(7).path("operation").asText())
+                .isEqualTo("DECIDE_INSPECTION_TASK");
+        assertThat(first.path("commands").get(8).path("operation").asText())
+                .isEqualTo("REQUEST_RECHECK");
+        assertThat(first.path("commands").get(11).path("operation").asText())
+                .isEqualTo("OPEN_CAPA");
+        assertThat(first.path("commands").get(13).path("operation").asText())
+                .isEqualTo("OPEN_RECALL_ACTION");
+        assertThat(first.path("commands").get(15).path("recallAction")
+                .path("resolutionCode").asText()).isEqualTo("QUARANTINED_DESTROYED");
+        assertThat(first.path("commands").get(7).path("inspectionTask")
+                .path("evidenceRef").asText()).matches("sha256:[0-9a-f]{64}");
+    }
+
     private JsonNode build(String skillId) {
         return JsonUtils.parseTree(factory.build(162L, skillId,
                 "2026-07-29", "temporal-run-1").orElseThrow());

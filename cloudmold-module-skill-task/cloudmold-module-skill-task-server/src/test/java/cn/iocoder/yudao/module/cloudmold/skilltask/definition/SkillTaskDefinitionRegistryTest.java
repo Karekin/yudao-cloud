@@ -185,6 +185,22 @@ class SkillTaskDefinitionRegistryTest {
                 .hasSize(11);
         assertThat(financeLifecycle.getSteps().get(financeLifecycle.getSteps().size() - 1).getWaitSuccess()
                 .path("/status").asText()).isEqualTo("CLOSED");
+        SkillTaskDefinition qualityLifecycle = workspaceRegistry.require(
+                "skill.cloudmold.quality.inspection-recall-lifecycle.v1", "1.0.0");
+        assertThat(qualityLifecycle.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(qualityLifecycle.getOwnerRole()).isEqualTo("quality-operations");
+        assertThat(qualityLifecycle.getRiskLevel()).isEqualTo("R3");
+        assertThat(qualityLifecycle.getSteps()).hasSize(21);
+        assertThat(qualityLifecycle.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(20);
+        assertThat(qualityLifecycle.getSteps().get(qualityLifecycle.getSteps().size() - 1))
+                .satisfies(step -> {
+                    assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
+                    assertThat(step.getCapabilityId()).isEqualTo(
+                            "capability.cloudmold.quality.quality-recall-workflow-query.inspect.v1");
+                    assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("SUCCEEDED");
+                });
         assertThat(workspaceRegistry.all()).extracting(SkillTaskDefinition::getSkillId)
                 .contains("skill.cloudmold.commerce.catalog-matrix.v1",
                         "skill.cloudmold.commerce.order-cancellation-operational.v1",

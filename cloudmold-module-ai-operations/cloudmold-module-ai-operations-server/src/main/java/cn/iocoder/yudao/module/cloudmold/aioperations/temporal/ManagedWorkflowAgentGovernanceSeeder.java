@@ -40,9 +40,12 @@ class ManagedWorkflowAgentGovernanceSeeder {
             Map.entry("merchant-operations", "商家运营"),
             Map.entry("operations-control", "综合运营控制"),
             Map.entry("procurement", "采购与供应商运营"),
+            Map.entry("quality-operations", "质量检验与召回运营"),
             Map.entry("supply-planning", "供应计划运营"),
             Map.entry("warehouse-operations", "仓储运营"),
             Map.entry("buyer", "采购会签责任人"),
+            Map.entry("quality", "质量会签责任人"),
+            Map.entry("operations-lead", "运营负责人"),
             Map.entry("risk", "风险会签责任人"),
             Map.entry("legal", "法务会签责任人")
     );
@@ -60,7 +63,8 @@ class ManagedWorkflowAgentGovernanceSeeder {
             Map.entry("purchase-order.dispatch", List.of("buyer", "finance")),
             Map.entry("warehouse.physical-cycle", List.of("inventory-control", "operations-control")),
             Map.entry("replenishment.end-to-end", List.of("buyer", "finance")),
-            Map.entry("finance.period-close", List.of("risk", "operations-control"))
+            Map.entry("finance.period-close", List.of("risk", "operations-control")),
+            Map.entry("quality.inspection-recall", List.of("quality", "operations-lead"))
     );
 
     private final AgentControlCommandApi agentCommands;
@@ -206,9 +210,10 @@ class ManagedWorkflowAgentGovernanceSeeder {
     private Long responsibilityActor(
             Long tenantId, String roleCode, TemporalApprovalPolicyRecord approvalPolicy) {
         return switch (roleCode) {
-            case "customer-service", "buyer", "risk", "inventory-control" ->
+            case "customer-service", "buyer", "quality", "risk", "inventory-control" ->
                     approvalPolicy.getGovernanceUserId();
-            case "finance", "legal", "operations-control" -> requireFinancialController(tenantId);
+            case "finance", "legal", "operations-control", "operations-lead" ->
+                    requireFinancialController(tenantId);
             default -> throw new IllegalStateException(
                     "managed workflow responsibility actor is not configured for role: " + roleCode);
         };

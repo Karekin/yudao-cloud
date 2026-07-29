@@ -45,6 +45,9 @@ final class AgentApprovalR3Policy {
                 "compensation.", "payment.refund", "trade.refund")) {
             return List.of("customer-service", "finance");
         }
+        if (action.equals("quality.inspection-recall")) {
+            return List.of("quality", "operations-lead");
+        }
         if (startsWithAny(action, "quality.", "recall.", "capa.")) {
             return List.of("quality", "risk", "operations-lead");
         }

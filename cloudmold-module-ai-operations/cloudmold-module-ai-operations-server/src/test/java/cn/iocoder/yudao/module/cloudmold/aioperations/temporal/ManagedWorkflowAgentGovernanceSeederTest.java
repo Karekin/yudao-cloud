@@ -77,4 +77,29 @@ class ManagedWorkflowAgentGovernanceSeederTest {
         verify(commands, never()).execute(any(), any());
         verify(authority, never()).executeAuthorityGovernance(any(), any());
     }
+
+    @Test
+    void shouldSeedIndependentQualityAndOperationsLeadResponsibility() {
+        AgentControlCommandApi commands = mock(AgentControlCommandApi.class);
+        AgentAuthorityGovernanceApi authority = mock(AgentAuthorityGovernanceApi.class);
+        AiOperationsTemporalMapper mapper = mock(AiOperationsTemporalMapper.class);
+        when(mapper.selectApprovalPolicy(162L)).thenReturn(new TemporalApprovalPolicyRecord()
+                .setTenantId(162L).setRequesterUserId(226L)
+                .setApproverUserId(225L).setGovernanceUserId(227L).setStatus("ACTIVE"));
+        when(mapper.selectFirstEffectiveAgentRoleActor(162L, "finance")).thenReturn(228L);
+        ManagedSkillTaskWorkflowView workflow = ManagedSkillTaskWorkflowView.builder()
+                .skillId("skill.cloudmold.quality.inspection-recall-lifecycle.v1")
+                .skillVersion("1.0.0").riskLevel("R3").approvalRequired(true)
+                .definitionClosureSha256("a".repeat(64)).build();
+
+        ManagedWorkflowAgentGovernanceSeeder.ReconcileResult result =
+                new ManagedWorkflowAgentGovernanceSeeder(commands, authority, mapper)
+                        .reconcile(162L, List.of(workflow));
+
+        assertThat(result).isEqualTo(
+                new ManagedWorkflowAgentGovernanceSeeder.ReconcileResult(1, 3, 1, 3));
+        verify(authority, org.mockito.Mockito.times(2))
+                .executeAuthorityGovernance(any(), eq(227L));
+        verify(authority).executeAuthorityGovernance(any(), eq(225L));
+    }
 }
