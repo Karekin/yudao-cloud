@@ -63,6 +63,8 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(json.path("listing").path("commands").get(0).path("offers")).hasSize(6);
         assertThat(json.path("listing").path("commands").get(0).path("runId").asText())
                 .startsWith("p260729162-").endsWith("-aftersale");
+        assertThat(json.path("readback").path("listingId").asText())
+                .isEqualTo("00000000-0000-0000-0000-000000000000");
         assertThat(json.path("master").path("merchantReference").path("merchantId").asText())
                 .isEqualTo("merchant-1");
         assertThat(json.path("master").path("merchantCommands").isMissingNode()).isTrue();
@@ -220,18 +222,12 @@ class RotatingBusinessScenarioInputFactoryTest {
     @Test
     void shouldRotateReusableChildBusinessScenariosInsteadOfLeavingDailySchedulesIdle() {
         mockReadyMaster();
+        ObjectNode template = completeAfterSaleTemplate();
+        template.putObject("legacyProjection").putArray("plans")
+                .addObject().put("idempotencyKey", "base-projection");
         when(mapper.selectLatestSuccessfulSkillTaskInput(
-                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
-                {
-                  "runIds":{"catalog":"base-cat"},
-                  "catalog":{"definitions":[{"styleCode":"YS-BASEABC1","spuCode":"YS-BASEABC1",
-                    "occurredAt":"2026-01-01T00:00:00Z"}],"lifecycle":[]},
-                  "master":{"identityReference":{},"warehouseReference":{}},
-                  "aftersale":{"commands":[{"idempotencyKey":"base-listing","occurredAt":"2026-01-01T00:00:00Z"}]},
-                  "legacyProjection":{"plans":[{"idempotencyKey":"base-projection"}]},
-                  "readback":{}
-                }
-                """);
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(template));
 
         JsonNode catalog = build(RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL);
         JsonNode aftersale = build(RotatingBusinessScenarioInputFactory.AFTERSALE_SAGA_SKILL);
@@ -915,22 +911,7 @@ class RotatingBusinessScenarioInputFactoryTest {
     @Test
     void shouldAlternateRestockAndScrapInputsWithMakerCheckerSeparation() {
         mockReadyMaster();
-        ObjectNode template = JsonNodeFactory.instance.objectNode();
-        template.putObject("runIds").put("catalog", "base-cat");
-        template.putObject("catalog").putArray("definitions").addObject()
-                .put("styleCode", "YS-BASEABC1").put("spuCode", "YS-BASEABC1")
-                .put("occurredAt", "2026-01-01T00:00:00Z");
-        template.putObject("master").putObject("identityReference");
-        ((ObjectNode) template.path("master")).putObject("warehouseReference");
-        ArrayNode commands = template.putObject("aftersale").putArray("commands");
-        for (int index = 0; index < 25; index++) {
-            commands.addObject().put("operation", index == 24 ? "ACCEPT_INSPECTION" : "TEST")
-                    .put("idempotencyKey", "base-command-" + index)
-                    .put("runId", "base-aftersale")
-                    .put("correlationId", "70000000-0000-4000-8000-000000000001")
-                    .put("occurredAt", "2026-01-01T00:00:00Z");
-        }
-        template.putObject("readback");
+        ObjectNode template = completeAfterSaleTemplate();
         when(mapper.selectLatestSuccessfulSkillTaskInput(
                 162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
                 .thenReturn(JsonUtils.toJsonString(template));
@@ -955,9 +936,60 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .isEqualTo("RESTOCK");
     }
 
+    @Test
+    void shouldHydrateStandaloneAfterSaleWithActiveCatalogAndMasterReferences() {
+        mockReadyMaster();
+        ObjectNode template = completeAfterSaleTemplate();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(template));
+
+        JsonNode input = build(RotatingBusinessScenarioInputFactory.AFTERSALE_SAGA_SKILL);
+
+        JsonNode orderItem = input.path("commands").get(7).path("items").get(0);
+        assertThat(orderItem.path("listingId").asText()).isEqualTo("listing-1");
+        assertThat(orderItem.path("listingOfferId").asText()).isEqualTo("offer-1");
+        assertThat(orderItem.path("canonicalSkuId").asText()).isEqualTo("sku-1");
+        JsonNode inventoryReceive = input.path("commands").get(6);
+        assertThat(inventoryReceive.path("ownerId").asText()).isEqualTo("merchant-1");
+        assertThat(inventoryReceive.path("canonicalSkuId").asText()).isEqualTo("sku-1");
+        assertThat(inventoryReceive.path("warehouseId").asText()).isEqualTo("warehouse-1");
+        assertThat(input.path("commands").get(12).path("sellerId").asText())
+                .isEqualTo("merchant-1");
+        assertThat(input.path("commands").get(13).path("warehouseId").asText())
+                .isEqualTo("warehouse-1");
+    }
+
     private JsonNode build(String skillId) {
         return JsonUtils.parseTree(factory.build(162L, skillId,
                 "2026-07-29", "temporal-run-1").orElseThrow());
+    }
+
+    private static ObjectNode completeAfterSaleTemplate() {
+        ObjectNode template = JsonNodeFactory.instance.objectNode();
+        template.putObject("runIds").put("catalog", "base-cat");
+        template.putObject("catalog").putArray("definitions").addObject()
+                .put("styleCode", "YS-BASEABC1").put("spuCode", "YS-BASEABC1")
+                .put("occurredAt", "2026-01-01T00:00:00Z");
+        ((ObjectNode) template.path("catalog")).putArray("lifecycle");
+        template.putObject("master").putObject("identityReference");
+        ((ObjectNode) template.path("master")).putObject("warehouseReference");
+        ArrayNode commands = template.putObject("aftersale").putArray("commands");
+        for (int index = 0; index < 25; index++) {
+            ObjectNode command = commands.addObject()
+                    .put("operation", index == 24 ? "ACCEPT_INSPECTION" : "TEST")
+                    .put("idempotencyKey", "base-command-" + index)
+                    .put("runId", "base-aftersale")
+                    .put("correlationId", "70000000-0000-4000-8000-000000000001")
+                    .put("occurredAt", "2026-01-01T00:00:00Z");
+            if (index == 0) {
+                command.putArray("offers").addObject();
+            } else if (index == 7 || index == 12) {
+                command.putArray("items").addObject();
+            }
+        }
+        template.putObject("readback");
+        return template;
     }
 
     private void mockReadyMaster() {
@@ -970,5 +1002,13 @@ class RotatingBusinessScenarioInputFactoryTest {
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(
                 162L, "skill.cloudmold.commerce.reuse-ready-master.v1", "principal"))
                 .thenReturn("{\"principalId\":\"principal-1\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL, "define_1"))
+                .thenReturn("{\"canonicalSpuId\":\"spu-1\",\"canonicalSkuId\":\"sku-1\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.PRODUCT_TO_LISTING_SKILL, "listing_create"))
+                .thenReturn("""
+                        {"listingId":"listing-1","offers":[{"listingOfferId":"offer-1"}]}
+                        """);
     }
 }

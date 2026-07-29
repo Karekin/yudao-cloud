@@ -112,11 +112,18 @@ class RotatingBusinessScenarioInputFactory {
         rotated.set("master", reusableMaster.get());
         JsonNode output;
         if (FULL_CHAIN_SKILL.equals(targetSkillId)) {
+            ObjectNode product = productToListing(rotated, newPrefix);
+            product.withObject("/runIds").put("product", newPrefix + "-product");
+            rotated.set("product", product);
             output = rotated;
         } else if (CATALOG_MATRIX_SKILL.equals(targetSkillId)) {
             output = rotated.path("catalog").deepCopy();
         } else if (AFTERSALE_SAGA_SKILL.equals(targetSkillId)) {
-            output = rotated.path("aftersale").deepCopy();
+            ObjectNode aftersale = (ObjectNode) rotated.path("aftersale").deepCopy();
+            if (!hydrateAfterSaleScenario(tenantId, aftersale)) {
+                return Optional.empty();
+            }
+            output = aftersale;
         } else if (PRODUCT_TO_LISTING_SKILL.equals(targetSkillId)) {
             output = productToListing(rotated, newPrefix);
         } else if (READY_MASTER_SKILL.equals(targetSkillId)) {
@@ -464,6 +471,52 @@ class RotatingBusinessScenarioInputFactory {
         return true;
     }
 
+    private boolean hydrateAfterSaleScenario(Long tenantId, ObjectNode aftersale) {
+        JsonNode listing = result(tenantId, PRODUCT_TO_LISTING_SKILL, "listing_create");
+        JsonNode catalog = result(tenantId, CATALOG_MATRIX_SKILL, "define_1");
+        JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
+        JsonNode warehouse = result(tenantId, READY_MASTER_SKILL, "warehouse_network");
+        String listingId = listing.path("listingId").asText();
+        String listingOfferId = listing.path("offers").path(0).path("listingOfferId").asText();
+        String canonicalSpuId = catalog.path("canonicalSpuId").asText();
+        String canonicalSkuId = catalog.path("canonicalSkuId").asText();
+        String merchantId = merchant.path("merchantId").asText();
+        String shopId = merchant.path("shopId").asText();
+        String warehouseId = warehouse.path("warehouseId").asText();
+        if (listingId.isBlank() || listingOfferId.isBlank()
+                || canonicalSpuId.isBlank() || canonicalSkuId.isBlank()
+                || merchantId.isBlank() || shopId.isBlank()
+                || warehouseId.isBlank()) {
+            return false;
+        }
+
+        JsonNode commands = aftersale.path("commands");
+        if (!commands.isArray() || commands.size() < 26) {
+            return false;
+        }
+
+        ObjectNode receive = objectAt(commands, 6);
+        receive.put("ownerId", merchantId)
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("warehouseId", warehouseId);
+        objectAt(objectAt(commands, 7).path("items"), 0)
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("listingId", listingId)
+                .put("listingOfferId", listingOfferId);
+        ObjectNode reserve = objectAt(commands, 8);
+        reserve.put("ownerId", merchantId)
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("warehouseId", warehouseId);
+        ObjectNode fulfillment = objectAt(commands, 12);
+        fulfillment.put("sellerId", merchantId).put("warehouseId", warehouseId);
+        objectAt(fulfillment.path("items"), 0).put("canonicalSkuId", canonicalSkuId);
+        ObjectNode ship = objectAt(commands, 13);
+        ship.put("ownerId", merchantId)
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("warehouseId", warehouseId);
+        return true;
+    }
+
     private static ObjectNode objectAt(JsonNode value, int index) {
         JsonNode selected = index < 0 ? value : value.path(index);
         if (!(selected instanceof ObjectNode object)) {
@@ -579,7 +632,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("correlationId", stableUuid(prefix + ":channel-confirmation"))
                 .put("occurredAt", fullChain.path("catalog").path("definitions").path(0)
                         .path("occurredAt").asText());
-        output.set("readback", JsonNodeFactory.instance.objectNode());
+        output.putObject("readback").put("listingId", ZERO_UUID);
         return output;
     }
 
