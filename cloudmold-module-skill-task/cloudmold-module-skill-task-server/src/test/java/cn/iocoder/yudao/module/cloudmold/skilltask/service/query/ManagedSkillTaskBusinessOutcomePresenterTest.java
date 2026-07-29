@@ -269,6 +269,43 @@ class ManagedSkillTaskBusinessOutcomePresenterTest {
     }
 
     @Test
+    void shouldDescribeBondedCustomsCaseAsMatchedReleasedDeliveredAndClosed() {
+        ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
+                task("skill.cloudmold.crossborder.bonded-customs-lifecycle.v1"),
+                List.of(
+                        step("wait_paid_in_transit_order", """
+                                {"status":"SUCCEEDED","outputs":{
+                                  "order_place":{"orderId":"order-2","orderNo":"O-300"}}}
+                                """),
+                        step("verify_bonded_case_closed", """
+                                {"caseId":"bonded-case-1","caseNo":"BC-100",
+                                 "tripleMatchStatus":"TRIPLE_MATCHED",
+                                 "goodsClassification":{"hsCode":"610910"},
+                                 "taxCalculation":{"currency":"CNY","totalTaxMinor":3582},
+                                 "customsStatus":"CUSTOMS_ACCEPTED",
+                                 "bondedReleaseStatus":"BONDED_RELEASED",
+                                 "deliveryStatus":"DELIVERED","status":"CLOSED"}
+                                """)));
+
+        assertThat(outcome.getHeadline())
+                .isEqualTo("保税关务案件 BC-100 已对碰、放行、妥投并关单");
+        assertThat(outcome.getSummary()).contains("商品归类", "三单对碰", "风险与法务会签");
+        assertThat(outcome.getMetrics()).extracting("label", "value")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("三单状态", "已对碰"),
+                        org.assertj.core.groups.Tuple.tuple("商品归类", "610910"),
+                        org.assertj.core.groups.Tuple.tuple("测试税费", "CNY 3582 分"),
+                        org.assertj.core.groups.Tuple.tuple("海关状态", "已受理"),
+                        org.assertj.core.groups.Tuple.tuple("保税放行", "已放行"),
+                        org.assertj.core.groups.Tuple.tuple("配送状态", "已送达"),
+                        org.assertj.core.groups.Tuple.tuple("案件状态", "已关闭"));
+        assertThat(outcome.getBusinessObjects()).extracting("objectType", "businessId")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("BONDED_CUSTOMS_CASE", "bonded-case-1"),
+                        org.assertj.core.groups.Tuple.tuple("ORDER", "order-2"));
+    }
+
+    @Test
     void shouldDescribeFullChainByCompletedChildFlows() {
         ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
                 task("skill.cloudmold.commerce.full-chain-hsf.v1"),

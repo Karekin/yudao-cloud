@@ -51,7 +51,8 @@ final class AgentApprovalR3Policy {
         if (action.equals("fulfillment.exception-resolution")) {
             return List.of("customer-service", "operations-lead");
         }
-        if (action.equals("crossborder.fulfillment-compliance")) {
+        if (action.equals("crossborder.fulfillment-compliance")
+                || action.equals("crossborder.bonded-customs")) {
             return List.of("risk", "legal");
         }
         if (startsWithAny(action, "quality.", "recall.", "capa.")) {

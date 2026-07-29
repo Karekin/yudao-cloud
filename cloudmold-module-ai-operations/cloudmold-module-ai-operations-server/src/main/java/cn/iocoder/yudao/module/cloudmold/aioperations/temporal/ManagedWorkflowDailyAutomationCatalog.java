@@ -49,6 +49,7 @@ final class ManagedWorkflowDailyAutomationCatalog {
             "skill.cloudmold.quality.inspection-recall-lifecycle.v1",
             "skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1",
             "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1",
+            "skill.cloudmold.crossborder.bonded-customs-lifecycle.v1",
             "skill.cloudmold.commerce.reuse-ready-master.v1",
             "skill.cloudmold.commerce.legacy-projection-plan.v1"
     );
@@ -103,6 +104,9 @@ final class ManagedWorkflowDailyAutomationCatalog {
             Map.entry("skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1",
                     new ApprovalRoute("crossborder-operations",
                             "crossborder.fulfillment-compliance")),
+            Map.entry("skill.cloudmold.crossborder.bonded-customs-lifecycle.v1",
+                    new ApprovalRoute("bonded-customs-operations",
+                            "crossborder.bonded-customs")),
             Map.entry("skill.cloudmold.consumer.in-transit-order-scenario.v1",
                     new ApprovalRoute("logistics-operations", "fulfillment.exception-resolution")),
             Map.entry("skill.cloudmold.supply-planning.prepare.v1",

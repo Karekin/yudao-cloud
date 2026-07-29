@@ -64,6 +64,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                     "履约异常处置闭环"),
             Map.entry("skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1",
                     "跨境履约与关务合规闭环"),
+            Map.entry("skill.cloudmold.crossborder.bonded-customs-lifecycle.v1",
+                    "保税仓关务闭环"),
             Map.entry("skill.cloudmold.consumer.in-transit-order-scenario.v1", "在途订单场景准备"),
             Map.entry("skill.cloudmold.commerce.return-refund-readback.v1", "退货退款终态跟踪"),
             Map.entry("skill.cloudmold.customer-service.resolution-readback.v1", "客户问题解决终态跟踪"),
@@ -152,6 +154,9 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1",
                     "模拟跨境运营岗位为全新已支付订单完成受控直邮合规评估、AI 路线推荐、双岗会签、申报资料与三单校验、国际承运、清关放行、末端妥投及关单；"
                             + "当前仅为 CN→US 测试规则包，不冒充通用税则或真实海关、承运商权威。"),
+            Map.entry("skill.cloudmold.crossborder.bonded-customs-lifecycle.v1",
+                    "模拟保税仓关务岗位为全新已支付订单完成 179 测试规则下的准入评估、商品归类、订单/支付/物流三单对碰、"
+                            + "税费计算、风险与法务会签、申报受理、保税放行、境内妥投及关单；不冒充真实海关或税则权威。"),
             Map.entry("skill.cloudmold.consumer.in-transit-order-scenario.v1",
                     "内部造数子流程：模拟会员选购、下单支付、出库和在途运输，为履约异常岗位主流程提供全新业务对象。"),
             Map.entry("skill.cloudmold.commerce.return-refund-readback.v1",
@@ -209,6 +214,18 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("record_last_mile_delivery", "登记末端妥投回执"),
             Map.entry("close_crossborder_case", "关闭跨境履约案件"),
             Map.entry("verify_crossborder_case_closed", "验收放行、妥投与关单终态"),
+            Map.entry("create_bonded_case", "建立保税关务案件"),
+            Map.entry("assess_eligibility", "AI 评估保税进口准入"),
+            Map.entry("classify_goods", "归类商品并核验正面清单"),
+            Map.entry("match_triple_orders", "对碰订单、支付与物流三单"),
+            Map.entry("calculate_tax", "计算受控测试税费"),
+            Map.entry("approve_declaration", "记录风险与法务会签"),
+            Map.entry("submit_declaration", "提交保税进口申报"),
+            Map.entry("accept_customs", "登记海关受理回执"),
+            Map.entry("release_bonded_stock", "登记保税库存放行"),
+            Map.entry("confirm_delivery", "确认境内末端妥投"),
+            Map.entry("close_case", "关闭保税关务案件"),
+            Map.entry("verify_bonded_case_closed", "验收三单、受理、放行、妥投与关单终态"),
             Map.entry("wait_in_transit_order", "等待订单进入在途"),
             Map.entry("open_exception", "识别并登记履约异常"),
             Map.entry("plan_response", "诊断影响并制定处置方案"),
@@ -467,6 +484,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                     fulfillmentExceptionLifecycle(task, steps);
             case "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1" ->
                     crossborderFulfillmentComplianceLifecycle(task, steps);
+            case "skill.cloudmold.crossborder.bonded-customs-lifecycle.v1" ->
+                    bondedCustomsLifecycle(task, steps);
             default -> genericSuccess(task, steps);
         };
     }
@@ -781,6 +800,41 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                         object("FULFILLMENT", "跨境履约单",
                                 text(fulfillment, "fulfillmentId"),
                                 text(fulfillment, "fulfillmentNo"), "IN_TRANSIT")),
+                task);
+    }
+
+    private ManagedSkillTaskBusinessOutcomeView bondedCustomsLifecycle(
+            Task task, List<Step> steps) {
+        JsonNode transit = result(steps, "wait_paid_in_transit_order");
+        JsonNode order = transit.at("/outputs/order_place");
+        JsonNode closed = result(steps, "verify_bonded_case_closed");
+        String caseNo = valueOr(text(closed, "caseNo"), text(closed, "caseId"));
+        JsonNode classification = closed.path("goodsClassification");
+        JsonNode tax = closed.path("taxCalculation");
+        return outcome("BONDED_CUSTOMS_LIFECYCLE",
+                "保税关务案件 " + valueOr(caseNo, "目标案件") + " 已对碰、放行、妥投并关单",
+                "保税仓关务已完成有边界的准入评估、商品归类、三单对碰、测试税费计算、"
+                        + "风险与法务会签、申报受理、保税放行和境内妥投；当前证据属于受控测试场景。",
+                List.of(
+                        metric("三单状态", "TRIPLE_MATCHED".equals(text(closed, "tripleMatchStatus"))
+                                ? "已对碰" : statusLabel(text(closed, "tripleMatchStatus"))),
+                        metric("商品归类", valueOr(text(classification, "hsCode"), "-")),
+                        metric("测试税费",
+                                valueOr(text(tax, "currency"), "CNY") + " "
+                                        + valueOr(text(tax, "totalTaxMinor"), "0") + " 分"),
+                        metric("海关状态", "CUSTOMS_ACCEPTED".equals(text(closed, "customsStatus"))
+                                ? "已受理" : statusLabel(text(closed, "customsStatus"))),
+                        metric("保税放行", "BONDED_RELEASED".equals(text(closed, "bondedReleaseStatus"))
+                                ? "已放行" : statusLabel(text(closed, "bondedReleaseStatus"))),
+                        metric("配送状态", "DELIVERED".equals(text(closed, "deliveryStatus"))
+                                ? "已送达" : statusLabel(text(closed, "deliveryStatus"))),
+                        metric("案件状态", "CLOSED".equals(text(closed, "status"))
+                                ? "已关闭" : statusLabel(text(closed, "status")))),
+                List.of(
+                        object("BONDED_CUSTOMS_CASE", "保税关务案件",
+                                text(closed, "caseId"), caseNo, text(closed, "status")),
+                        object("ORDER", "保税进口订单",
+                                text(order, "orderId"), text(order, "orderNo"), "IN_TRANSIT")),
                 task);
     }
 

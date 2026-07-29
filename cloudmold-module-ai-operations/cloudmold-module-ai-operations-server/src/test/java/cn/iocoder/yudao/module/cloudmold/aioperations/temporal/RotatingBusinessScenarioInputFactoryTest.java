@@ -376,6 +376,80 @@ class RotatingBusinessScenarioInputFactoryTest {
     }
 
     @Test
+    void shouldBuildFreshBondedCustomsTripleOrderScenario() {
+        properties.setSyntheticConsumerMemberUserId(286L);
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.READY_MASTER_SKILL, "principal"))
+                .thenReturn("{\"principalId\":\"principal-1\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.PRODUCT_TO_LISTING_SKILL, "listing_create"))
+                .thenReturn("""
+                        {"listingId":"listing-1","offers":[{"listingOfferId":"offer-1"}]}
+                        """);
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL, "define_1"))
+                .thenReturn("""
+                        {"canonicalSpuId":"spu-1","canonicalSkuId":"sku-1"}
+                        """);
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
+                {
+                  "runIds":{"catalog":"base-cat"},
+                  "catalog":{},"master":{"identityReference":{},"warehouseReference":{}},
+                  "aftersale":{"commands":[
+                    {},{},{},{},{},{},
+                    {"operation":"RECEIVE"},{"operation":"PLACE_FROM_LISTING","items":[{}]},
+                    {"operation":"RESERVE"},{"operation":"CONFIRM_INVENTORY"},
+                    {"operation":"CAPTURE"},{"operation":"CONFIRM_PAYMENT"},
+                    {"operation":"CREATE","items":[{}]},{"operation":"SHIP"},
+                    {"operation":"SHIP"},{"operation":"CONFIRM_SHIPMENT"},
+                    {"operation":"IN_TRANSIT"},{"operation":"DELIVERED"},
+                    {"operation":"COMPLETE"},{"operation":"REQUEST"},
+                    {"operation":"APPROVE"},{"operation":"HANDOVER"},
+                    {"operation":"TRANSIT"},{"operation":"RECEIVE"},
+                    {"operation":"ACCEPT"}]},
+                  "readback":{}
+                }
+                """);
+
+        JsonNode first = build(
+                RotatingBusinessScenarioInputFactory.BONDED_CUSTOMS_LIFECYCLE_SKILL);
+        JsonNode second = JsonUtils.parseTree(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.BONDED_CUSTOMS_LIFECYCLE_SKILL,
+                "2026-07-29", "temporal-run-2").orElseThrow());
+
+        assertThat(first.path("inTransitRunId").asText()).startsWith("t260729162-")
+                .endsWith("-bonded-order");
+        assertThat(first.path("inTransitRunId").asText())
+                .isNotEqualTo(second.path("inTransitRunId").asText());
+        assertThat(first.path("operatorPrincipalId").asText()).isEqualTo("principal-1");
+        assertThat(first.path("bondedCommands")).hasSize(11);
+        assertThat(first.path("bondedCommands").get(0).path("operation").asText())
+                .isEqualTo("CREATE_CASE");
+        JsonNode triple = first.path("bondedCommands").get(0).path("tripleOrder");
+        assertThat(triple.path("orderRef").asText())
+                .isNotEqualTo(second.path("bondedCommands").get(0)
+                        .path("tripleOrder").path("orderRef").asText());
+        assertThat(triple.path("orderAmountMinor").asLong())
+                .isEqualTo(triple.path("paymentAmountMinor").asLong())
+                .isEqualTo(triple.path("logisticsAmountMinor").asLong());
+        assertThat(triple.path("buyerIdentityHash").asText())
+                .isEqualTo(triple.path("receiverIdentityHash").asText())
+                .isEqualTo(triple.path("declarantIdentityHash").asText());
+        assertThat(first.path("bondedCommands").get(1).path("eligibilityAssessment")
+                .path("facts")).hasSize(3);
+        assertThat(first.path("bondedCommands").get(1).path("eligibilityAssessment")
+                .path("recommendation").asText()).isEqualTo("BONDED_RETAIL_IMPORT");
+        assertThat(first.path("bondedCommands").get(5).has("approvalRef")).isFalse();
+        assertThat(first.path("bondedCommands").get(6).has("approvalRef")).isFalse();
+        assertThat(first.path("bondedCommands").get(10).path("operation").asText())
+                .isEqualTo("CLOSE_CASE");
+        assertThat(first.path("bondedCommands").get(10).path("closeReason").asText())
+                .isEqualTo("TRIPLE_MATCHED_CUSTOMS_ACCEPTED_BONDED_RELEASED_DELIVERED");
+    }
+
+    @Test
     void shouldBuildUniqueMerchantOnboardingLifecycleInput() {
         mockReadyMaster();
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(

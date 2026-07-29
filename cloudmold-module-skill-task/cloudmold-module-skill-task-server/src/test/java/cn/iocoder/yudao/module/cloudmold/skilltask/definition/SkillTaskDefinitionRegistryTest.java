@@ -256,6 +256,31 @@ class SkillTaskDefinitionRegistryTest {
             assertThat(step.getWaitSuccess().path("/deliveryStatus").asText())
                     .isEqualTo("DELIVERED");
         });
+        SkillTaskDefinition bondedCustomsLifecycle = workspaceRegistry.require(
+                "skill.cloudmold.crossborder.bonded-customs-lifecycle.v1", "1.0.0");
+        assertThat(bondedCustomsLifecycle.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(bondedCustomsLifecycle.getOwnerRole()).isEqualTo("bonded-customs-operations");
+        assertThat(bondedCustomsLifecycle.getRiskLevel()).isEqualTo("R3");
+        assertThat(bondedCustomsLifecycle.getSteps()).hasSize(14);
+        assertThat(bondedCustomsLifecycle.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(11)
+                .allSatisfy(step -> assertThat(step.getCapabilityId()).isEqualTo(
+                        "capability.cloudmold.crossborder.bonded-customs-command.execute.v1"));
+        assertThat(bondedCustomsLifecycle.getSteps().get(13)).satisfies(step -> {
+            assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
+            assertThat(step.getCapabilityId()).isEqualTo(
+                    "capability.cloudmold.crossborder.bonded-customs-query.get.v1");
+            assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("CLOSED");
+            assertThat(step.getWaitSuccess().path("/tripleMatchStatus").asText())
+                    .isEqualTo("TRIPLE_MATCHED");
+            assertThat(step.getWaitSuccess().path("/customsStatus").asText())
+                    .isEqualTo("CUSTOMS_ACCEPTED");
+            assertThat(step.getWaitSuccess().path("/bondedReleaseStatus").asText())
+                    .isEqualTo("BONDED_RELEASED");
+            assertThat(step.getWaitSuccess().path("/deliveryStatus").asText())
+                    .isEqualTo("DELIVERED");
+        });
         assertThat(workspaceRegistry.all()).extracting(SkillTaskDefinition::getSkillId)
                 .contains("skill.cloudmold.commerce.catalog-matrix.v1",
                         "skill.cloudmold.commerce.order-cancellation-operational.v1",
@@ -263,6 +288,7 @@ class SkillTaskDefinitionRegistryTest {
                         "skill.cloudmold.commerce.aftersale-saga.v1",
                         "skill.cloudmold.supply-planning.sop-lifecycle.v1",
                         "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1",
+                        "skill.cloudmold.crossborder.bonded-customs-lifecycle.v1",
                         "skill.cloudmold.commerce.terminal-readback.v1");
         List<String> readbackSkillIds = List.of(
                 "skill.cloudmold.operations.daily-business-control.v1",

@@ -22,6 +22,8 @@ cn.iocoder.yudao.module.cloudmold.commercebehavior.api.CommerceBehaviorCommandAp
 cn.iocoder.yudao.module.cloudmold.customerservice.api.CustomerServiceCommandApi
 cn.iocoder.yudao.module.cloudmold.customerservice.api.CustomerServiceQueryApi
 cn.iocoder.yudao.module.cloudmold.customerservice.api.workflow.CustomerResolutionWorkflowQueryApi
+cn.iocoder.yudao.module.cloudmold.crossborder.api.bonded.BondedCustomsCommandApi
+cn.iocoder.yudao.module.cloudmold.crossborder.api.bonded.BondedCustomsQueryApi
 cn.iocoder.yudao.module.cloudmold.crossborder.api.CrossBorderCommandApi
 cn.iocoder.yudao.module.cloudmold.crossborder.api.CrossBorderQueryApi
 cn.iocoder.yudao.module.cloudmold.engagement.api.EngagementCommandApi

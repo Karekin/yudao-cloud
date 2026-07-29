@@ -62,6 +62,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1";
     static final String CROSSBORDER_FULFILLMENT_COMPLIANCE_LIFECYCLE_SKILL =
             "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1";
+    static final String BONDED_CUSTOMS_LIFECYCLE_SKILL =
+            "skill.cloudmold.crossborder.bonded-customs-lifecycle.v1";
     static final String READY_MASTER_SKILL = "skill.cloudmold.commerce.reuse-ready-master.v1";
     static final String LEGACY_PROJECTION_SKILL = "skill.cloudmold.commerce.legacy-projection-plan.v1";
     private static final String ZERO_UUID = "00000000-0000-0000-0000-000000000000";
@@ -302,6 +304,21 @@ class RotatingBusinessScenarioInputFactory {
             }
             output = crossborderFulfillmentComplianceLifecycle(
                     newPrefix, occurredAt, consumer, operator.path("principalId").asText());
+        } else if (BONDED_CUSTOMS_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
+                return Optional.empty();
+            }
+            JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
+            if (operator.path("principalId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            ObjectNode consumer = consumerJourney(rotated, newPrefix, occurredAt,
+                    seedProperties.getSyntheticConsumerMemberUserId());
+            if (!hydrateConsumerJourney(tenantId, consumer)) {
+                return Optional.empty();
+            }
+            output = bondedCustomsLifecycle(
+                    newPrefix, occurredAt, consumer, operator.path("principalId").asText());
         } else {
             if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
                 return Optional.empty();
@@ -341,6 +358,7 @@ class RotatingBusinessScenarioInputFactory {
             case QUALITY_INSPECTION_RECALL_LIFECYCLE_SKILL -> "j";
             case FULFILLMENT_EXCEPTION_LIFECYCLE_SKILL -> "x";
             case CROSSBORDER_FULFILLMENT_COMPLIANCE_LIFECYCLE_SKILL -> "b";
+            case BONDED_CUSTOMS_LIFECYCLE_SKILL -> "t";
             case READY_MASTER_SKILL -> "m";
             case LEGACY_PROJECTION_SKILL -> "l";
             default -> throw new IllegalArgumentException("Unsupported rotating scenario Skill: " + skillId);
@@ -1602,6 +1620,146 @@ class RotatingBusinessScenarioInputFactory {
 
     private static String crossborderEvidence(String prefix, String purpose) {
         return "evidence:crossborder/sha256/"
+                + DigestUtil.sha256Hex(prefix + ":" + purpose);
+    }
+
+    private static ObjectNode bondedCustomsLifecycle(
+            String prefix, String occurredAt, ObjectNode consumer, String operatorPrincipalId) {
+        String runId = prefix + "-bonded-customs";
+        String correlationId = stableUuid(prefix + ":bonded-customs-correlation");
+        String identityHash = DigestUtil.sha256Hex(prefix + ":bonded-buyer");
+        long goodsAmountMinor = 39_800L;
+
+        ObjectNode input = JsonNodeFactory.instance.objectNode();
+        input.put("inTransitRunId", prefix + "-bonded-order");
+        input.put("operatorPrincipalId", operatorPrincipalId);
+        input.set("consumer", consumer);
+        ArrayNode commands = input.putArray("bondedCommands");
+
+        ObjectNode tripleOrder = JsonNodeFactory.instance.objectNode()
+                .put("orderRef", "bonded-order:" + prefix)
+                .put("paymentRef", "bonded-payment:" + prefix)
+                .put("logisticsRef", "bonded-logistics:" + prefix)
+                .put("orderAmountMinor", goodsAmountMinor)
+                .put("paymentAmountMinor", goodsAmountMinor)
+                .put("logisticsAmountMinor", goodsAmountMinor)
+                .put("currency", "CNY")
+                .put("buyerIdentityHash", identityHash)
+                .put("receiverIdentityHash", identityHash)
+                .put("declarantIdentityHash", identityHash)
+                .put("orderSnapshotRef", bondedCustomsEvidence(prefix, "order-snapshot"))
+                .put("paymentSnapshotRef", bondedCustomsEvidence(prefix, "payment-snapshot"))
+                .put("logisticsSnapshotRef", bondedCustomsEvidence(prefix, "logistics-snapshot"));
+        commands.add(bondedCustomsCommand(runId, correlationId, occurredAt, "CREATE_CASE")
+                .put("caseId", ZERO_UUID)
+                .put("canonicalOrderId", ZERO_UUID)
+                .set("tripleOrder", tripleOrder));
+
+        ObjectNode assessment = JsonNodeFactory.instance.objectNode();
+        assessment.putArray("facts")
+                .add("规范订单已支付并形成境内在途履约事实")
+                .add("订单、支付和物流三单均具备可审计快照")
+                .add("商品按受控测试正面清单与保税仓模式申报");
+        assessment.putArray("options")
+                .add("BONDED_RETAIL_IMPORT")
+                .add("HOLD_FOR_MANUAL_CLASSIFICATION");
+        assessment.put("recommendation", "BONDED_RETAIL_IMPORT");
+        assessment.putArray("risks")
+                .add("CUSTOMS_RULE_SOURCE_NOT_CONNECTED")
+                .add("HS_CLASSIFICATION_REQUIRES_PRODUCTION_AUTHORITY");
+        assessment.put("confidence", 0.91);
+        assessment.putArray("missingFacts");
+        assessment.put("evidenceRef",
+                bondedCustomsEvidence(prefix, "bounded-eligibility-assessment"));
+        commands.add(bondedCustomsCommand(runId, correlationId, occurredAt,
+                        "ASSESS_ELIGIBILITY")
+                .put("caseId", ZERO_UUID)
+                .put("expectedVersion", 1)
+                .set("eligibilityAssessment", assessment));
+
+        commands.add(bondedCustomsCommand(runId, correlationId, occurredAt,
+                        "CLASSIFY_GOODS")
+                .put("caseId", ZERO_UUID)
+                .put("expectedVersion", 2)
+                .set("goodsClassification", JsonNodeFactory.instance.objectNode()
+                        .put("hsCode", "610910")
+                        .put("positiveListCode", "TEST_POSITIVE_LIST_APPAREL_V1")
+                        .put("goodsName", "KNITTED COTTON T-SHIRT")
+                        .put("evidenceRef",
+                                bondedCustomsEvidence(prefix, "goods-classification"))));
+
+        commands.add(bondedCustomsCommand(runId, correlationId, occurredAt,
+                        "MATCH_TRIPLE_ORDERS")
+                .put("caseId", ZERO_UUID)
+                .put("expectedVersion", 3));
+
+        commands.add(bondedCustomsCommand(runId, correlationId, occurredAt,
+                        "CALCULATE_TAX")
+                .put("caseId", ZERO_UUID)
+                .put("expectedVersion", 4)
+                .set("taxCalculation", JsonNodeFactory.instance.objectNode()
+                        .put("dutiableAmountMinor", goodsAmountMinor)
+                        .put("consumptionTaxMinor", 0)
+                        .put("valueAddedTaxMinor", 3_582)
+                        .put("totalTaxMinor", 3_582)
+                        .put("currency", "CNY")
+                        .put("evidenceRef",
+                                bondedCustomsEvidence(prefix, "test-tax-calculation"))));
+
+        commands.add(bondedCustomsCommand(runId, correlationId, occurredAt,
+                        "APPROVE_DECLARATION")
+                .put("caseId", ZERO_UUID)
+                .put("expectedVersion", 5));
+
+        commands.add(bondedCustomsCommand(runId, correlationId, occurredAt,
+                        "SUBMIT_DECLARATION")
+                .put("caseId", ZERO_UUID)
+                .put("expectedVersion", 6)
+                .put("declarationRef",
+                        bondedCustomsEvidence(prefix, "customs-declaration-submission")));
+
+        commands.add(bondedCustomsCommand(runId, correlationId, occurredAt,
+                        "ACCEPT_CUSTOMS")
+                .put("caseId", ZERO_UUID)
+                .put("expectedVersion", 7)
+                .put("customsAcceptanceRef",
+                        bondedCustomsEvidence(prefix, "customs-acceptance")));
+
+        commands.add(bondedCustomsCommand(runId, correlationId, occurredAt,
+                        "RELEASE_BONDED_STOCK")
+                .put("caseId", ZERO_UUID)
+                .put("expectedVersion", 8)
+                .put("bondedReleaseRef",
+                        bondedCustomsEvidence(prefix, "bonded-stock-release")));
+
+        commands.add(bondedCustomsCommand(runId, correlationId, occurredAt,
+                        "CONFIRM_DELIVERY")
+                .put("caseId", ZERO_UUID)
+                .put("expectedVersion", 9)
+                .put("deliveryConfirmationRef",
+                        bondedCustomsEvidence(prefix, "domestic-delivery")));
+
+        commands.add(bondedCustomsCommand(runId, correlationId, occurredAt,
+                        "CLOSE_CASE")
+                .put("caseId", ZERO_UUID)
+                .put("expectedVersion", 10)
+                .put("closeReason",
+                        "TRIPLE_MATCHED_CUSTOMS_ACCEPTED_BONDED_RELEASED_DELIVERED"));
+        return input;
+    }
+
+    private static ObjectNode bondedCustomsCommand(
+            String runId, String correlationId, String occurredAt, String operation) {
+        return JsonNodeFactory.instance.objectNode()
+                .put("operation", operation)
+                .put("idempotencyKey", "pending-bonded-customs-command")
+                .put("runId", runId)
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt);
+    }
+
+    private static String bondedCustomsEvidence(String prefix, String purpose) {
+        return "evidence:bonded-customs/sha256/"
                 + DigestUtil.sha256Hex(prefix + ":" + purpose);
     }
 
