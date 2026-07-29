@@ -114,6 +114,16 @@ public class InventoryCommandServiceImpl implements InventoryCommandApi {
                 deltaReserved = command.quantity().negate();
                 afterReserved = beforeReserved.subtract(command.quantity());
             }
+            case DISPOSE -> {
+                require(!"SELLABLE".equals(balance.getStockStatus()),
+                        "sellable inventory cannot be disposed");
+                require(beforeReserved.signum() == 0,
+                        "reserved inventory cannot be disposed");
+                require(beforeOnHand.compareTo(command.quantity()) >= 0,
+                        "insufficient non-sellable inventory for disposal");
+                deltaOnHand = command.quantity().negate();
+                afterOnHand = beforeOnHand.subtract(command.quantity());
+            }
         }
         require(afterOnHand.signum() >= 0 && afterReserved.signum() >= 0,
                 "inventory balance cannot become negative");
@@ -184,7 +194,8 @@ public class InventoryCommandServiceImpl implements InventoryCommandApi {
             requireMatches(balance, command);
             return new LockedAggregate(balance, reservation);
         }
-        if (command.operation() == InventoryOperation.RECEIVE) {
+        if (command.operation() == InventoryOperation.RECEIVE
+                || command.operation() == InventoryOperation.RETURN) {
             balanceMapper.insertOrResolve(UUID.randomUUID().toString(), tenantId, command.ownerId(),
                     command.canonicalSkuId(), command.warehouseId(), command.stockStatus(),
                     command.qualityStatus(), command.uomCode(), now);
@@ -238,8 +249,19 @@ public class InventoryCommandServiceImpl implements InventoryCommandApi {
         requireText(command.getOwnerId(), "ownerId", 128);
         requireText(command.getCanonicalSkuId(), "canonicalSkuId", 128);
         requireText(command.getWarehouseId(), "warehouseId", 128);
-        require("SELLABLE".equals(command.getStockStatus()), "first slice supports SELLABLE stock only");
-        require("QUALIFIED".equals(command.getQualityStatus()), "first slice supports QUALIFIED stock only");
+        boolean saleableFlow = command.getOperation() != InventoryOperation.RETURN
+                && command.getOperation() != InventoryOperation.DISPOSE;
+        require(!saleableFlow || "SELLABLE".equals(command.getStockStatus()),
+                "commercial inventory flow supports SELLABLE stock only");
+        require(!saleableFlow || "QUALIFIED".equals(command.getQualityStatus()),
+                "commercial inventory flow supports QUALIFIED stock only");
+        require(!"SELLABLE".equals(command.getStockStatus())
+                        || "QUALIFIED".equals(command.getQualityStatus()),
+                "SELLABLE inventory must be QUALIFIED");
+        require(command.getOperation() != InventoryOperation.DISPOSE
+                        || ("NON_SELLABLE".equals(command.getStockStatus())
+                        && "DAMAGED".equals(command.getQualityStatus())),
+                "disposal requires NON_SELLABLE/DAMAGED inventory");
         requireText(command.getUomCode(), "uomCode", 32);
         requireText(command.getBusinessType(), "businessType", 32);
         requireText(command.getBusinessId(), "businessId", 128);
@@ -325,6 +347,7 @@ public class InventoryCommandServiceImpl implements InventoryCommandApi {
             case SHIP -> "SALE_SHIPMENT";
             case RETURN -> "SALE_RETURN";
             case RELEASE -> "RESERVATION_RELEASE";
+            case DISPOSE -> "RETURN_DISPOSAL";
         };
     }
 

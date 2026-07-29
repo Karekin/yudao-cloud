@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.cloudmold.payment.api.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.math.BigDecimal;
 import java.time.*;
@@ -64,6 +65,12 @@ class AfterSaleResolutionWorkerTest {
             return null;
         }).when(checkpoint).markInventoryReturned(anyLong(), anyString(), anyString(), any(), any());
         doAnswer(invocation -> {
+            InventoryCommandResult result = invocation.getArgument(3);
+            saga.setDisposalOperationId(result.getOperationId())
+                    .setDisposalLedgerTransactionId(result.getLedgerTransactionId());
+            return null;
+        }).when(checkpoint).markInventoryDisposed(anyLong(), anyString(), anyString(), any(), any());
+        doAnswer(invocation -> {
             AfterSaleBenefitReversalResult result = invocation.getArgument(3);
             saga.setBenefitReversalStatus("RECORDED").setBenefitReversalBatchId(result.batchId())
                     .setBenefitReversalAmountMinor(result.amountMinor());
@@ -117,6 +124,41 @@ class AfterSaleResolutionWorkerTest {
                 && command.getExpectedVersion() == 6L
                 && command.getIdempotencyKey().equals("after-sale-saga:saga-1:order-return")));
         verify(checkpoint).markCompleted(eq(1L), eq("saga-1"), eq("worker-1"), any());
+    }
+
+    @Test
+    void shouldQuarantineAndDisposeScrapBeforeRefundingCustomer() {
+        saga.setDispositionCode("SCRAP").setReturnStockStatus("NON_SELLABLE")
+                .setReturnQualityStatus("DAMAGED");
+        when(returnQueryApi.requireInspectionAccepted("after-sale-1", "return-1"))
+                .thenReturn(ReturnFulfillmentView.builder().currentStatus("INSPECTION_ACCEPTED")
+                        .qualityStatus("DAMAGED").dispositionCode("SCRAP").build());
+        when(inventoryApi.execute(any())).thenAnswer(invocation -> {
+            InventoryCommand command = invocation.getArgument(0);
+            return InventoryCommandResult.builder()
+                    .operationId(command.getOperation() == InventoryOperation.RETURN ? 101L : 103L)
+                    .ledgerTransactionId(command.getOperation() == InventoryOperation.RETURN ? 102L : 104L)
+                    .duplicate(false).build();
+        });
+
+        worker.process(1L, "saga-1", "worker-1", now);
+
+        ArgumentCaptor<InventoryCommand> inventory = ArgumentCaptor.forClass(InventoryCommand.class);
+        verify(inventoryApi, times(2)).execute(inventory.capture());
+        assertThat(inventory.getAllValues()).extracting(InventoryCommand::getOperation)
+                .containsExactly(InventoryOperation.RETURN, InventoryOperation.DISPOSE);
+        assertThat(inventory.getAllValues()).extracting(InventoryCommand::getIdempotencyKey)
+                .containsExactly("after-sale-saga:saga-1:inventory-return",
+                        "after-sale-saga:saga-1:inventory-dispose");
+        assertThat(inventory.getAllValues()).extracting(InventoryCommand::getStockStatus)
+                .containsOnly("NON_SELLABLE");
+        assertThat(inventory.getAllValues()).extracting(InventoryCommand::getQualityStatus)
+                .containsOnly("DAMAGED");
+        InOrder order = inOrder(inventoryApi, paymentApi);
+        order.verify(inventoryApi, times(2)).execute(any());
+        order.verify(paymentApi).execute(any());
+        verify(checkpoint).markInventoryDisposed(eq(1L), eq("saga-1"), eq("worker-1"),
+                argThat(result -> result.getLedgerTransactionId() == 104L), any());
     }
 
     @Test
@@ -288,6 +330,8 @@ class AfterSaleResolutionWorkerTest {
                 .setReturnShipmentId("return-shipment-1").setInspectionId("inspection-1")
                 .setCanonicalSkuId("sku-1").setQuantity(new BigDecimal("2.000000"))
                 .setOwnerId("internal-company").setWarehouseId("warehouse-1").setUomCode("PCS")
+                .setDispositionCode("RESTOCK").setReturnStockStatus("SELLABLE")
+                .setReturnQualityStatus("QUALIFIED")
                 .setApprovedAmountMinor(39800L).setGrossAmountMinor(39800L).setBenefitAmountMinor(0L)
                 .setNetAmountMinor(39800L).setBenefitReversalStatus("NOT_REQUIRED")
                 .setBenefitReversalAmountMinor(0L).setCurrencyCode("CNY").setReason("size not fit")

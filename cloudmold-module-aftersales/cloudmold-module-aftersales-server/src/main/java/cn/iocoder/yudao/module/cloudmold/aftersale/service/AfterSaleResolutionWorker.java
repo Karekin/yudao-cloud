@@ -63,13 +63,33 @@ public class AfterSaleResolutionWorker {
                         .operation(InventoryOperation.RETURN)
                         .idempotencyKey("after-sale-saga:" + sagaId + ":inventory-return")
                         .ownerId(saga.getOwnerId()).canonicalSkuId(saga.getCanonicalSkuId())
-                        .warehouseId(saga.getWarehouseId()).stockStatus("SELLABLE").qualityStatus("QUALIFIED")
+                        .warehouseId(saga.getWarehouseId()).stockStatus(saga.getReturnStockStatus())
+                        .qualityStatus(saga.getReturnQualityStatus())
                         .uomCode(saga.getUomCode()).quantity(saga.getQuantity())
                         .businessType("AFTER_SALE_RETURN").businessId(saga.getAfterSaleId())
                         .businessItemId(saga.getAfterSaleItemId()).businessNo(saga.getOrderNo())
                         .correlationId(saga.getCorrelationId()).causationId(saga.getCausationId())
                         .occurredAt(saga.getInventoryOccurredAt().toInstant(ZoneOffset.UTC)).build());
                 checkpointService.markInventoryReturned(tenantId, sagaId, leaseOwner, returned,
+                        checkpointNow(floor));
+            }
+            saga = requireSaga(tenantId, sagaId);
+            if ("SCRAP".equals(saga.getDispositionCode()) && saga.getDisposalLedgerTransactionId() == null) {
+                checkpointService.markProgress(tenantId, sagaId, leaseOwner,
+                        "DISPOSING_INVENTORY", "DISPOSE_INVENTORY", checkpointNow(floor));
+                saga = requireSaga(tenantId, sagaId);
+                InventoryCommandResult disposed = inventoryCommandApi.execute(InventoryCommand.builder()
+                        .operation(InventoryOperation.DISPOSE)
+                        .idempotencyKey("after-sale-saga:" + sagaId + ":inventory-dispose")
+                        .ownerId(saga.getOwnerId()).canonicalSkuId(saga.getCanonicalSkuId())
+                        .warehouseId(saga.getWarehouseId()).stockStatus("NON_SELLABLE")
+                        .qualityStatus("DAMAGED").uomCode(saga.getUomCode()).quantity(saga.getQuantity())
+                        .businessType("AFTER_SALE_DISPOSAL").businessId(saga.getAfterSaleId())
+                        .businessItemId(saga.getAfterSaleItemId()).businessNo(saga.getOrderNo())
+                        .correlationId(saga.getCorrelationId()).causationId(saga.getCausationId())
+                        .occurredAt(saga.getInventoryOccurredAt().plusSeconds(1)
+                                .toInstant(ZoneOffset.UTC)).build());
+                checkpointService.markInventoryDisposed(tenantId, sagaId, leaseOwner, disposed,
                         checkpointNow(floor));
             }
             saga = requireSaga(tenantId, sagaId);

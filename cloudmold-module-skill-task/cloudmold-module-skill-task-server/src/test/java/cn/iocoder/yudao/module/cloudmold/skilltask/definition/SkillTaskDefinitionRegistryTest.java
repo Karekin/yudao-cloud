@@ -159,7 +159,7 @@ class SkillTaskDefinitionRegistryTest {
         workspaceRegistry.reload();
 
         SkillTaskDefinition definition = workspaceRegistry.require(
-                "skill.cloudmold.commerce.full-chain-hsf.v1", "1.2.1");
+                "skill.cloudmold.commerce.full-chain-hsf.v1", "1.2.2");
         SkillTaskDefinition cancellation = workspaceRegistry.require(
                 "skill.cloudmold.commerce.order-cancellation-operational.v1", "1.0.0");
         assertThat(definition.getRiskLevel()).isEqualTo("R3");

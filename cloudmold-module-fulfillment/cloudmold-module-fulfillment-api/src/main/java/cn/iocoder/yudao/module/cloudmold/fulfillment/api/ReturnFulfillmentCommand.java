@@ -31,6 +31,10 @@ public class ReturnFulfillmentCommand {
     private String waybillNo;
     private String operatorId;
     private String qualityStatus;
+    private String dispositionAssessmentId;
+    private String dispositionCode;
+    private String conditionGrade;
+    private String inspectionEvidenceRef;
     private String correlationId;
     private String causationId;
     private Instant occurredAt;

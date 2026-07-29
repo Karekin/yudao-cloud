@@ -25,6 +25,7 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
     private final AfterSaleCaseMapper caseMapper;
     private final AfterSaleItemMapper itemMapper;
     private final AfterSaleResolutionSagaMapper sagaMapper;
+    private final ReturnDispositionAssessmentMapper dispositionAssessmentMapper;
     private final OrderAfterSaleQueryApi orderQueryApi;
     private final PaymentRefundQueryApi paymentQueryApi;
     private final ForwardFulfillmentAfterSaleQueryApi forwardFulfillmentQueryApi;
@@ -61,6 +62,7 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
             case APPROVE -> approve(tenantId, operationId, command, now);
             case HAND_OVER_RETURN, MARK_RETURN_IN_TRANSIT, RECEIVE_RETURN ->
                     advanceReturn(tenantId, operationId, command, now);
+            case ASSESS_DISPOSITION -> assessDisposition(tenantId, operationId, command, now);
             case ACCEPT_INSPECTION -> acceptInspection(tenantId, operationId, command, now);
             case RETRY_RESOLUTION -> retryResolution(tenantId, command, now);
         };
@@ -216,8 +218,20 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
     private AfterSaleView acceptInspection(Long tenantId, Long operationId, AfterSaleCommand command,
                                            LocalDateTime now) {
         AfterSaleCaseDO sale = requireCase(tenantId, command, "APPROVED");
-        require("QUALIFIED".equals(command.getQualityStatus()), "first slice accepts QUALIFIED only");
+        ReturnDispositionAssessmentDO assessment =
+                dispositionAssessmentMapper.selectByAfterSale(tenantId, sale.getAfterSaleId());
+        require(assessment != null, "return disposition assessment is required before inspection");
+        require(Objects.equals(command.getDispositionAssessmentId(), assessment.getAssessmentId()),
+                "dispositionAssessmentId does not match the governed assessment");
+        require(!"MANUAL_REVIEW".equals(assessment.getRecommendedDisposition()),
+                "ambiguous return disposition requires manual review");
+        require(Objects.equals(command.getDispositionCode(), assessment.getRecommendedDisposition()),
+                "inspection disposition does not match the governed assessment");
+        require(Objects.equals(command.getQualityStatus(), assessment.getQualityStatus()),
+                "inspection qualityStatus does not match the governed assessment");
         requireText(command.getInspectorId(), "inspectorId", 128);
+        require(!Objects.equals(command.getInspectorId(), assessment.getAssessorId()),
+                "disposition assessor and inspection confirmer must be different");
         ReturnFulfillmentView current = returnQueryApi.getForAfterSale(sale.getAfterSaleId(),
                 sale.getReturnFulfillmentId());
         ReturnFulfillmentView returned = returnCommandApi.execute(ReturnFulfillmentCommand.builder()
@@ -225,10 +239,16 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
                 .idempotencyKey("after-sale:" + sale.getAfterSaleId() + ":return:accept-inspection")
                 .runId(sale.getRunId()).returnFulfillmentId(sale.getReturnFulfillmentId())
                 .expectedVersion(current.getAggregateVersion()).operatorId(command.getInspectorId())
-                .qualityStatus(command.getQualityStatus()).correlationId(sale.getCorrelationId())
+                .qualityStatus(command.getQualityStatus())
+                .dispositionAssessmentId(assessment.getAssessmentId())
+                .dispositionCode(assessment.getRecommendedDisposition())
+                .conditionGrade(assessment.getConditionGrade())
+                .inspectionEvidenceRef(assessment.getInspectionEvidenceRef())
+                .correlationId(sale.getCorrelationId())
                 .causationId(sale.getCausationId()).occurredAt(command.getOccurredAt()).build());
         require("INSPECTION_ACCEPTED".equals(returned.getCurrentStatus()), "return inspection is not accepted");
         AfterSaleItemDO item = requireSingleItem(tenantId, sale.getAfterSaleId());
+        long downstreamOffset = "SCRAP".equals(assessment.getRecommendedDisposition()) ? 1 : 0;
         String sagaId = UUID.randomUUID().toString();
         AfterSaleResolutionSagaDO saga = new AfterSaleResolutionSagaDO().setSagaId(sagaId).setTenantId(tenantId)
                 .setAfterSaleId(sale.getAfterSaleId()).setAfterSaleItemId(item.getAfterSaleItemId())
@@ -238,6 +258,11 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
                 .setPaymentId(sale.getPaymentId()).setPaymentVersionAtRequest(sale.getPaymentVersionAtRequest())
                 .setReturnFulfillmentId(returned.getReturnFulfillmentId())
                 .setReturnShipmentId(returned.getReturnShipmentId()).setInspectionId(returned.getInspectionId())
+                .setDispositionAssessmentId(assessment.getAssessmentId())
+                .setDispositionCode(assessment.getRecommendedDisposition())
+                .setReturnStockStatus("RESTOCK".equals(assessment.getRecommendedDisposition())
+                        ? "SELLABLE" : "NON_SELLABLE")
+                .setReturnQualityStatus(assessment.getQualityStatus())
                 .setCanonicalSkuId(item.getCanonicalSkuId()).setQuantity(item.getQuantity())
                 .setOwnerId(sale.getOwnerId()).setWarehouseId(sale.getWarehouseId()).setUomCode(sale.getUomCode())
                 .setApprovedAmountMinor(sale.getApprovedAmountMinor())
@@ -250,10 +275,10 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
                 .setVersion(1L).setCorrelationId(sale.getCorrelationId()).setCausationId(sale.getCausationId())
                 .setInventoryOccurredAt(at(command.getOccurredAt(), 1))
                 .setBenefitReversalOccurredAt(item.getDiscountAmountMinor() == 0 ? null
-                        : at(command.getOccurredAt(), 2))
-                .setPaymentOccurredAt(at(command.getOccurredAt(), 3))
-                .setOrderRefundOccurredAt(at(command.getOccurredAt(), 4))
-                .setOrderReturnOccurredAt(at(command.getOccurredAt(), 5))
+                        : at(command.getOccurredAt(), 2 + downstreamOffset))
+                .setPaymentOccurredAt(at(command.getOccurredAt(), 3 + downstreamOffset))
+                .setOrderRefundOccurredAt(at(command.getOccurredAt(), 4 + downstreamOffset))
+                .setOrderReturnOccurredAt(at(command.getOccurredAt(), 5 + downstreamOffset))
                 .setCreatedAt(now).setUpdatedAt(now);
         sagaMapper.insert(saga);
         require(caseMapper.startResolution(tenantId, sale.getAfterSaleId(), sale.getVersion(),
@@ -266,6 +291,66 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
         eventService.appendCase(operationId, sale, item, previous, command.getOccurredAt(), now);
         eventService.appendSaga(saga, null, now);
         return view(operationId, sale, item, returned, saga, false);
+    }
+
+    private AfterSaleView assessDisposition(Long tenantId, Long operationId, AfterSaleCommand command,
+                                            LocalDateTime now) {
+        AfterSaleCaseDO sale = requireCase(tenantId, command, "APPROVED");
+        ReturnFulfillmentView returned = returnQueryApi.getForAfterSale(sale.getAfterSaleId(),
+                sale.getReturnFulfillmentId());
+        require("RECEIVED".equals(returned.getCurrentStatus()),
+                "return disposition assessment requires warehouse receipt");
+        require(dispositionAssessmentMapper.selectByAfterSale(tenantId, sale.getAfterSaleId()) == null,
+                "return disposition assessment already exists");
+        requireText(command.getAssessorId(), "assessorId", 128);
+        int packaging = score(command.getPackagingScore(), "packagingScore");
+        int appearance = score(command.getAppearanceScore(), "appearanceScore");
+        int function = score(command.getFunctionScore(), "functionScore");
+        require(command.getSafetyRisk() != null, "safetyRisk is required");
+        require(command.getCounterfeitRisk() != null, "counterfeitRisk is required");
+        require(command.getEstimatedResaleValueMinor() != null
+                        && command.getEstimatedResaleValueMinor() > 0,
+                "estimatedResaleValueMinor must be positive");
+        require(command.getEstimatedRecoveryCostMinor() != null
+                        && command.getEstimatedRecoveryCostMinor() >= 0,
+                "estimatedRecoveryCostMinor must be nonnegative");
+        requireText(command.getInspectionEvidenceRef(), "inspectionEvidenceRef", 256);
+
+        boolean hardScrap = Boolean.TRUE.equals(command.getSafetyRisk())
+                || Boolean.TRUE.equals(command.getCounterfeitRisk())
+                || function < 50
+                || command.getEstimatedRecoveryCostMinor() >= command.getEstimatedResaleValueMinor();
+        boolean directRestock = packaging >= 80 && appearance >= 85 && function >= 90
+                && command.getEstimatedRecoveryCostMinor()
+                <= command.getEstimatedResaleValueMinor() / 20;
+        String recommendation = hardScrap ? "SCRAP" : directRestock ? "RESTOCK" : "MANUAL_REVIEW";
+        String qualityStatus = "RESTOCK".equals(recommendation) ? "QUALIFIED" : "DAMAGED";
+        String grade = "RESTOCK".equals(recommendation) ? "A"
+                : "SCRAP".equals(recommendation) ? "D" : "C";
+        int confidence = hardScrap ? 96 : directRestock ? 92 : 60;
+        String rationale = Boolean.TRUE.equals(command.getSafetyRisk()) ? "SAFETY_RISK"
+                : Boolean.TRUE.equals(command.getCounterfeitRisk()) ? "COUNTERFEIT_RISK"
+                : function < 50 ? "FUNCTION_FAILURE"
+                : command.getEstimatedRecoveryCostMinor() >= command.getEstimatedResaleValueMinor()
+                ? "RECOVERY_COST_EXCEEDS_VALUE"
+                : directRestock ? "QUALIFIED_LOW_RECOVERY_COST" : "AMBIGUOUS_CONDITION";
+        ReturnDispositionAssessmentDO assessment = new ReturnDispositionAssessmentDO()
+                .setAssessmentId(UUID.randomUUID().toString()).setTenantId(tenantId)
+                .setAfterSaleId(sale.getAfterSaleId())
+                .setReturnFulfillmentId(sale.getReturnFulfillmentId())
+                .setAssessorId(command.getAssessorId()).setPackagingScore(packaging)
+                .setAppearanceScore(appearance).setFunctionScore(function)
+                .setSafetyRisk(command.getSafetyRisk()).setCounterfeitRisk(command.getCounterfeitRisk())
+                .setEstimatedResaleValueMinor(command.getEstimatedResaleValueMinor())
+                .setEstimatedRecoveryCostMinor(command.getEstimatedRecoveryCostMinor())
+                .setInspectionEvidenceRef(command.getInspectionEvidenceRef())
+                .setRecommendedDisposition(recommendation).setQualityStatus(qualityStatus)
+                .setConditionGrade(grade).setConfidenceScore(confidence)
+                .setRationaleCode(rationale).setCreatedAt(now);
+        dispositionAssessmentMapper.insert(assessment);
+        eventService.appendDispositionAssessment(assessment, sale, command.getOccurredAt(), now);
+        return view(operationId, sale, requireSingleItem(tenantId, sale.getAfterSaleId()),
+                returned, null, assessment, false);
     }
 
     private AfterSaleView retryResolution(Long tenantId, AfterSaleCommand command, LocalDateTime now) {
@@ -293,12 +378,20 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
                 : returnQueryApi.getForAfterSale(sale.getAfterSaleId(), sale.getReturnFulfillmentId());
         AfterSaleResolutionSagaDO saga = sale.getResolutionSagaId() == null ? null
                 : sagaMapper.selectTenant(sale.getTenantId(), sale.getResolutionSagaId());
-        return view(operationId, sale, item, returned, saga, duplicate);
+        ReturnDispositionAssessmentDO assessment =
+                dispositionAssessmentMapper.selectByAfterSale(sale.getTenantId(), sale.getAfterSaleId());
+        return view(operationId, sale, item, returned, saga, assessment, duplicate);
     }
 
     private static AfterSaleView view(Long operationId, AfterSaleCaseDO sale, AfterSaleItemDO item,
                                       ReturnFulfillmentView returned, AfterSaleResolutionSagaDO saga,
                                       boolean duplicate) {
+        return view(operationId, sale, item, returned, saga, null, duplicate);
+    }
+
+    private static AfterSaleView view(Long operationId, AfterSaleCaseDO sale, AfterSaleItemDO item,
+                                      ReturnFulfillmentView returned, AfterSaleResolutionSagaDO saga,
+                                      ReturnDispositionAssessmentDO assessment, boolean duplicate) {
         return AfterSaleView.builder().operationId(operationId).afterSaleId(sale.getAfterSaleId())
                 .afterSaleNo(sale.getAfterSaleNo()).runId(sale.getRunId()).orderId(sale.getOrderId())
                 .afterSaleItemId(item.getAfterSaleItemId()).orderItemId(item.getOrderItemId())
@@ -313,12 +406,28 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
                 .returnFulfillmentStatus(returned == null ? null : returned.getCurrentStatus())
                 .returnShipmentId(returned == null ? sale.getReturnShipmentId() : returned.getReturnShipmentId())
                 .inspectionId(returned == null ? sale.getInspectionId() : returned.getInspectionId())
+                .dispositionAssessmentId(assessment == null
+                        ? (saga == null ? null : saga.getDispositionAssessmentId()) : assessment.getAssessmentId())
+                .recommendedDisposition(assessment == null
+                        ? (saga == null ? null : saga.getDispositionCode())
+                        : assessment.getRecommendedDisposition())
+                .recommendedQualityStatus(assessment == null
+                        ? (saga == null ? null : saga.getReturnQualityStatus())
+                        : assessment.getQualityStatus())
+                .dispositionCode(returned == null
+                        ? (saga == null ? null : saga.getDispositionCode()) : returned.getDispositionCode())
+                .conditionGrade(assessment == null
+                        ? (returned == null ? null : returned.getConditionGrade()) : assessment.getConditionGrade())
+                .dispositionConfidence(assessment == null ? null : assessment.getConfidenceScore())
+                .dispositionRationaleCode(assessment == null ? null : assessment.getRationaleCode())
                 .resolutionSagaId(saga == null ? sale.getResolutionSagaId() : saga.getSagaId())
                 .resolutionSagaStatus(saga == null ? null : saga.getStatus())
                 .resolutionSagaVersion(saga == null ? null : saga.getVersion())
                 .paymentRefundTransactionId(saga == null ? null : saga.getPaymentRefundTransactionId())
                 .inventoryOperationId(saga == null ? null : saga.getInventoryOperationId())
                 .inventoryLedgerTransactionId(saga == null ? null : saga.getInventoryLedgerTransactionId())
+                .disposalOperationId(saga == null ? null : saga.getDisposalOperationId())
+                .disposalLedgerTransactionId(saga == null ? null : saga.getDisposalLedgerTransactionId())
                 .orderSettlementEffectId(saga == null ? null : saga.getOrderSettlementEffectId())
                 .orderSettlementVersion(saga == null ? null : saga.getOrderSettlementVersion())
                 .orderReturnFull(saga == null ? null : saga.getOrderReturnFull())
@@ -338,6 +447,12 @@ public class AfterSaleCommandServiceImpl implements AfterSaleCommandApi, AfterSa
 
     private static LocalDateTime at(Instant instant, long seconds) {
         return LocalDateTime.ofInstant(instant.plusSeconds(seconds), ZoneOffset.UTC);
+    }
+
+    private static int score(Integer value, String field) {
+        require(value != null && value >= 0 && value <= 100,
+                field + " must be between 0 and 100");
+        return value;
     }
 
     private static String compact(String uuid) {

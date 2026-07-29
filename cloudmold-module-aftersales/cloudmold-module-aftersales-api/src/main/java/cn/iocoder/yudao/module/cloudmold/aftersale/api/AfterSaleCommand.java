@@ -29,6 +29,17 @@ public class AfterSaleCommand {
     private String carrierCode;
     private String waybillNo;
     private String receiverId;
+    private String assessorId;
+    private Integer packagingScore;
+    private Integer appearanceScore;
+    private Integer functionScore;
+    private Boolean safetyRisk;
+    private Boolean counterfeitRisk;
+    private Long estimatedResaleValueMinor;
+    private Long estimatedRecoveryCostMinor;
+    private String inspectionEvidenceRef;
+    private String dispositionAssessmentId;
+    private String dispositionCode;
     private String inspectorId;
     private String qualityStatus;
     private Long resolutionSagaExpectedVersion;

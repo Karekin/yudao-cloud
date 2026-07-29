@@ -5,5 +5,6 @@ public enum InventoryOperation {
     RESERVE,
     SHIP,
     RETURN,
-    RELEASE
+    RELEASE,
+    DISPOSE
 }

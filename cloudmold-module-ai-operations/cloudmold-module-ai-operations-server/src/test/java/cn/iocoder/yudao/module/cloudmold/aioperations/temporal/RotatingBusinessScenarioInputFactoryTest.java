@@ -2,6 +2,9 @@ package cn.iocoder.yudao.module.cloudmold.aioperations.temporal;
 
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -138,7 +141,7 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .path("expectedVersion").asLong()).isEqualTo(3L);
         assertThat(json.path("consumer").path("identityReference").path("sourceId").asText()).isEqualTo("286");
         assertThat(json.path("consumer").path("behaviorCommands")).hasSize(8);
-        assertThat(json.path("consumer").path("commands")).hasSize(19);
+        assertThat(json.path("consumer").path("commands")).hasSize(20);
         assertThat(json.path("consumer").path("commands").get(6).path("occurredAt").asText())
                 .isEqualTo("2026-07-29T00:00:00Z");
         assertThat(json.path("consumer").path("commands").get(6).path("promisedDeliveryAt").asText())
@@ -211,7 +214,7 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(input.path("campaign").path("clickedReceiptCommand").isObject()).isTrue();
         assertThat(input.path("consumer").path("identityReference").path("sourceId").asText())
                 .isEqualTo("286");
-        assertThat(input.path("consumer").path("commands")).hasSize(19);
+        assertThat(input.path("consumer").path("commands")).hasSize(20);
     }
 
     @Test
@@ -356,7 +359,7 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .isNotEqualTo(second.path("inTransitRunId").asText());
         assertThat(first.path("consumer").path("identityReference").path("sourceId").asText())
                 .isEqualTo("286");
-        assertThat(first.path("consumer").path("commands")).hasSize(19);
+        assertThat(first.path("consumer").path("commands")).hasSize(20);
         assertThat(first.path("consumer").path("commands").get(10).path("operation").asText())
                 .isEqualTo("IN_TRANSIT");
         assertThat(first.path("exceptionCommands")).hasSize(6);
@@ -907,6 +910,49 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .path("resolutionCode").asText()).isEqualTo("QUARANTINED_DESTROYED");
         assertThat(first.path("commands").get(7).path("inspectionTask")
                 .path("evidenceRef").asText()).matches("sha256:[0-9a-f]{64}");
+    }
+
+    @Test
+    void shouldAlternateRestockAndScrapInputsWithMakerCheckerSeparation() {
+        mockReadyMaster();
+        ObjectNode template = JsonNodeFactory.instance.objectNode();
+        template.putObject("runIds").put("catalog", "base-cat");
+        template.putObject("catalog").putArray("definitions").addObject()
+                .put("styleCode", "YS-BASEABC1").put("spuCode", "YS-BASEABC1")
+                .put("occurredAt", "2026-01-01T00:00:00Z");
+        template.putObject("master").putObject("identityReference");
+        ((ObjectNode) template.path("master")).putObject("warehouseReference");
+        ArrayNode commands = template.putObject("aftersale").putArray("commands");
+        for (int index = 0; index < 25; index++) {
+            commands.addObject().put("operation", index == 24 ? "ACCEPT_INSPECTION" : "TEST")
+                    .put("idempotencyKey", "base-command-" + index)
+                    .put("runId", "base-aftersale")
+                    .put("correlationId", "70000000-0000-4000-8000-000000000001")
+                    .put("occurredAt", "2026-01-01T00:00:00Z");
+        }
+        template.putObject("readback");
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(template));
+
+        JsonNode scrapDay = build(RotatingBusinessScenarioInputFactory.AFTERSALE_SAGA_SKILL);
+        JsonNode restockDay = JsonUtils.parseTree(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.AFTERSALE_SAGA_SKILL,
+                "2026-07-30", "temporal-run-1").orElseThrow());
+
+        assertThat(scrapDay.path("commands")).hasSize(26);
+        assertThat(scrapDay.path("commands").get(24).path("operation").asText())
+                .isEqualTo("ASSESS_DISPOSITION");
+        assertThat(scrapDay.path("commands").get(24).path("assessorId").asText())
+                .startsWith("ai-return-assessor:");
+        assertThat(scrapDay.path("commands").get(25).path("inspectorId").asText())
+                .startsWith("warehouse-inspector:")
+                .isNotEqualTo(scrapDay.path("commands").get(24).path("assessorId").asText());
+        assertThat(scrapDay.path("commands").get(25).path("dispositionCode").asText())
+                .isEqualTo("SCRAP");
+        assertThat(scrapDay.path("commands").get(24).path("safetyRisk").asBoolean()).isTrue();
+        assertThat(restockDay.path("commands").get(25).path("dispositionCode").asText())
+                .isEqualTo("RESTOCK");
     }
 
     private JsonNode build(String skillId) {

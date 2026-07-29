@@ -104,6 +104,7 @@ class RotatingBusinessScenarioInputFactory {
         String newProductToken = productToken(newPrefix);
         ObjectNode rotated = (ObjectNode) rotate(template, oldPrefix, newPrefix,
                 oldProductToken, newProductToken, occurredAt, null);
+        prepareAfterSaleDisposition(rotated, newPrefix, occurredAt, date.getDayOfYear() % 2 == 0);
         Optional<ObjectNode> reusableMaster = reusableMaster(tenantId, template, occurredAt);
         if (reusableMaster.isEmpty()) {
             return Optional.empty();
@@ -491,6 +492,44 @@ class RotatingBusinessScenarioInputFactory {
                 .put("shopId", merchant.path("shopId").asText());
         master.set("warehouseReference", warehouseReference.deepCopy());
         return Optional.of(master);
+    }
+
+    private static void prepareAfterSaleDisposition(ObjectNode fullChain, String prefix, String occurredAt,
+                                                    boolean scrapScenario) {
+        JsonNode commandsNode = fullChain.path("aftersale").path("commands");
+        if (!(commandsNode instanceof ArrayNode commands) || commands.size() < 25
+                || !(commands.get(24) instanceof ObjectNode inspection)) {
+            return;
+        }
+        String runId = inspection.path("runId").asText(prefix + "-aftersale");
+        String correlationId = inspection.path("correlationId")
+                .asText(stableUuid(prefix + ":aftersale-correlation"));
+        ObjectNode assessment = JsonNodeFactory.instance.objectNode()
+                .put("operation", "ASSESS_DISPOSITION")
+                .put("idempotencyKey", prefix + "-disposition-assess")
+                .put("runId", runId)
+                .put("afterSaleId", ZERO_UUID)
+                .put("expectedVersion", 2)
+                .put("assessorId", "ai-return-assessor:" + prefix)
+                .put("packagingScore", scrapScenario ? 40 : 96)
+                .put("appearanceScore", scrapScenario ? 30 : 95)
+                .put("functionScore", scrapScenario ? 20 : 98)
+                .put("safetyRisk", scrapScenario)
+                .put("counterfeitRisk", false)
+                .put("estimatedResaleValueMinor", scrapScenario ? 12000 : 39800)
+                .put("estimatedRecoveryCostMinor", scrapScenario ? 9000 : 1000)
+                .put("inspectionEvidenceRef", "restricted:return-inspection:" + prefix)
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt);
+        String causationId = inspection.path("causationId").asText();
+        if (!causationId.isBlank()) {
+            assessment.put("causationId", causationId);
+        }
+        commands.insert(24, assessment);
+        inspection.put("inspectorId", "warehouse-inspector:" + prefix);
+        inspection.put("dispositionAssessmentId", ZERO_UUID);
+        inspection.put("dispositionCode", scrapScenario ? "SCRAP" : "RESTOCK");
+        inspection.put("qualityStatus", scrapScenario ? "DAMAGED" : "QUALIFIED");
     }
 
     private JsonNode result(Long tenantId, String stepCode) {

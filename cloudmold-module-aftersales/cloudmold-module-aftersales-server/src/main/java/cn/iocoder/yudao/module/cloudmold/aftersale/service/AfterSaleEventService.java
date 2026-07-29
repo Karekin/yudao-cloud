@@ -19,6 +19,42 @@ public class AfterSaleEventService {
     private final AfterSaleResolutionSagaHistoryMapper sagaHistoryMapper;
     private final OutboxAppender outboxAppender;
 
+    public void appendDispositionAssessment(ReturnDispositionAssessmentDO assessment,
+                                            AfterSaleCaseDO sale,
+                                            Instant occurredAt,
+                                            LocalDateTime now) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("run_id", sale.getRunId());
+        payload.put("assessment_id", assessment.getAssessmentId());
+        payload.put("after_sale_id", assessment.getAfterSaleId());
+        payload.put("return_fulfillment_id", assessment.getReturnFulfillmentId());
+        payload.put("assessor_id", assessment.getAssessorId());
+        payload.put("packaging_score", assessment.getPackagingScore());
+        payload.put("appearance_score", assessment.getAppearanceScore());
+        payload.put("function_score", assessment.getFunctionScore());
+        payload.put("safety_risk", assessment.getSafetyRisk());
+        payload.put("counterfeit_risk", assessment.getCounterfeitRisk());
+        payload.put("estimated_resale_value_minor", assessment.getEstimatedResaleValueMinor());
+        payload.put("estimated_recovery_cost_minor", assessment.getEstimatedRecoveryCostMinor());
+        payload.put("inspection_evidence_ref", assessment.getInspectionEvidenceRef());
+        payload.put("recommended_disposition", assessment.getRecommendedDisposition());
+        payload.put("quality_status", assessment.getQualityStatus());
+        payload.put("condition_grade", assessment.getConditionGrade());
+        payload.put("confidence_score", assessment.getConfidenceScore());
+        payload.put("rationale_code", assessment.getRationaleCode());
+        outboxAppender.append(AppendDomainEventCommand.builder()
+                .eventType("after_sale.return_disposition.assessed").schemaVersion(1)
+                .sourceSystem("cloudmold-aftersales").tenantId(sale.getTenantId())
+                .aggregateType("return_disposition_assessment")
+                .aggregateId(assessment.getAssessmentId()).aggregateVersion(1L)
+                .eventSequence((short) 1).occurredAt(occurredAt)
+                .correlationId(sale.getCorrelationId()).causationId(sale.getCausationId())
+                .idempotencyKey("return-disposition:" + assessment.getAssessmentId() + ":event:1")
+                .payload(payload).headers(Map.of("recommendation",
+                        assessment.getRecommendedDisposition()))
+                .destination("lakehouse").build());
+    }
+
     public void appendCase(Long operationId, AfterSaleCaseDO sale, AfterSaleItemDO item,
                            String previous, Instant occurredAt, LocalDateTime now) {
         historyMapper.insert(new AfterSaleHistoryDO().setTenantId(sale.getTenantId())
@@ -83,6 +119,10 @@ public class AfterSaleEventService {
         payload.put("return_fulfillment_id", saga.getReturnFulfillmentId());
         payload.put("return_shipment_id", saga.getReturnShipmentId());
         payload.put("inspection_id", saga.getInspectionId());
+        payload.put("disposition_assessment_id", saga.getDispositionAssessmentId());
+        payload.put("disposition_code", saga.getDispositionCode());
+        payload.put("return_stock_status", saga.getReturnStockStatus());
+        payload.put("return_quality_status", saga.getReturnQualityStatus());
         payload.put("canonical_sku_id", saga.getCanonicalSkuId());
         payload.put("quantity", saga.getQuantity().toPlainString());
         payload.put("accepted_quantity", saga.getQuantity().toPlainString());
@@ -103,6 +143,8 @@ public class AfterSaleEventService {
         payload.put("attempt", saga.getAttemptCount());
         payload.put("inventory_operation_id", saga.getInventoryOperationId());
         payload.put("inventory_ledger_transaction_id", saga.getInventoryLedgerTransactionId());
+        payload.put("disposal_operation_id", saga.getDisposalOperationId());
+        payload.put("disposal_ledger_transaction_id", saga.getDisposalLedgerTransactionId());
         payload.put("benefit_reversal_status", saga.getBenefitReversalStatus());
         payload.put("benefit_reversal_batch_id", saga.getBenefitReversalBatchId());
         payload.put("benefit_reversal_amount_minor", saga.getBenefitReversalAmountMinor());
@@ -115,6 +157,8 @@ public class AfterSaleEventService {
         payload.put("order_version", saga.getOrderVersion());
         Map<String, Object> checkpoints = new LinkedHashMap<>();
         checkpoints.put("inventory_returned", saga.getInventoryLedgerTransactionId() != null);
+        checkpoints.put("inventory_disposed", !"SCRAP".equals(saga.getDispositionCode())
+                || saga.getDisposalLedgerTransactionId() != null);
         checkpoints.put("benefit_reversed", "NOT_REQUIRED".equals(saga.getBenefitReversalStatus())
                 || "RECORDED".equals(saga.getBenefitReversalStatus()));
         checkpoints.put("payment_refunded", saga.getPaymentRefundTransactionId() != null);
@@ -211,14 +255,15 @@ public class AfterSaleEventService {
     }
 
     private static int stepOrdinal(AfterSaleResolutionSagaDO saga) {
-        if ("COMPLETED".equals(saga.getStatus())) return 7;
+        if ("COMPLETED".equals(saga.getStatus())) return 8;
         return switch (saga.getActiveStep()) {
             case "RETURN_INVENTORY" -> 1;
-            case "REVERSE_BENEFITS" -> 2;
-            case "REFUND_PAYMENT" -> 3;
-            case "SETTLE_ORDER" -> 4;
-            case "CONFIRM_ORDER_REFUND" -> 5;
-            case "RETURN_ORDER" -> 6;
+            case "DISPOSE_INVENTORY" -> 2;
+            case "REVERSE_BENEFITS" -> 3;
+            case "REFUND_PAYMENT" -> 4;
+            case "SETTLE_ORDER" -> 5;
+            case "CONFIRM_ORDER_REFUND" -> 6;
+            case "RETURN_ORDER" -> 7;
             default -> 0;
         };
     }

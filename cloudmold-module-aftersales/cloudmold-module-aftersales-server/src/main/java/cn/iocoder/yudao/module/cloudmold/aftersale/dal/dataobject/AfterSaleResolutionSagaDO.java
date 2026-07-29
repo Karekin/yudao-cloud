@@ -27,6 +27,10 @@ public class AfterSaleResolutionSagaDO {
     private String returnFulfillmentId;
     private String returnShipmentId;
     private String inspectionId;
+    private String dispositionAssessmentId;
+    private String dispositionCode;
+    private String returnStockStatus;
+    private String returnQualityStatus;
     private String canonicalSkuId;
     private BigDecimal quantity;
     private String ownerId;
@@ -49,6 +53,8 @@ public class AfterSaleResolutionSagaDO {
     private Long version;
     private Long inventoryOperationId;
     private Long inventoryLedgerTransactionId;
+    private Long disposalOperationId;
+    private Long disposalLedgerTransactionId;
     private Long paymentRefundTransactionId;
     private Long orderRefundOperationId;
     private Long orderReturnOperationId;

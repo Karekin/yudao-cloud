@@ -48,13 +48,15 @@ class ManagedSkillTaskBusinessOutcomePresenterTest {
                                 """),
                         step("wait_resolution", """
                                 {"afterSaleId":"as-id","afterSaleNo":"AS-100","caseStatus":"COMPLETED",
-                                 "refundStatus":"REFUNDED","approvedAmountMinor":12900,"currencyCode":"CNY"}
+                                 "refundStatus":"REFUNDED","dispositionCode":"RESTOCK",
+                                 "approvedAmountMinor":12900,"currencyCode":"CNY"}
                                 """)));
 
-        assertThat(outcome.getHeadline()).isEqualTo("售后单 AS-100 已完成退款与库存恢复");
-        assertThat(outcome.getSummary()).contains("订单 O-100", "退货质检和退款闭环");
+        assertThat(outcome.getHeadline()).isEqualTo("售后单 AS-100 已完成退货处置与退款");
+        assertThat(outcome.getSummary()).contains("订单 O-100", "AI 成色评估", "返售");
         assertThat(outcome.getMetrics()).extracting("label", "value")
-                .contains(org.assertj.core.groups.Tuple.tuple("退款金额", "129.00 CNY"));
+                .contains(org.assertj.core.groups.Tuple.tuple("退款金额", "129.00 CNY"),
+                        org.assertj.core.groups.Tuple.tuple("处置结论", "返售"));
         assertThat(outcome.getBusinessObjects()).extracting("businessCode")
                 .containsExactly("L-100", "O-100", "AS-100");
     }

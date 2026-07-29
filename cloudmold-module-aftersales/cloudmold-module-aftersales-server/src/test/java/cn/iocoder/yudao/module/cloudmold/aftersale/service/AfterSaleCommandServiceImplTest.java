@@ -23,6 +23,8 @@ class AfterSaleCommandServiceImplTest {
     private final AfterSaleCaseMapper caseMapper = mock(AfterSaleCaseMapper.class);
     private final AfterSaleItemMapper itemMapper = mock(AfterSaleItemMapper.class);
     private final AfterSaleResolutionSagaMapper sagaMapper = mock(AfterSaleResolutionSagaMapper.class);
+    private final ReturnDispositionAssessmentMapper dispositionAssessmentMapper =
+            mock(ReturnDispositionAssessmentMapper.class);
     private final OrderAfterSaleQueryApi orderQueryApi = mock(OrderAfterSaleQueryApi.class);
     private final PaymentRefundQueryApi paymentQueryApi = mock(PaymentRefundQueryApi.class);
     private final ForwardFulfillmentAfterSaleQueryApi forwardQueryApi = mock(ForwardFulfillmentAfterSaleQueryApi.class);
@@ -31,16 +33,19 @@ class AfterSaleCommandServiceImplTest {
     private final AfterSaleEventService eventService = mock(AfterSaleEventService.class);
     private final AfterSaleResolutionCheckpointService checkpointService = mock(AfterSaleResolutionCheckpointService.class);
     private final AfterSaleCommandServiceImpl service = new AfterSaleCommandServiceImpl(operationMapper, caseMapper,
-            itemMapper, sagaMapper, orderQueryApi, paymentQueryApi, forwardQueryApi, returnCommandApi, returnQueryApi,
-            eventService, checkpointService);
+            itemMapper, sagaMapper, dispositionAssessmentMapper, orderQueryApi, paymentQueryApi, forwardQueryApi,
+            returnCommandApi, returnQueryApi, eventService, checkpointService);
 
     private final Map<String, AfterSaleOperationDO> operations = new HashMap<>();
     private final AtomicLong operationSequence = new AtomicLong();
     private final AtomicReference<Long> lastOperationId = new AtomicReference<>();
     private AfterSaleCaseDO sale;
     private AfterSaleItemDO item;
+    private ReturnDispositionAssessmentDO assessment;
     private String returnStatus = "CREATED";
     private long returnVersion = 1L;
+    private String returnQualityStatus;
+    private String returnDispositionCode;
 
     @BeforeEach
     void setUp() {
@@ -61,6 +66,10 @@ class AfterSaleCommandServiceImplTest {
                 case RECEIVE -> "RECEIVED";
                 case ACCEPT_INSPECTION -> "INSPECTION_ACCEPTED";
             };
+            if (command.getOperation() == ReturnFulfillmentOperation.ACCEPT_INSPECTION) {
+                returnQualityStatus = command.getQualityStatus();
+                returnDispositionCode = command.getDispositionCode();
+            }
             returnVersion = command.getOperation() == ReturnFulfillmentOperation.CREATE ? 1L : returnVersion + 1;
             return returnView();
         });
@@ -120,8 +129,13 @@ class AfterSaleCommandServiceImplTest {
                 .receiverId("receiver-1").build());
         verify(sagaMapper, never()).insert(any(AfterSaleResolutionSagaDO.class));
 
+        AfterSaleView assessed = service.execute(restockAssessment("after-sale-assess-001"));
+        assertThat(assessed.getRecommendedDisposition()).isEqualTo("RESTOCK");
+        assertThat(assessed.getDispositionConfidence()).isEqualTo(92);
         AfterSaleView pending = service.execute(command(AfterSaleOperation.ACCEPT_INSPECTION,
-                "after-sale-inspection-001", 2L).qualityStatus("QUALIFIED").inspectorId("inspector-1").build());
+                "after-sale-inspection-001", 2L).qualityStatus("QUALIFIED")
+                .dispositionCode("RESTOCK").dispositionAssessmentId(assessment.getAssessmentId())
+                .inspectorId("inspector-1").build());
         assertThat(pending.getCaseStatus()).isEqualTo("RESOLUTION_PENDING");
         assertThat(pending.getAggregateVersion()).isEqualTo(3L);
         verify(sagaMapper).insert(argThat((AfterSaleResolutionSagaDO value) -> "REQUESTED".equals(value.getStatus())
@@ -145,8 +159,12 @@ class AfterSaleCommandServiceImplTest {
         service.execute(request("after-sale-benefit-request"));
         service.execute(command(AfterSaleOperation.APPROVE, "after-sale-benefit-approve", 1L)
                 .reviewerId("reviewer-1").build());
+        returnStatus = "RECEIVED";
+        returnVersion = 4L;
+        service.execute(restockAssessment("after-sale-benefit-assess"));
         service.execute(command(AfterSaleOperation.ACCEPT_INSPECTION,
                 "after-sale-benefit-inspection", 2L).qualityStatus("QUALIFIED")
+                .dispositionCode("RESTOCK").dispositionAssessmentId(assessment.getAssessmentId())
                 .inspectorId("inspector-1").build());
 
         assertThat(item.getLineAmountMinor()).isEqualTo(39800L);
@@ -179,19 +197,52 @@ class AfterSaleCommandServiceImplTest {
     }
 
     @Test
-    void shouldRejectNonQualifiedInspectionAndKeepTenantIsolation() {
+    void shouldRejectInspectionThatConflictsWithAssessmentAndKeepTenantIsolation() {
         service.execute(request("after-sale-request-tenant"));
         service.execute(command(AfterSaleOperation.APPROVE, "after-sale-approve-tenant", 1L)
                 .reviewerId("reviewer-1").build());
+        returnStatus = "RECEIVED";
+        returnVersion = 4L;
+        service.execute(restockAssessment("after-sale-assess-tenant"));
         assertThatThrownBy(() -> service.execute(command(AfterSaleOperation.ACCEPT_INSPECTION,
-                "after-sale-bad-inspection", 2L).qualityStatus("DAMAGED").inspectorId("inspector-1").build()))
-                .hasMessage("first slice accepts QUALIFIED only");
+                "after-sale-bad-inspection", 2L).qualityStatus("DAMAGED").dispositionCode("SCRAP")
+                .dispositionAssessmentId(assessment.getAssessmentId()).inspectorId("inspector-1").build()))
+                .hasMessage("inspection disposition does not match the governed assessment");
         verify(sagaMapper, never()).insert(any(AfterSaleResolutionSagaDO.class));
 
         TenantContextHolder.setTenantId(2L);
         assertThatThrownBy(() -> service.get(sale.getAfterSaleId()))
                 .hasMessage("after-sale case does not exist");
         verify(caseMapper).selectTenant(2L, sale.getAfterSaleId());
+    }
+
+    @Test
+    void shouldRecommendScrapForSafetyRiskAndFreezeNonSellableDisposition() {
+        service.execute(request("after-sale-scrap-request"));
+        service.execute(command(AfterSaleOperation.APPROVE, "after-sale-scrap-approve", 1L)
+                .reviewerId("reviewer-1").build());
+        returnStatus = "RECEIVED";
+        returnVersion = 4L;
+        AfterSaleView assessed = service.execute(command(AfterSaleOperation.ASSESS_DISPOSITION,
+                "after-sale-scrap-assess", 2L).assessorId("assessor-1")
+                .packagingScore(30).appearanceScore(20).functionScore(10)
+                .safetyRisk(true).counterfeitRisk(false)
+                .estimatedResaleValueMinor(12000L).estimatedRecoveryCostMinor(9000L)
+                .inspectionEvidenceRef("evidence:scrap-risk").build());
+
+        assertThat(assessed.getRecommendedDisposition()).isEqualTo("SCRAP");
+        assertThat(assessed.getRecommendedQualityStatus()).isEqualTo("DAMAGED");
+        assertThat(assessed.getDispositionRationaleCode()).isEqualTo("SAFETY_RISK");
+
+        service.execute(command(AfterSaleOperation.ACCEPT_INSPECTION,
+                "after-sale-scrap-inspection", 2L).qualityStatus("DAMAGED")
+                .dispositionCode("SCRAP").dispositionAssessmentId(assessment.getAssessmentId())
+                .inspectorId("inspector-1").build());
+
+        verify(sagaMapper).insert(argThat((AfterSaleResolutionSagaDO value) ->
+                "SCRAP".equals(value.getDispositionCode())
+                        && "NON_SELLABLE".equals(value.getReturnStockStatus())
+                        && "DAMAGED".equals(value.getReturnQualityStatus())));
     }
 
     private void wirePersistence() {
@@ -216,6 +267,14 @@ class AfterSaleCommandServiceImplTest {
         when(caseMapper.startResolution(anyLong(), anyString(), anyLong(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(1);
         when(sagaMapper.selectTenant(anyLong(), anyString())).thenReturn(null);
+        when(dispositionAssessmentMapper.selectByAfterSale(anyLong(), anyString())).thenAnswer(invocation ->
+                assessment != null && Objects.equals(invocation.getArgument(0), assessment.getTenantId())
+                        && Objects.equals(invocation.getArgument(1), assessment.getAfterSaleId())
+                        ? assessment : null);
+        when(dispositionAssessmentMapper.insert(any(ReturnDispositionAssessmentDO.class))).thenAnswer(invocation -> {
+            assessment = invocation.getArgument(0);
+            return 1;
+        });
     }
 
     private void wireOperationStore() {
@@ -265,12 +324,22 @@ class AfterSaleCommandServiceImplTest {
                 .occurredAt(Instant.parse("2026-07-15T01:00:01Z").plusSeconds(version));
     }
 
+    private AfterSaleCommand restockAssessment(String key) {
+        return command(AfterSaleOperation.ASSESS_DISPOSITION, key, 2L)
+                .assessorId("assessor-1").packagingScore(95).appearanceScore(96).functionScore(100)
+                .safetyRisk(false).counterfeitRisk(false)
+                .estimatedResaleValueMinor(39800L).estimatedRecoveryCostMinor(1000L)
+                .inspectionEvidenceRef("evidence:qualified-return").build();
+    }
+
     private ReturnFulfillmentView returnView() {
         return ReturnFulfillmentView.builder().returnFulfillmentId("return-1").returnShipmentId("return-shipment-1")
                 .inspectionId("inspection-1").afterSaleId(sale == null ? "after-sale-1" : sale.getAfterSaleId())
                 .afterSaleItemId(item == null ? "after-sale-item-1" : item.getAfterSaleItemId())
-                .currentStatus(returnStatus).aggregateVersion(returnVersion).qualityStatus(
-                        "INSPECTION_ACCEPTED".equals(returnStatus) ? "QUALIFIED" : null).build();
+                .currentStatus(returnStatus).aggregateVersion(returnVersion)
+                .qualityStatus("INSPECTION_ACCEPTED".equals(returnStatus) ? returnQualityStatus : null)
+                .dispositionCode("INSPECTION_ACCEPTED".equals(returnStatus) ? returnDispositionCode : null)
+                .build();
     }
 
     private static OrderAfterSaleView eligibleOrder() {

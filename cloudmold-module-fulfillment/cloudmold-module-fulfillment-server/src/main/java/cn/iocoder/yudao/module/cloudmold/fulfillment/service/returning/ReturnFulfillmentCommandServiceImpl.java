@@ -81,9 +81,13 @@ public class ReturnFulfillmentCommandServiceImpl implements ReturnFulfillmentCom
                 "return Fulfillment inspection has not been accepted");
         ReturnInspectionDO inspection = inspectionMapper.selectByFulfillment(tenantId, returnFulfillmentId);
         ReturnFulfillmentItemDO item = requireSingleItem(tenantId, returnFulfillmentId);
-        require(inspection != null && "QUALIFIED".equals(inspection.getQualityStatus())
+        require(inspection != null
+                        && (("QUALIFIED".equals(inspection.getQualityStatus())
+                        && "RESTOCK".equals(inspection.getDispositionCode()))
+                        || ("DAMAGED".equals(inspection.getQualityStatus())
+                        && "SCRAP".equals(inspection.getDispositionCode())))
                         && inspection.getAcceptedQuantity().compareTo(item.getQuantity()) == 0,
-                "qualified return inspection is incomplete");
+                "governed return inspection disposition is incomplete");
         return view(null, fulfillment, shipmentMapper.selectByFulfillment(tenantId, returnFulfillmentId),
                 item, inspection, false);
     }
@@ -175,8 +179,17 @@ public class ReturnFulfillmentCommandServiceImpl implements ReturnFulfillmentCom
                 appendTracking(fulfillment, shipment, "RECEIVED", command.getOperatorId(), occurredAt, now);
             } else if (command.getOperation() == ReturnFulfillmentOperation.ACCEPT_INSPECTION) {
                 require(inspection == null, "return inspection is immutable");
-                require("QUALIFIED".equals(command.getQualityStatus()),
-                        "first slice accepts QUALIFIED inspection only");
+                require("QUALIFIED".equals(command.getQualityStatus())
+                                || "DAMAGED".equals(command.getQualityStatus()),
+                        "inspection qualityStatus must be QUALIFIED or DAMAGED");
+                requireText(command.getDispositionAssessmentId(), "dispositionAssessmentId", 36);
+                require(("QUALIFIED".equals(command.getQualityStatus())
+                                && "RESTOCK".equals(command.getDispositionCode()))
+                                || ("DAMAGED".equals(command.getQualityStatus())
+                                && "SCRAP".equals(command.getDispositionCode())),
+                        "inspection quality and disposition do not match");
+                requireText(command.getConditionGrade(), "conditionGrade", 16);
+                requireText(command.getInspectionEvidenceRef(), "inspectionEvidenceRef", 256);
                 requireText(command.getOperatorId(), "inspectorId", 128);
                 inspection = new ReturnInspectionDO().setInspectionId(UUID.randomUUID().toString())
                         .setTenantId(tenantId).setReturnFulfillmentId(fulfillment.getReturnFulfillmentId())
@@ -186,7 +199,12 @@ public class ReturnFulfillmentCommandServiceImpl implements ReturnFulfillmentCom
                                 .getReturnShipmentItemId())
                         .setWarehouseId(fulfillment.getWarehouseId())
                         .setReceivedQuantity(item.getQuantity()).setAcceptedQuantity(item.getQuantity())
-                        .setQualityStatus("QUALIFIED").setInspectorId(command.getOperatorId())
+                        .setQualityStatus(command.getQualityStatus())
+                        .setDispositionAssessmentId(command.getDispositionAssessmentId())
+                        .setDispositionCode(command.getDispositionCode())
+                        .setConditionGrade(command.getConditionGrade())
+                        .setInspectionEvidenceRef(command.getInspectionEvidenceRef())
+                        .setInspectorId(command.getOperatorId())
                         .setDecidedAt(occurredAt).setCreatedAt(now);
                 inspectionMapper.insert(inspection);
             }
@@ -282,6 +300,10 @@ public class ReturnFulfillmentCommandServiceImpl implements ReturnFulfillmentCom
         payload.put("receiver_id", s == null ? null : s.getReceiverId());
         payload.put("inspection_id", i == null ? null : i.getInspectionId());
         payload.put("quality_status", i == null ? null : i.getQualityStatus());
+        payload.put("disposition_assessment_id", i == null ? null : i.getDispositionAssessmentId());
+        payload.put("disposition_code", i == null ? null : i.getDispositionCode());
+        payload.put("condition_grade", i == null ? null : i.getConditionGrade());
+        payload.put("inspection_evidence_ref", i == null ? null : i.getInspectionEvidenceRef());
         payload.put("received_quantity", i == null ? null : i.getReceivedQuantity().toPlainString());
         payload.put("accepted_quantity", i == null ? null : i.getAcceptedQuantity().toPlainString());
         payload.put("rejected_quantity", i == null ? null : "0");
@@ -305,7 +327,12 @@ public class ReturnFulfillmentCommandServiceImpl implements ReturnFulfillmentCom
                 .canonicalSkuId(item.getCanonicalSkuId()).quantity(item.getQuantity()).ownerId(f.getOwnerId())
                 .warehouseId(f.getWarehouseId()).uomCode(f.getUomCode())
                 .carrierCode(s == null ? null : s.getCarrierCode()).waybillNo(s == null ? null : s.getWaybillNo())
-                .qualityStatus(i == null ? null : i.getQualityStatus()).currentStatus(f.getStatus())
+                .qualityStatus(i == null ? null : i.getQualityStatus())
+                .dispositionAssessmentId(i == null ? null : i.getDispositionAssessmentId())
+                .dispositionCode(i == null ? null : i.getDispositionCode())
+                .conditionGrade(i == null ? null : i.getConditionGrade())
+                .inspectionEvidenceRef(i == null ? null : i.getInspectionEvidenceRef())
+                .currentStatus(f.getStatus())
                 .aggregateVersion(f.getVersion()).duplicate(duplicate).build();
     }
 

@@ -14,6 +14,7 @@ import cn.iocoder.yudao.module.cloudmold.inventory.dal.mysql.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 import java.math.BigDecimal;
@@ -178,6 +179,43 @@ class InventoryCommandServiceImplTest {
 
         verifyNoInteractions(balanceMapper, reservationMapper, migrationMapper,
                 ledgerTransactionMapper, ledgerEntryMapper, outboxAppender);
+    }
+
+    @Test
+    void shouldDisposeReturnedNonSellableInventoryWithImmutableLedgerEvidence() {
+        prepareNewOperation("DISPOSE");
+        when(balanceMapper.selectDimensionForUpdate(1L, "owner-1", "sku-1", "warehouse-1",
+                "NON_SELLABLE", "DAMAGED"))
+                .thenReturn(new InventoryBalanceDO().setBalanceId("damaged-balance-1").setTenantId(1L)
+                        .setOwnerId("owner-1").setCanonicalSkuId("sku-1").setWarehouseId("warehouse-1")
+                        .setStockStatus("NON_SELLABLE").setQualityStatus("DAMAGED").setBaseUomCode("PIECE")
+                        .setOnHandQuantity(new BigDecimal("2.000000"))
+                        .setReservedQuantity(new BigDecimal("0.000000"))
+                        .setInTransitQuantity(new BigDecimal("0.000000")).setVersion(7L));
+        when(balanceMapper.updateBalanceCas(eq(1L), eq("damaged-balance-1"), eq(7L),
+                eq(new BigDecimal("0.000000")), eq(new BigDecimal("0.000000")), any())).thenReturn(1);
+        when(ledgerTransactionMapper.insert(any(InventoryLedgerTransactionDO.class))).thenAnswer(invocation -> {
+            invocation.<InventoryLedgerTransactionDO>getArgument(0).setLedgerTransactionId(301L);
+            return 1;
+        });
+        when(ledgerEntryMapper.insert(any(InventoryLedgerEntryDO.class))).thenReturn(1);
+        when(outboxAppender.append(any())).thenReturn(new AppendDomainEventResult("event-dispose", "b".repeat(64), false));
+        when(operationMapper.markSucceeded(eq(101L), eq(1L), eq(301L), anyString(), any())).thenReturn(1);
+
+        InventoryCommand command = command(InventoryOperation.DISPOSE, "2.000000", null)
+                .setStockStatus("NON_SELLABLE").setQualityStatus("DAMAGED")
+                .setBusinessType("AFTER_SALE_DISPOSAL");
+        InventoryCommandResult result = service.execute(command);
+
+        assertThat(result.getOnHandQuantity()).isEqualByComparingTo("0.000000");
+        assertThat(result.getAvailableQuantity()).isEqualByComparingTo("0.000000");
+        ArgumentCaptor<InventoryLedgerTransactionDO> transaction =
+                ArgumentCaptor.forClass(InventoryLedgerTransactionDO.class);
+        verify(ledgerTransactionMapper).insert(transaction.capture());
+        assertThat(transaction.getValue().getCommandType()).isEqualTo("DISPOSE");
+        verify(outboxAppender).append(argThat(event -> "RETURN_DISPOSAL".equals(
+                event.getPayload().get("movement_type"))
+                && "0.000000".equals(event.getPayload().get("after_on_hand_quantity"))));
     }
 
     private void prepareNewOperation(String type) {

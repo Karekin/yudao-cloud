@@ -48,9 +48,24 @@ JOIN cloudmold_return_fulfillment_item ri
 LEFT JOIN cloudmold_return_inspection i
   ON i.tenant_id=r.tenant_id AND i.return_fulfillment_id=r.return_fulfillment_id
 WHERE r.status='INSPECTION_ACCEPTED'
-  AND (i.inspection_id IS NULL OR i.quality_status<>'QUALIFIED'
+  AND (i.inspection_id IS NULL
+    OR (i.quality_status='QUALIFIED' AND i.disposition_code<>'RESTOCK')
+    OR (i.quality_status='DAMAGED' AND i.disposition_code<>'SCRAP')
+    OR i.quality_status NOT IN ('QUALIFIED','DAMAGED')
     OR i.received_quantity<>ri.quantity OR i.accepted_quantity<>ri.quantity
     OR i.warehouse_id<>r.warehouse_id);
+
+SELECT COUNT(*) AS return_disposition_assessment_violation
+FROM cloudmold_return_inspection i
+LEFT JOIN cloudmold_return_disposition_assessment a
+  ON a.tenant_id=i.tenant_id AND a.assessment_id=i.disposition_assessment_id
+WHERE i.disposition_code IS NOT NULL
+  AND (a.assessment_id IS NULL OR a.after_sale_id<>i.after_sale_id
+    OR a.return_fulfillment_id<>i.return_fulfillment_id
+    OR a.recommended_disposition<>i.disposition_code
+    OR a.quality_status<>i.quality_status
+    OR a.assessor_id=i.inspector_id
+    OR a.inspection_evidence_ref<>i.inspection_evidence_ref);
 
 SELECT COUNT(*) AS after_sale_money_violation
 FROM cloudmold_after_sale_case a
@@ -83,6 +98,24 @@ WHERE s.status='COMPLETED'
     OR BINARY t.business_id<>BINARY s.after_sale_id
     OR BINARY t.business_item_id<>BINARY s.after_sale_item_id
     OR e.delta_on_hand_quantity<>s.quantity);
+
+SELECT COUNT(*) AS after_sale_disposal_violation
+FROM cloudmold_after_sale_resolution_saga s
+LEFT JOIN cloudmold_inventory_ledger_transaction t
+  ON t.tenant_id=s.tenant_id AND t.ledger_transaction_id=s.disposal_ledger_transaction_id
+LEFT JOIN cloudmold_inventory_ledger_entry e
+  ON e.tenant_id=t.tenant_id AND e.ledger_transaction_id=t.ledger_transaction_id
+WHERE s.status='COMPLETED'
+  AND ((s.disposition_code='SCRAP' AND (
+        s.return_stock_status<>'NON_SELLABLE' OR s.return_quality_status<>'DAMAGED'
+        OR s.disposal_operation_id IS NULL OR s.disposal_ledger_transaction_id IS NULL
+        OR t.command_type<>'DISPOSE' OR t.business_type<>'AFTER_SALE_DISPOSAL'
+        OR BINARY t.business_id<>BINARY s.after_sale_id
+        OR BINARY t.business_item_id<>BINARY s.after_sale_item_id
+        OR e.delta_on_hand_quantity<>-s.quantity))
+    OR (s.disposition_code='RESTOCK' AND (
+        s.return_stock_status<>'SELLABLE' OR s.return_quality_status<>'QUALIFIED'
+        OR s.disposal_operation_id IS NOT NULL OR s.disposal_ledger_transaction_id IS NOT NULL)));
 
 SELECT COUNT(*) AS after_sale_order_terminal_violation
 FROM cloudmold_after_sale_resolution_saga s

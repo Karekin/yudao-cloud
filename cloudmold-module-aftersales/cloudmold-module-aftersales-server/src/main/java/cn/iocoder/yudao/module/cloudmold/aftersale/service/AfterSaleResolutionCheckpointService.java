@@ -43,9 +43,28 @@ public class AfterSaleResolutionCheckpointService {
         saga.setInventoryOperationId(result.getOperationId())
                 .setInventoryLedgerTransactionId(result.getLedgerTransactionId())
                 .setStatus("INVENTORY_RETURNED").setActiveStep(
-                        "PENDING".equals(saga.getBenefitReversalStatus()) ? "REVERSE_BENEFITS" : "REFUND_PAYMENT")
+                        "SCRAP".equals(saga.getDispositionCode()) ? "DISPOSE_INVENTORY"
+                                : "PENDING".equals(saga.getBenefitReversalStatus())
+                                ? "REVERSE_BENEFITS" : "REFUND_PAYMENT")
                 .setVersion(saga.getVersion() + 1).setUpdatedAt(now);
         require(sagaMapper.updateById(saga) == 1, "inventory return checkpoint conflict");
+        eventService.appendSaga(saga, previous, now);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void markInventoryDisposed(Long tenantId, String sagaId, String leaseOwner,
+                                      InventoryCommandResult result, LocalDateTime now) {
+        AfterSaleResolutionSagaDO saga = requireLeased(tenantId, sagaId, leaseOwner);
+        require("SCRAP".equals(saga.getDispositionCode()),
+                "inventory disposal checkpoint requires SCRAP disposition");
+        String previous = saga.getStatus();
+        saga.setDisposalOperationId(result.getOperationId())
+                .setDisposalLedgerTransactionId(result.getLedgerTransactionId())
+                .setStatus("INVENTORY_DISPOSED")
+                .setActiveStep("PENDING".equals(saga.getBenefitReversalStatus())
+                        ? "REVERSE_BENEFITS" : "REFUND_PAYMENT")
+                .setVersion(saga.getVersion() + 1).setUpdatedAt(now);
+        require(sagaMapper.updateById(saga) == 1, "inventory disposal checkpoint conflict");
         eventService.appendSaga(saga, previous, now);
     }
 
@@ -142,6 +161,10 @@ public class AfterSaleResolutionCheckpointService {
         require(saga.getInventoryLedgerTransactionId() != null && saga.getPaymentRefundTransactionId() != null
                         && saga.getOrderSettlementEffectId() != null,
                 "resolution Saga participant checkpoints are incomplete");
+        require(!"SCRAP".equals(saga.getDispositionCode())
+                        || (saga.getDisposalOperationId() != null
+                        && saga.getDisposalLedgerTransactionId() != null),
+                "SCRAP disposition is missing inventory disposal evidence");
         require((Boolean.TRUE.equals(saga.getOrderReturnFull())
                         && saga.getOrderRefundOperationId() != null && saga.getOrderReturnOperationId() != null)
                         || (Boolean.FALSE.equals(saga.getOrderReturnFull())

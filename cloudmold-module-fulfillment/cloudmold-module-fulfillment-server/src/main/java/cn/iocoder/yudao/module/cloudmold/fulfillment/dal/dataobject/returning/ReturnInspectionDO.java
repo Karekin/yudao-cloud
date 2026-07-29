@@ -22,6 +22,10 @@ public class ReturnInspectionDO {
     private BigDecimal receivedQuantity;
     private BigDecimal acceptedQuantity;
     private String qualityStatus;
+    private String dispositionAssessmentId;
+    private String dispositionCode;
+    private String conditionGrade;
+    private String inspectionEvidenceRef;
     private String inspectorId;
     private LocalDateTime decidedAt;
     private LocalDateTime createdAt;

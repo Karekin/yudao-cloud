@@ -121,7 +121,10 @@ class ReturnFulfillmentCommandServiceImplTest {
         ReturnFulfillmentView received = service.execute(transition(ReturnFulfillmentOperation.RECEIVE,
                 "return-receive-001", 3L).operatorId("receiver-1").build());
         ReturnFulfillmentView accepted = service.execute(transition(ReturnFulfillmentOperation.ACCEPT_INSPECTION,
-                "return-inspection-001", 4L).operatorId("inspector-1").qualityStatus("QUALIFIED").build());
+                "return-inspection-001", 4L).operatorId("inspector-1").qualityStatus("QUALIFIED")
+                .dispositionAssessmentId("70000000-0000-4000-8000-000000000010")
+                .dispositionCode("RESTOCK").conditionGrade("A")
+                .inspectionEvidenceRef("evidence:return-001").build());
 
         assertThat(List.of(handedOver.getCurrentStatus(), inTransit.getCurrentStatus(), received.getCurrentStatus(),
                 accepted.getCurrentStatus())).containsExactly("HANDED_OVER", "IN_TRANSIT", "RECEIVED",
@@ -131,7 +134,7 @@ class ReturnFulfillmentCommandServiceImplTest {
     }
 
     @Test
-    void shouldRejectIllegalOrderWaybillConflictAndNonQualifiedInspection() {
+    void shouldRejectIllegalOrderWaybillConflictAndMismatchedInspectionDisposition() {
         service.execute(createCommand("return-create-002"));
         assertThatThrownBy(() -> service.execute(transition(ReturnFulfillmentOperation.RECEIVE,
                 "return-receive-too-early", 1L).operatorId("receiver-1").build()))
@@ -152,8 +155,11 @@ class ReturnFulfillmentCommandServiceImplTest {
         service.execute(transition(ReturnFulfillmentOperation.RECEIVE,
                 "return-receive-002", 3L).operatorId("receiver-1").build());
         assertThatThrownBy(() -> service.execute(transition(ReturnFulfillmentOperation.ACCEPT_INSPECTION,
-                "return-inspection-rejected", 4L).operatorId("inspector-1").qualityStatus("DAMAGED").build()))
-                .hasMessage("first slice accepts QUALIFIED inspection only");
+                "return-inspection-rejected", 4L).operatorId("inspector-1").qualityStatus("DAMAGED")
+                .dispositionAssessmentId("70000000-0000-4000-8000-000000000011")
+                .dispositionCode("RESTOCK").conditionGrade("D")
+                .inspectionEvidenceRef("evidence:return-002").build()))
+                .hasMessage("inspection quality and disposition do not match");
     }
 
     @Test

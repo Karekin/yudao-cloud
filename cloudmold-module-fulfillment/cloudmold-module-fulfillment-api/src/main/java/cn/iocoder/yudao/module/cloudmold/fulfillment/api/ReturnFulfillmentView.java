@@ -29,6 +29,10 @@ public class ReturnFulfillmentView {
     private String carrierCode;
     private String waybillNo;
     private String qualityStatus;
+    private String dispositionAssessmentId;
+    private String dispositionCode;
+    private String conditionGrade;
+    private String inspectionEvidenceRef;
     private String currentStatus;
     private Long aggregateVersion;
     private Boolean duplicate;

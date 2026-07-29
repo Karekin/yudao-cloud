@@ -36,7 +36,7 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("skill.cloudmold.commerce.autonomous-day.v1", "AI 自主经营日"),
             Map.entry("skill.cloudmold.commerce.category-daily-operations.v1", "品类日常运营闭环"),
             Map.entry("skill.cloudmold.consumer.shopping-journey.v1", "消费者选购与服务全旅程"),
-            Map.entry("skill.cloudmold.commerce.aftersale-saga.v1", "售后退款全链路"),
+            Map.entry("skill.cloudmold.commerce.aftersale-saga.v1", "跨境退货质检处置闭环"),
             Map.entry("skill.cloudmold.commerce.legacy-projection-plan.v1", "旧系统投影预检"),
             Map.entry("skill.cloudmold.commerce.reuse-ready-master.v1", "商家与仓网主数据准备"),
             Map.entry("skill.cloudmold.commerce.terminal-readback.v1", "全链路终态核验"),
@@ -109,7 +109,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("skill.cloudmold.consumer.shopping-journey.v1",
                     "模拟真实会员完成搜索、商详、收藏、加购、结算、下单支付、履约、售后、咨询与社区发布。"),
             Map.entry("skill.cloudmold.commerce.aftersale-saga.v1",
-                    "贯通发布、库存、下单支付、履约、退货质检、退款和库存恢复。"),
+                    "模拟跨境退货运营岗位完成全新订单、退货收仓、AI 成色与风险评估、仓库独立复检、"
+                            + "可返售复库或不可售报废处置、客户退款和订单关闭；每日轮换返售与报废场景。"),
             Map.entry("skill.cloudmold.commerce.legacy-projection-plan.v1",
                     "只读规划规范 SKU 向 Mall、ERP 与 WMS 的兼容投影，不执行旧系统写入。"),
             Map.entry("skill.cloudmold.commerce.reuse-ready-master.v1",
@@ -327,8 +328,9 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("return_handover", "退货交接"),
             Map.entry("return_transit", "退货运输"),
             Map.entry("return_receive", "退货入库"),
+            Map.entry("disposition_assess", "AI 成色与处置评估"),
             Map.entry("inspection_accept", "退货质检通过"),
-            Map.entry("wait_resolution", "确认退款与库存恢复"),
+            Map.entry("wait_resolution", "确认处置、退款与订单关闭"),
             Map.entry("erp_warehouse", "读取 ERP 仓库"),
             Map.entry("principal", "核验运营主体"),
             Map.entry("link_finance_maker", "建立财务制单身份"),
@@ -769,11 +771,15 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
         String afterSaleNo = text(aftersale, "afterSaleNo");
         String orderNo = text(order, "orderNo");
         String amount = money(aftersale.path("approvedAmountMinor"), text(aftersale, "currencyCode"));
+        String disposition = statusLabel(text(aftersale, "dispositionCode"));
         return outcome("AFTERSALE_REFUND",
-                "售后单 " + valueOr(afterSaleNo, text(aftersale, "afterSaleId")) + " 已完成退款与库存恢复",
+                "售后单 " + valueOr(afterSaleNo, text(aftersale, "afterSaleId"))
+                        + " 已完成退货处置与退款",
                 "订单 " + valueOr(orderNo, text(order, "orderId"))
-                        + " 已完成发布、支付、履约、退货质检和退款闭环。",
+                        + " 已完成发布、支付、履约、AI 成色评估、独立复检、"
+                        + valueOr(disposition, "退货处置") + "和退款闭环。",
                 List.of(metric("退款金额", amount), metric("售后状态", statusLabel(text(aftersale, "caseStatus"))),
+                        metric("处置结论", disposition),
                         metric("退款状态", statusLabel(text(aftersale, "refundStatus")))),
                 List.of(
                         object("LISTING", "商品刊登", text(listing, "listingId"), text(listing, "listingNo"),
@@ -1346,6 +1352,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             case "RETRY_SCHEDULED" -> "等待重试";
             case "CANCELLATION_PENDING" -> "取消处理中";
             case "APPROVED", "ACCEPTED" -> "已通过";
+            case "RESTOCK" -> "返售";
+            case "SCRAP" -> "报废";
             case "READY" -> "已就绪";
             case "RUNNING" -> "运行中";
             case "WAITING" -> "等待中";
