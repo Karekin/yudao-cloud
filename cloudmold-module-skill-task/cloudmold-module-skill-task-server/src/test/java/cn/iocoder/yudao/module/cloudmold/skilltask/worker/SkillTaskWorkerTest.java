@@ -163,6 +163,39 @@ class SkillTaskWorkerTest {
     }
 
     @Test
+    void acceptsNumericallyEqualWaitConditionsAcrossJsonIntegerWidths() {
+        Candidate candidate = new Candidate();
+        candidate.setTenantId(8L); candidate.setTaskId("task-poll"); candidate.setStatus("WAITING");
+        candidate.setVersion(4L); candidate.setAttemptCount(3); candidate.setMaxAttempts(3);
+        Task task = task();
+        task.setTaskId("task-poll"); task.setStatus("RUNNING"); task.setCurrentStepCode("wait-case");
+        task.setInputJson("{\"alertId\":\"alert-1\"}");
+        Step wait = step();
+        wait.setTaskId("task-poll"); wait.setStepCode("wait-case"); wait.setStepKind("WAIT_CAPABILITY");
+        wait.setOperationType("READ"); wait.setCapabilityId("cap.operations-alert.get");
+        wait.setArgumentTemplateJson("[\"$input.alertId\"]"); wait.setPollIntervalSeconds(2);
+        wait.setWaitSuccessJson("{\"/status\":\"RESOLVED\",\"/aggregateVersion\":4}");
+        wait.setWaitFailureJson("{\"/status\":[\"INVALID\"]}");
+        JsonNode resolved = objectMapper.createObjectNode()
+                .put("status", "RESOLVED")
+                .put("aggregateVersion", 4L);
+        when(mapper.selectDue(LocalDateTime.of(2026, 7, 18, 12, 0), 20)).thenReturn(List.of(candidate));
+        when(checkpoints.claim(eq(candidate), anyString())).thenReturn(task);
+        when(mapper.selectStep(8L, "task-poll", "wait-case")).thenReturn(wait);
+        when(mapper.selectSteps(8L, "task-poll")).thenReturn(List.of(wait));
+        when(executor.execute(eq("cap.operations-alert.get"), any(), any(), eq(false))).thenReturn(resolved);
+        when(checkpoints.checkpointSuccess(eq(task), eq(wait), anyString(),
+                eq("{\"aggregateVersion\":4,\"status\":\"RESOLVED\"}"), anyString())).thenReturn(null);
+
+        worker.poll();
+
+        verify(checkpoints).checkpointSuccess(eq(task), eq(wait), anyString(),
+                eq("{\"aggregateVersion\":4,\"status\":\"RESOLVED\"}"), anyString());
+        verify(checkpoints, never()).checkpointWaiting(any(), any(), anyString(), any(),
+                anyString(), any(), any());
+    }
+
+    @Test
     void doesNotInvokeTheActuatorWhenTakeoverWinsBeforeExecution() {
         Candidate candidate = new Candidate();
         candidate.setTenantId(8L); candidate.setTaskId("task-1"); candidate.setStatus("RUNNING");

@@ -206,7 +206,7 @@ public class SkillTaskWorker {
         Iterator<Map.Entry<String, JsonNode>> fields = conditions.fields();
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> condition = fields.next();
-            if (!condition.getValue().equals(result.at(condition.getKey()))) {
+            if (!scalarEquals(condition.getValue(), result.at(condition.getKey()))) {
                 return false;
             }
         }
@@ -219,12 +219,19 @@ public class SkillTaskWorker {
             Map.Entry<String, JsonNode> condition = fields.next();
             JsonNode actual = result.at(condition.getKey());
             for (JsonNode expected : condition.getValue()) {
-                if (expected.equals(actual)) {
+                if (scalarEquals(expected, actual)) {
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    private static boolean scalarEquals(JsonNode expected, JsonNode actual) {
+        if (expected.isNumber() && actual.isNumber()) {
+            return expected.decimalValue().compareTo(actual.decimalValue()) == 0;
+        }
+        return expected.equals(actual);
     }
 
     private Task requireChild(Task parent, String childTaskId) {
