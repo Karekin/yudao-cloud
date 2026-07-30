@@ -360,14 +360,44 @@ class ManagedSkillTaskBusinessOutcomePresenterTest {
         ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
                 task("skill.cloudmold.commerce.full-chain-hsf.v1"),
                 List.of(
-                        step("wait_catalog", "{\"status\":\"SUCCEEDED\"}"),
+                        step("wait_product", "{\"status\":\"SUCCEEDED\"}"),
                         step("wait_projection", "{\"status\":\"SUCCEEDED\"}"),
-                        step("wait_master", "{\"status\":\"SUCCEEDED\"}"),
                         step("wait_aftersale", "{\"status\":\"SUCCEEDED\"}"),
                         step("wait_readback", "{\"status\":\"SUCCEEDED\"}")));
 
         assertThat(outcome.getHeadline()).isEqualTo("商品售后自治全链路已完成");
-        assertThat(outcome.getSummary()).contains("5 条子流程全部成功");
+        assertThat(outcome.getSummary()).contains("4 条子流程全部成功");
+    }
+
+    @Test
+    void shouldDescribeMesProductionAsProducedReceivedAndClosed() {
+        ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
+                task("skill.cloudmold.mes.production-execution-lifecycle.v1"),
+                List.of(step("verify_production_closed_loop", """
+                        {
+                          "workOrderId":101,"workOrderStatus":2,"plannedQuantity":12,
+                          "taskId":102,"taskStatus":4,
+                          "feedbackId":103,"feedbackStatus":4,
+                          "produceId":104,"produceStatus":4,
+                          "outputQuantity":12,"passedOutputQuantity":12,
+                          "failedOutputQuantity":0,"closedLoop":true
+                        }
+                        """)));
+
+        assertThat(outcome.getHeadline()).isEqualTo("新品试产、合格品入库与生产工单已闭环");
+        assertThat(outcome.getSummary()).contains("产线准备", "任务派工", "产成品入库");
+        assertThat(outcome.getMetrics()).extracting("label", "value")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("计划生产", "12"),
+                        org.assertj.core.groups.Tuple.tuple("实际产出", "12"),
+                        org.assertj.core.groups.Tuple.tuple("合格产出", "12"),
+                        org.assertj.core.groups.Tuple.tuple("不合格产出", "0"));
+        assertThat(outcome.getBusinessObjects()).extracting("objectType", "businessId")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("MES_WORK_ORDER", "101"),
+                        org.assertj.core.groups.Tuple.tuple("MES_PRODUCTION_TASK", "102"),
+                        org.assertj.core.groups.Tuple.tuple("MES_PRODUCTION_FEEDBACK", "103"),
+                        org.assertj.core.groups.Tuple.tuple("MES_PRODUCT_PRODUCE", "104"));
     }
 
     @Test

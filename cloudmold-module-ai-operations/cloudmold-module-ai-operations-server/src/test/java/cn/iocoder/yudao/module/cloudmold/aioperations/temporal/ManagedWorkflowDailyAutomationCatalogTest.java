@@ -73,10 +73,10 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                 .hasSize(24);
         assertThat(ManagedWorkflowDailyAutomationFixtures.workflows())
                 .filteredOn(workflow -> "R2".equals(workflow.getRiskLevel()))
-                .hasSize(6);
+                .hasSize(7);
         assertThat(ManagedWorkflowDailyAutomationFixtures.workflows())
                 .filteredOn(workflow -> "R3".equals(workflow.getRiskLevel()))
-                .hasSize(21);
+                .hasSize(22);
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .filter(ManagedWorkflowDailyAutomationCatalog::canRunWithoutBusinessInput))
                 .containsExactly(
@@ -89,7 +89,7 @@ class ManagedWorkflowDailyAutomationCatalogTest {
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("ROTATING_BUSINESS_SCENARIO"::equals)
-                .hasSize(24);
+                .hasSize(25);
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("DOMAIN_BACKLOG"::equals)
@@ -97,7 +97,7 @@ class ManagedWorkflowDailyAutomationCatalogTest {
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("EVENT_BACKLOG"::equals)
-                .hasSize(24);
+                .hasSize(25);
         assertThat(ManagedWorkflowDailyAutomationCatalog.inputStrategy(
                 "skill.cloudmold.supply-planning.prepare.v1"))
                 .isEqualTo("DOMAIN_BACKLOG");
@@ -126,6 +126,10 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                 .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
                         "partner-marketing-operations",
                         "partner-marketing.kol-media-operations"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.mes.production-execution-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "production-supervisor", "production.execute"));
     }
 
     @Test

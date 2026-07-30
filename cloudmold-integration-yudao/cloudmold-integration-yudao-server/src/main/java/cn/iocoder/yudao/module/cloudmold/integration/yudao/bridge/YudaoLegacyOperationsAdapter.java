@@ -41,11 +41,36 @@ import cn.iocoder.yudao.module.mes.controller.admin.pro.workorder.vo.MesProWorkO
 import cn.iocoder.yudao.module.mes.controller.admin.md.item.vo.MesMdItemSaveReqVO;
 import cn.iocoder.yudao.module.mes.controller.admin.md.item.vo.type.MesMdItemTypeSaveReqVO;
 import cn.iocoder.yudao.module.mes.controller.admin.md.unitmeasure.vo.MesMdUnitMeasureSaveReqVO;
+import cn.iocoder.yudao.module.mes.controller.admin.md.workstation.vo.MesMdWorkstationSaveReqVO;
+import cn.iocoder.yudao.module.mes.controller.admin.md.workstation.vo.workshop.MesMdWorkshopSaveReqVO;
+import cn.iocoder.yudao.module.mes.controller.admin.pro.feedback.vo.MesProFeedbackSaveReqVO;
+import cn.iocoder.yudao.module.mes.controller.admin.pro.process.vo.MesProProcessSaveReqVO;
+import cn.iocoder.yudao.module.mes.controller.admin.pro.route.vo.MesProRouteSaveReqVO;
+import cn.iocoder.yudao.module.mes.controller.admin.pro.route.vo.process.MesProRouteProcessSaveReqVO;
+import cn.iocoder.yudao.module.mes.controller.admin.pro.task.vo.MesProTaskSaveReqVO;
+import cn.iocoder.yudao.module.mes.dal.dataobject.pro.feedback.MesProFeedbackDO;
+import cn.iocoder.yudao.module.mes.dal.dataobject.pro.task.MesProTaskDO;
 import cn.iocoder.yudao.module.mes.dal.dataobject.pro.workorder.MesProWorkOrderDO;
+import cn.iocoder.yudao.module.mes.dal.dataobject.wm.productproduce.MesWmProductProduceDO;
+import cn.iocoder.yudao.module.mes.dal.dataobject.wm.productproduce.MesWmProductProduceLineDO;
+import cn.iocoder.yudao.module.mes.enums.pro.MesProFeedbackStatusEnum;
+import cn.iocoder.yudao.module.mes.enums.pro.MesProTaskStatusEnum;
+import cn.iocoder.yudao.module.mes.enums.pro.MesProWorkOrderStatusEnum;
+import cn.iocoder.yudao.module.mes.enums.wm.MesWmProductProduceStatusEnum;
+import cn.iocoder.yudao.module.mes.enums.wm.MesWmQualityStatusEnum;
 import cn.iocoder.yudao.module.mes.service.md.item.MesMdItemService;
 import cn.iocoder.yudao.module.mes.service.md.item.MesMdItemTypeService;
 import cn.iocoder.yudao.module.mes.service.md.unitmeasure.MesMdUnitMeasureService;
+import cn.iocoder.yudao.module.mes.service.md.workstation.MesMdWorkshopService;
+import cn.iocoder.yudao.module.mes.service.md.workstation.MesMdWorkstationService;
+import cn.iocoder.yudao.module.mes.service.pro.feedback.MesProFeedbackService;
+import cn.iocoder.yudao.module.mes.service.pro.process.MesProProcessService;
+import cn.iocoder.yudao.module.mes.service.pro.route.MesProRouteProcessService;
+import cn.iocoder.yudao.module.mes.service.pro.route.MesProRouteService;
+import cn.iocoder.yudao.module.mes.service.pro.task.MesProTaskService;
 import cn.iocoder.yudao.module.mes.service.pro.workorder.MesProWorkOrderService;
+import cn.iocoder.yudao.module.mes.service.wm.productproduce.MesWmProductProduceLineService;
+import cn.iocoder.yudao.module.mes.service.wm.productproduce.MesWmProductProduceService;
 import cn.iocoder.yudao.module.wms.controller.admin.md.item.vo.category.WmsItemCategorySaveReqVO;
 import cn.iocoder.yudao.module.wms.controller.admin.md.item.vo.item.WmsItemSaveReqVO;
 import cn.iocoder.yudao.module.wms.controller.admin.md.item.vo.sku.WmsItemSkuSaveReqVO;
@@ -61,6 +86,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Anti-corruption layer between governed CloudMold capabilities and upstream
@@ -91,7 +117,16 @@ public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi,
     private final MesMdUnitMeasureService mesUnitMeasureService;
     private final MesMdItemTypeService mesItemTypeService;
     private final MesMdItemService mesItemService;
+    private final MesMdWorkshopService mesWorkshopService;
+    private final MesProProcessService mesProcessService;
+    private final MesMdWorkstationService mesWorkstationService;
+    private final MesProRouteService mesRouteService;
+    private final MesProRouteProcessService mesRouteProcessService;
     private final MesProWorkOrderService workOrderService;
+    private final MesProTaskService mesTaskService;
+    private final MesProFeedbackService mesFeedbackService;
+    private final MesWmProductProduceService mesProductProduceService;
+    private final MesWmProductProduceLineService mesProductProduceLineService;
     private final YudaoCommandOperationService operationService;
 
     @Override
@@ -497,6 +532,84 @@ public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi,
     }
 
     @Override
+    public Long createWorkshop(YudaoMesCommandApi.WorkshopCommand command) {
+        MesMdWorkshopSaveReqVO request = new MesMdWorkshopSaveReqVO();
+        request.setCode(command.code());
+        request.setName(command.name());
+        request.setArea(command.area());
+        request.setChargeUserId(command.chargeUserId());
+        request.setStatus(command.status());
+        request.setRemark(command.remark());
+        return operationService.executeLong("CREATE_MES_WORKSHOP", command.idempotencyKey(), command,
+                () -> mesWorkshopService.createWorkshop(request));
+    }
+
+    @Override
+    public Long createProcess(YudaoMesCommandApi.ProcessCommand command) {
+        MesProProcessSaveReqVO request = new MesProProcessSaveReqVO();
+        request.setCode(command.code());
+        request.setName(command.name());
+        request.setAttention(command.attention());
+        request.setStatus(command.status());
+        request.setRemark(command.remark());
+        return operationService.executeLong("CREATE_MES_PROCESS", command.idempotencyKey(), command,
+                () -> mesProcessService.createProcess(request));
+    }
+
+    @Override
+    public Long createWorkstation(YudaoMesCommandApi.WorkstationCommand command) {
+        MesMdWorkstationSaveReqVO request = new MesMdWorkstationSaveReqVO();
+        request.setCode(command.code());
+        request.setName(command.name());
+        request.setAddress(command.address());
+        request.setWorkshopId(command.workshopId());
+        request.setProcessId(command.processId());
+        request.setWarehouseId(command.warehouseId());
+        request.setLocationId(command.locationId());
+        request.setAreaId(command.areaId());
+        request.setStatus(command.status());
+        request.setRemark(command.remark());
+        return operationService.executeLong("CREATE_MES_WORKSTATION", command.idempotencyKey(), command,
+                () -> mesWorkstationService.createWorkstation(request));
+    }
+
+    @Override
+    public Long createRoute(YudaoMesCommandApi.RouteCommand command) {
+        MesProRouteSaveReqVO request = new MesProRouteSaveReqVO();
+        request.setCode(command.code());
+        request.setName(command.name());
+        request.setDescription(command.description());
+        request.setRemark(command.remark());
+        return operationService.executeLong("CREATE_MES_ROUTE", command.idempotencyKey(), command,
+                () -> mesRouteService.createRoute(request));
+    }
+
+    @Override
+    public Long createRouteProcess(YudaoMesCommandApi.RouteProcessCommand command) {
+        MesProRouteProcessSaveReqVO request = new MesProRouteProcessSaveReqVO();
+        request.setRouteId(command.routeId());
+        request.setProcessId(command.processId());
+        request.setSort(command.sort());
+        request.setLinkType(command.linkType());
+        request.setPrepareTime(command.prepareTime());
+        request.setWaitTime(command.waitTime());
+        request.setColorCode(command.colorCode());
+        request.setKeyFlag(command.keyFlag());
+        request.setCheckFlag(command.checkFlag());
+        request.setRemark(command.remark());
+        return operationService.executeLong("CREATE_MES_ROUTE_PROCESS", command.idempotencyKey(), command,
+                () -> mesRouteProcessService.createRouteProcess(request));
+    }
+
+    @Override
+    public Boolean setRouteStatus(YudaoMesCommandApi.RouteStatusCommand command) {
+        return operationService.executeBoolean("SET_MES_ROUTE_STATUS", command.idempotencyKey(), command, () -> {
+            mesRouteService.updateRouteStatus(command.routeId(), command.status());
+            return true;
+        });
+    }
+
+    @Override
     public Long createWorkOrder(WorkOrderCommand command) {
         MesProWorkOrderSaveReqVO request = new MesProWorkOrderSaveReqVO();
         request.setCode(command.code());
@@ -522,6 +635,67 @@ public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi,
             workOrderService.confirmWorkOrder(command.documentId());
             return true;
         });
+    }
+
+    @Override
+    public Long createTask(YudaoMesCommandApi.TaskCommand command) {
+        MesProTaskSaveReqVO request = new MesProTaskSaveReqVO();
+        request.setWorkOrderId(command.workOrderId());
+        request.setWorkstationId(command.workstationId());
+        request.setRouteId(command.routeId());
+        request.setProcessId(command.processId());
+        request.setItemId(command.itemId());
+        request.setQuantity(command.quantity());
+        request.setStartTime(parseBusinessTime(command.startTime(), "startTime"));
+        request.setDuration(command.duration());
+        request.setEndTime(parseBusinessTime(command.endTime(), "endTime"));
+        request.setColorCode(command.colorCode());
+        request.setRemark(command.remark());
+        return operationService.executeLong("CREATE_MES_TASK", command.idempotencyKey(), command,
+                () -> mesTaskService.createTask(request));
+    }
+
+    @Override
+    public Long createFeedback(YudaoMesCommandApi.FeedbackCommand command) {
+        MesProFeedbackSaveReqVO request = new MesProFeedbackSaveReqVO();
+        request.setCode(command.code());
+        request.setType(command.type());
+        request.setWorkstationId(command.workstationId());
+        request.setRouteId(command.routeId());
+        request.setProcessId(command.processId());
+        request.setWorkOrderId(command.workOrderId());
+        request.setTaskId(command.taskId());
+        request.setItemId(command.itemId());
+        request.setExpireDate(parseOptionalBusinessTime(command.expireDate(), "expireDate"));
+        request.setLotNumber(command.lotNumber());
+        request.setScheduledQuantity(command.scheduledQuantity());
+        request.setFeedbackQuantity(command.feedbackQuantity());
+        request.setQualifiedQuantity(command.qualifiedQuantity());
+        request.setUnqualifiedQuantity(command.unqualifiedQuantity());
+        request.setUncheckQuantity(command.uncheckQuantity());
+        request.setLaborScrapQuantity(command.laborScrapQuantity());
+        request.setMaterialScrapQuantity(command.materialScrapQuantity());
+        request.setOtherScrapQuantity(command.otherScrapQuantity());
+        request.setFeedbackUserId(command.feedbackUserId());
+        request.setFeedbackTime(parseBusinessTime(command.feedbackTime(), "feedbackTime"));
+        request.setApproveUserId(command.approveUserId());
+        request.setRemark(command.remark());
+        return operationService.executeLong("CREATE_MES_FEEDBACK", command.idempotencyKey(), command,
+                () -> mesFeedbackService.createFeedback(request));
+    }
+
+    @Override
+    public Boolean submitFeedback(YudaoMesCommandApi.DocumentActionCommand command) {
+        return operationService.executeBoolean("SUBMIT_MES_FEEDBACK", command.idempotencyKey(), command, () -> {
+            mesFeedbackService.submitFeedback(command.documentId());
+            return true;
+        });
+    }
+
+    @Override
+    public Boolean approveFeedback(YudaoMesCommandApi.DocumentActionCommand command) {
+        return operationService.executeBoolean("APPROVE_MES_FEEDBACK", command.idempotencyKey(), command,
+                () -> mesFeedbackService.approveFeedback(command.documentId()));
     }
 
     @Override
@@ -616,6 +790,47 @@ public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi,
     }
 
     @Override
+    public MesProductionExecutionView getMesProductionExecution(Long workOrderId, Long taskId, Long feedbackId) {
+        MesProWorkOrderDO workOrder = workOrderService.getWorkOrder(workOrderId);
+        MesProTaskDO task = mesTaskService.getTask(taskId);
+        MesProFeedbackDO feedback = mesFeedbackService.getFeedback(feedbackId);
+        if (workOrder == null || task == null || feedback == null) {
+            return null;
+        }
+        MesWmProductProduceDO produce = mesProductProduceService.getProductProduceByFeedbackId(feedbackId);
+        List<MesWmProductProduceLineDO> outputLines = produce == null
+                ? List.of()
+                : mesProductProduceLineService.getProductProduceLineListByProduceId(produce.getId());
+        BigDecimal outputQuantity = sumQuantities(outputLines);
+        BigDecimal passedOutputQuantity = sumQuantities(outputLines.stream()
+                .filter(line -> Objects.equals(line.getQualityStatus(), MesWmQualityStatusEnum.PASS.getStatus())).toList());
+        BigDecimal failedOutputQuantity = sumQuantities(outputLines.stream()
+                .filter(line -> Objects.equals(line.getQualityStatus(), MesWmQualityStatusEnum.FAIL.getStatus())).toList());
+        boolean closedLoop = Objects.equals(workOrder.getStatus(), MesProWorkOrderStatusEnum.FINISHED.getStatus())
+                && Objects.equals(task.getStatus(), MesProTaskStatusEnum.FINISHED.getStatus())
+                && Objects.equals(feedback.getStatus(), MesProFeedbackStatusEnum.FINISHED.getStatus())
+                && produce != null
+                && Objects.equals(produce.getStatus(), MesWmProductProduceStatusEnum.FINISHED.getStatus())
+                && outputQuantity.compareTo(BigDecimal.ZERO) > 0
+                && workOrder.getQuantityProduced() != null
+                && workOrder.getQuantityProduced().compareTo(feedback.getFeedbackQuantity()) == 0
+                && task.getProducedQuantity() != null
+                && task.getProducedQuantity().compareTo(feedback.getFeedbackQuantity()) == 0;
+        return new MesProductionExecutionView(
+                workOrder.getId(), workOrder.getStatus(), workOrder.getQuantity(),
+                workOrder.getQuantityScheduled(), workOrder.getQuantityProduced(),
+                task.getId(), task.getStatus(), task.getQuantity(), task.getProducedQuantity(),
+                task.getQualifyQuantity(), task.getUnqualifyQuantity(),
+                feedback.getId(), feedback.getStatus(), feedback.getFeedbackQuantity(),
+                feedback.getQualifiedQuantity(), feedback.getUnqualifiedQuantity(),
+                produce == null ? null : produce.getId(), produce == null ? null : produce.getStatus(),
+                outputQuantity, passedOutputQuantity, failedOutputQuantity,
+                outputLines.stream().map(MesWmProductProduceLineDO::getBatchCode)
+                        .filter(Objects::nonNull).distinct().toList(),
+                closedLoop);
+    }
+
+    @Override
     public WmsSkuView getWmsItemSku(Long itemId) {
         var item = wmsItemService.getItem(itemId);
         if (item == null) {
@@ -665,5 +880,14 @@ public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi,
         } catch (java.time.format.DateTimeParseException ex) {
             throw new IllegalArgumentException(field + " must be an ISO-8601 local date-time", ex);
         }
+    }
+
+    private static java.time.LocalDateTime parseOptionalBusinessTime(String value, String field) {
+        return value == null || value.isBlank() ? null : parseBusinessTime(value, field);
+    }
+
+    private static BigDecimal sumQuantities(List<MesWmProductProduceLineDO> lines) {
+        return lines.stream().map(MesWmProductProduceLineDO::getQuantity)
+                .filter(Objects::nonNull).reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 }

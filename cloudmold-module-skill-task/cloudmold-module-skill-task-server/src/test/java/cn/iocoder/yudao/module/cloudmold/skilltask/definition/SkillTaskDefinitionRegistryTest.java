@@ -159,11 +159,11 @@ class SkillTaskDefinitionRegistryTest {
         workspaceRegistry.reload();
 
         SkillTaskDefinition definition = workspaceRegistry.require(
-                "skill.cloudmold.commerce.full-chain-hsf.v1", "1.2.2");
+                "skill.cloudmold.commerce.full-chain-hsf.v1", "1.3.0");
         SkillTaskDefinition cancellation = workspaceRegistry.require(
                 "skill.cloudmold.commerce.order-cancellation-operational.v1", "1.0.0");
         assertThat(definition.getRiskLevel()).isEqualTo("R3");
-        assertThat(definition.getSteps()).hasSize(10);
+        assertThat(definition.getSteps()).hasSize(8);
         assertThat(cancellation.getRiskLevel()).isEqualTo("R3");
         assertThat(cancellation.getSteps()).extracting(SkillTaskDefinition.Step::getStepKind)
                 .containsExactly("CAPABILITY", "WAIT_CAPABILITY");
@@ -305,6 +305,27 @@ class SkillTaskDefinitionRegistryTest {
             assertThat(step.getWaitSuccess().path("/terminal").asBoolean()).isTrue();
             assertThat(step.getWaitSuccess().path("/aggregateVersion").asInt()).isEqualTo(12);
         });
+        SkillTaskDefinition productionReadiness = workspaceRegistry.require(
+                "skill.cloudmold.mes.production-readiness.v1", "1.0.0");
+        assertThat(productionReadiness.getWorkflowLevel()).isEqualTo("INTERNAL_SUBFLOW");
+        assertThat(productionReadiness.getRiskLevel()).isEqualTo("R2");
+        assertThat(productionReadiness.getSteps()).hasSize(9)
+                .allSatisfy(step -> assertThat(step.getOperationType()).isEqualTo("WRITE"));
+        SkillTaskDefinition productionLifecycle = workspaceRegistry.require(
+                "skill.cloudmold.mes.production-execution-lifecycle.v1", "1.0.0");
+        assertThat(productionLifecycle.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(productionLifecycle.getOwnerRole()).isEqualTo("production-supervisor");
+        assertThat(productionLifecycle.getRiskLevel()).isEqualTo("R3");
+        assertThat(productionLifecycle.getSteps()).hasSize(10);
+        assertThat(productionLifecycle.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(7);
+        assertThat(productionLifecycle.getSteps().get(9)).satisfies(step -> {
+            assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
+            assertThat(step.getCapabilityId()).isEqualTo(
+                    "capability.cloudmold.integration.yudao-legacy-operations-query.get-mes-production-execution.v1");
+            assertThat(step.getWaitSuccess().path("/closedLoop").asBoolean()).isTrue();
+        });
         SkillTaskDefinition productToListing = workspaceRegistry.require(
                 "skill.cloudmold.commerce.product-to-listing.v1", "1.1.0");
         assertThat(productToListing.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
@@ -336,6 +357,8 @@ class SkillTaskDefinitionRegistryTest {
                         "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1",
                         "skill.cloudmold.crossborder.bonded-customs-lifecycle.v1",
                         "skill.cloudmold.partner-marketing.kol-media-operations.v1",
+                        "skill.cloudmold.mes.production-readiness.v1",
+                        "skill.cloudmold.mes.production-execution-lifecycle.v1",
                         "skill.cloudmold.commerce.terminal-readback.v1");
         List<String> readbackSkillIds = List.of(
                 "skill.cloudmold.operations.daily-business-control.v1",

@@ -960,6 +960,49 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .isEqualTo("warehouse-1");
     }
 
+    @Test
+    void shouldBuildOccurrenceFreshMesProductionExecutionWithIndependentReview() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
+                {
+                  "runIds":{"catalog":"base-cat"},
+                  "catalog":{},"master":{"identityReference":{},"warehouseReference":{}},
+                  "aftersale":{"commands":[]},"readback":{}
+                }
+                """);
+        when(mapper.selectApprovalPolicy(162L)).thenReturn(new TemporalApprovalPolicyRecord()
+                .setTenantId(162L).setGovernanceUserId(227L).setStatus("ACTIVE"));
+
+        JsonNode first = build(
+                RotatingBusinessScenarioInputFactory.MES_PRODUCTION_EXECUTION_LIFECYCLE_SKILL);
+        JsonNode replay = build(
+                RotatingBusinessScenarioInputFactory.MES_PRODUCTION_EXECUTION_LIFECYCLE_SKILL);
+        JsonNode nextOccurrence = JsonUtils.parseTree(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.MES_PRODUCTION_EXECUTION_LIFECYCLE_SKILL,
+                "2026-07-29", "temporal-run-2").orElseThrow());
+
+        assertThat(replay).isEqualTo(first);
+        assertThat(first).isNotEqualTo(nextOccurrence);
+        assertThat(first.path("runIds").path("readiness").asText())
+                .startsWith("z260729162-").endsWith("-production-readiness");
+        assertThat(first.path("operatorUserId").asLong()).isEqualTo(1L);
+        assertThat(first.path("reviewerUserId").asLong()).isEqualTo(227L);
+        assertThat(first.path("readiness").path("item").path("code").asText())
+                .startsWith("CMIZ260729162").isNotEqualTo(
+                        nextOccurrence.path("readiness").path("item").path("code").asText());
+        assertThat(first.path("readiness").path("item").path("batchFlag").asBoolean()).isFalse();
+        assertThat(first.path("readiness").path("routeProcess").path("keyFlag").asBoolean()).isTrue();
+        assertThat(first.path("readiness").path("routeProcess").path("checkFlag").asBoolean()).isFalse();
+        assertThat(first.path("workOrder").path("quantity").asInt()).isEqualTo(12);
+        assertThat(first.path("task").path("quantity").asInt()).isEqualTo(12);
+        assertThat(first.path("feedback").path("feedbackQuantity").asInt()).isEqualTo(12);
+        assertThat(first.path("feedback").path("qualifiedQuantity").asInt()).isEqualTo(12);
+        assertThat(first.path("feedback").path("unqualifiedQuantity").asInt()).isZero();
+        assertThat(first.path("feedback").path("feedbackUserId").asLong()).isEqualTo(1L);
+        assertThat(first.path("feedback").path("approveUserId").asLong()).isEqualTo(227L);
+    }
+
     private JsonNode build(String skillId) {
         return JsonUtils.parseTree(factory.build(162L, skillId,
                 "2026-07-29", "temporal-run-1").orElseThrow());

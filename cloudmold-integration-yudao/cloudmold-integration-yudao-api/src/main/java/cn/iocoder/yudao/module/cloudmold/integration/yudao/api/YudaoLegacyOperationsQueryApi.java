@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.cloudmold.integration.yudao.api;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
+import java.util.List;
 
 /** Read model shared by ERP, WMS and MES Skill assertions. */
 public interface YudaoLegacyOperationsQueryApi {
@@ -32,6 +33,8 @@ public interface YudaoLegacyOperationsQueryApi {
 
     LegacyDocumentView getWorkOrder(Long documentId);
 
+    MesProductionExecutionView getMesProductionExecution(Long workOrderId, Long taskId, Long feedbackId);
+
     WmsSkuView getWmsItemSku(Long itemId);
 
     WmsInventoryView getWmsInventory(Long warehouseId, Long skuId);
@@ -48,5 +51,17 @@ public interface YudaoLegacyOperationsQueryApi {
 
     record WmsInventoryView(Long inventoryId, Long warehouseId, Long skuId,
                             BigDecimal quantity) implements Serializable {
+    }
+
+    record MesProductionExecutionView(
+            Long workOrderId, Integer workOrderStatus,
+            BigDecimal plannedQuantity, BigDecimal scheduledQuantity, BigDecimal producedQuantity,
+            Long taskId, Integer taskStatus, BigDecimal taskQuantity,
+            BigDecimal taskProducedQuantity, BigDecimal taskQualifiedQuantity, BigDecimal taskUnqualifiedQuantity,
+            Long feedbackId, Integer feedbackStatus, BigDecimal feedbackQuantity,
+            BigDecimal feedbackQualifiedQuantity, BigDecimal feedbackUnqualifiedQuantity,
+            Long produceId, Integer produceStatus, BigDecimal outputQuantity,
+            BigDecimal passedOutputQuantity, BigDecimal failedOutputQuantity,
+            List<String> outputBatchCodes, boolean closedLoop) implements Serializable {
     }
 }

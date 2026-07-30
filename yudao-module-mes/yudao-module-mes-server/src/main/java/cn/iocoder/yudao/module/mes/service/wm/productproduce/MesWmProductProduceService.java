@@ -19,6 +19,14 @@ public interface MesWmProductProduceService {
     MesWmProductProduceDO validateProductProduceExists(Long id);
 
     /**
+     * 根据报工记录获得生产入库单。
+     *
+     * @param feedbackId 报工记录 ID
+     * @return 生产入库单，不存在时返回 {@code null}
+     */
+    MesWmProductProduceDO getProductProduceByFeedbackId(Long feedbackId);
+
+    /**
      * 完成生产入库单（草稿 → 已完成）
      *
      * @param id 编号

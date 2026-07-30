@@ -67,6 +67,11 @@ public class MesWmProductProduceServiceImpl implements MesWmProductProduceServic
     private MesWmWarehouseAreaService areaService;
 
     @Override
+    public MesWmProductProduceDO getProductProduceByFeedbackId(Long feedbackId) {
+        return productProduceMapper.selectByFeedbackId(feedbackId);
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public void finishProductProduce(Long id) {
         // 1.1 校验存在 + 草稿状态

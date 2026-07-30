@@ -69,6 +69,9 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                     "保税仓关务闭环"),
             Map.entry("skill.cloudmold.partner-marketing.kol-media-operations.v1",
                     "海外 KOL 与媒体合作投放闭环"),
+            Map.entry("skill.cloudmold.mes.production-readiness.v1", "MES 新品试产准备"),
+            Map.entry("skill.cloudmold.mes.production-execution-lifecycle.v1",
+                    "新品试产与量产交付闭环"),
             Map.entry("skill.cloudmold.consumer.in-transit-order-scenario.v1", "在途订单场景准备"),
             Map.entry("skill.cloudmold.commerce.return-refund-readback.v1", "退货退款终态跟踪"),
             Map.entry("skill.cloudmold.customer-service.resolution-readback.v1", "客户问题解决终态跟踪"),
@@ -171,6 +174,11 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("skill.cloudmold.partner-marketing.kol-media-operations.v1",
                     "模拟海外 KOL 与媒体合作岗位完成候选风险筛选、合作 brief 和披露合规审批、受控外部发布、"
                             + "真实消费者选购支付归因、交付验收与结算闭环；外部平台发布和付款使用测试证据，不冒充真实平台或银行权威。"),
+            Map.entry("skill.cloudmold.mes.production-readiness.v1",
+                    "内部造数子流程：为单次新品试产建立 occurrence 唯一的 MES 产品、车间、工作站、关键工序与启用工艺路线。"),
+            Map.entry("skill.cloudmold.mes.production-execution-lifecycle.v1",
+                    "模拟生产主管完成 occurrence 全新的新品产线准备、生产工单确认、任务派工、合格报工审核、"
+                            + "产成品入库、工单完工与数量终态核验；仅工单、任务、报工和入库单全部闭环才成功。"),
             Map.entry("skill.cloudmold.consumer.in-transit-order-scenario.v1",
                     "内部造数子流程：模拟会员选购、下单支付、出库和在途运输，为履约异常岗位主流程提供全新业务对象。"),
             Map.entry("skill.cloudmold.commerce.return-refund-readback.v1",
@@ -204,7 +212,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             "projection", "skill.cloudmold.commerce.legacy-projection-plan.v1",
             "master", "skill.cloudmold.commerce.reuse-ready-master.v1",
             "aftersale", "skill.cloudmold.commerce.aftersale-saga.v1",
-            "readback", "skill.cloudmold.commerce.terminal-readback.v1"
+            "readback", "skill.cloudmold.commerce.terminal-readback.v1",
+            "production_readiness", "skill.cloudmold.mes.production-readiness.v1"
     );
 
     private static final Map<String, String> STEP_NAMES = Map.ofEntries(
@@ -314,6 +323,25 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("approve_settlement", "独立复核达人结算"),
             Map.entry("mark_settlement_paid", "登记受控付款回执"),
             Map.entry("verify_partner_marketing_closed", "验收发布、归因、结算与关单终态"),
+            Map.entry("submit_production_readiness", "准备新品、产线与工艺路线"),
+            Map.entry("wait_production_readiness", "等待新品试产准备完成"),
+            Map.entry("create_unit_measure", "建立生产计量单位"),
+            Map.entry("create_item_type", "建立产成品分类"),
+            Map.entry("create_item", "创建业务商品主数据"),
+            Map.entry("create_workshop", "建立试产车间"),
+            Map.entry("create_process", "建立关键生产工序"),
+            Map.entry("create_workstation", "建立试产工作站"),
+            Map.entry("create_route", "建立新品工艺路线"),
+            Map.entry("create_route_process", "配置关键工序"),
+            Map.entry("enable_route", "启用新品工艺路线"),
+            Map.entry("create_work_order", "创建新品试产工单"),
+            Map.entry("confirm_work_order", "确认生产工单"),
+            Map.entry("create_production_task", "派发生产任务"),
+            Map.entry("record_production_feedback", "记录合格生产报工"),
+            Map.entry("submit_production_feedback", "提交生产报工审核"),
+            Map.entry("approve_production_feedback", "复核报工并完成产成品入库"),
+            Map.entry("finish_work_order", "完成生产工单"),
+            Map.entry("verify_production_closed_loop", "验收工单、任务、报工与入库终态"),
             Map.entry("inventory_receive", "商品入库"),
             Map.entry("order_place", "创建订单"),
             Map.entry("inventory_reserve", "预占库存"),
@@ -461,7 +489,6 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             ,Map.entry("create_source_warehouse", "创建收货源仓")
             ,Map.entry("create_target_warehouse", "创建调拨目标仓")
             ,Map.entry("create_item_category", "创建仓储商品分类")
-            ,Map.entry("create_item", "创建每日仓储商品")
             ,Map.entry("resolve_sku", "解析仓储 SKU")
             ,Map.entry("create_receipt", "创建采购收货单")
             ,Map.entry("complete_receipt", "完成采购收货")
@@ -530,6 +557,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                     bondedCustomsLifecycle(task, steps);
             case "skill.cloudmold.partner-marketing.kol-media-operations.v1" ->
                     partnerMarketingLifecycle(task, steps);
+            case "skill.cloudmold.mes.production-execution-lifecycle.v1" ->
+                    mesProductionLifecycle(task, steps);
             default -> genericSuccess(task, steps);
         };
     }
@@ -1093,6 +1122,33 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                 List.of(metric("完成子流程", Long.toString(completed)),
                         metric("成功步骤", Integer.toString(succeededCount(steps)))),
                 List.of(), task);
+    }
+
+    private ManagedSkillTaskBusinessOutcomeView mesProductionLifecycle(Task task, List<Step> steps) {
+        JsonNode readback = result(steps, "verify_production_closed_loop");
+        return outcome("MES_PRODUCTION_EXECUTION",
+                "新品试产、合格品入库与生产工单已闭环",
+                "生产主管已完成新品产线准备、工单确认、任务派工、报工复核、产成品入库和工单完工；"
+                        + "工单、任务、报工与入库单数量已通过终态核验。",
+                List.of(
+                        metric("计划生产", valueOr(text(readback, "plannedQuantity"), "0")),
+                        metric("实际产出", valueOr(text(readback, "outputQuantity"), "0")),
+                        metric("合格产出", valueOr(text(readback, "passedOutputQuantity"), "0")),
+                        metric("不合格产出", valueOr(text(readback, "failedOutputQuantity"), "0"))),
+                List.of(
+                        object("MES_WORK_ORDER", "生产工单",
+                                text(readback, "workOrderId"), null,
+                                statusLabel(text(readback, "workOrderStatus"))),
+                        object("MES_PRODUCTION_TASK", "生产任务",
+                                text(readback, "taskId"), null,
+                                statusLabel(text(readback, "taskStatus"))),
+                        object("MES_PRODUCTION_FEEDBACK", "生产报工",
+                                text(readback, "feedbackId"), null,
+                                statusLabel(text(readback, "feedbackStatus"))),
+                        object("MES_PRODUCT_PRODUCE", "产成品入库单",
+                                text(readback, "produceId"), null,
+                                statusLabel(text(readback, "produceStatus")))),
+                task);
     }
 
     private ManagedSkillTaskBusinessOutcomeView genericSuccess(Task task, List<Step> steps) {

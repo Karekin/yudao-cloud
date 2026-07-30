@@ -24,10 +24,26 @@ import cn.iocoder.yudao.module.erp.service.sale.ErpSaleOutService;
 import cn.iocoder.yudao.module.erp.service.stock.ErpStockCheckService;
 import cn.iocoder.yudao.module.erp.service.stock.ErpStockMoveService;
 import cn.iocoder.yudao.module.erp.service.stock.ErpWarehouseService;
+import cn.iocoder.yudao.module.mes.controller.admin.pro.feedback.vo.MesProFeedbackSaveReqVO;
+import cn.iocoder.yudao.module.mes.controller.admin.pro.task.vo.MesProTaskSaveReqVO;
+import cn.iocoder.yudao.module.mes.dal.dataobject.pro.feedback.MesProFeedbackDO;
+import cn.iocoder.yudao.module.mes.dal.dataobject.pro.task.MesProTaskDO;
+import cn.iocoder.yudao.module.mes.dal.dataobject.pro.workorder.MesProWorkOrderDO;
+import cn.iocoder.yudao.module.mes.dal.dataobject.wm.productproduce.MesWmProductProduceDO;
+import cn.iocoder.yudao.module.mes.dal.dataobject.wm.productproduce.MesWmProductProduceLineDO;
 import cn.iocoder.yudao.module.mes.service.pro.workorder.MesProWorkOrderService;
 import cn.iocoder.yudao.module.mes.service.md.item.MesMdItemService;
 import cn.iocoder.yudao.module.mes.service.md.item.MesMdItemTypeService;
 import cn.iocoder.yudao.module.mes.service.md.unitmeasure.MesMdUnitMeasureService;
+import cn.iocoder.yudao.module.mes.service.md.workstation.MesMdWorkshopService;
+import cn.iocoder.yudao.module.mes.service.md.workstation.MesMdWorkstationService;
+import cn.iocoder.yudao.module.mes.service.pro.feedback.MesProFeedbackService;
+import cn.iocoder.yudao.module.mes.service.pro.process.MesProProcessService;
+import cn.iocoder.yudao.module.mes.service.pro.route.MesProRouteProcessService;
+import cn.iocoder.yudao.module.mes.service.pro.route.MesProRouteService;
+import cn.iocoder.yudao.module.mes.service.pro.task.MesProTaskService;
+import cn.iocoder.yudao.module.mes.service.wm.productproduce.MesWmProductProduceLineService;
+import cn.iocoder.yudao.module.mes.service.wm.productproduce.MesWmProductProduceService;
 import cn.iocoder.yudao.module.wms.service.md.item.WmsItemCategoryService;
 import cn.iocoder.yudao.module.wms.service.md.item.WmsItemService;
 import cn.iocoder.yudao.module.wms.service.md.item.WmsItemSkuService;
@@ -70,7 +86,16 @@ class YudaoLegacyOperationsAdapterTest {
     private final MesMdUnitMeasureService mesUnitMeasureService = mock(MesMdUnitMeasureService.class);
     private final MesMdItemTypeService mesItemTypeService = mock(MesMdItemTypeService.class);
     private final MesMdItemService mesItemService = mock(MesMdItemService.class);
+    private final MesMdWorkshopService mesWorkshopService = mock(MesMdWorkshopService.class);
+    private final MesProProcessService mesProcessService = mock(MesProProcessService.class);
+    private final MesMdWorkstationService mesWorkstationService = mock(MesMdWorkstationService.class);
+    private final MesProRouteService mesRouteService = mock(MesProRouteService.class);
+    private final MesProRouteProcessService mesRouteProcessService = mock(MesProRouteProcessService.class);
     private final MesProWorkOrderService workOrderService = mock(MesProWorkOrderService.class);
+    private final MesProTaskService mesTaskService = mock(MesProTaskService.class);
+    private final MesProFeedbackService mesFeedbackService = mock(MesProFeedbackService.class);
+    private final MesWmProductProduceService mesProductProduceService = mock(MesWmProductProduceService.class);
+    private final MesWmProductProduceLineService mesProductProduceLineService = mock(MesWmProductProduceLineService.class);
     private final YudaoCommandOperationService operationService = mock(YudaoCommandOperationService.class);
     private final YudaoLegacyOperationsAdapter adapter = new YudaoLegacyOperationsAdapter(
             purchaseOrderService, purchaseInService, customerService, saleOrderService, saleOutService,
@@ -78,7 +103,9 @@ class YudaoLegacyOperationsAdapterTest {
             financePaymentService, financeReceiptService, wmsMerchantService, wmsWarehouseService,
             wmsItemCategoryService, wmsItemService, wmsItemSkuService, wmsPhysicalOperationsPort,
             mesUnitMeasureService, mesItemTypeService,
-            mesItemService, workOrderService, operationService);
+            mesItemService, mesWorkshopService, mesProcessService, mesWorkstationService,
+            mesRouteService, mesRouteProcessService, workOrderService, mesTaskService,
+            mesFeedbackService, mesProductProduceService, mesProductProduceLineService, operationService);
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -205,6 +232,73 @@ class YudaoLegacyOperationsAdapterTest {
         verify(mesUnitMeasureService).createUnitMeasure(any());
         verify(mesItemTypeService).createItemType(any());
         verify(mesItemService).createItem(any());
+    }
+
+    @Test
+    void shouldTranslateMesTaskAndFeedbackWithoutLeakingUpstreamVos() {
+        when(mesTaskService.createTask(any())).thenReturn(201L);
+        when(mesFeedbackService.createFeedback(any())).thenReturn(202L);
+        var taskCommand =
+                new cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoMesCommandApi.TaskCommand(
+                        "mes-task-001", 11L, 12L, 13L, 14L, 15L,
+                        new BigDecimal("12"), "2026-07-30T09:00:00", 1,
+                        "2026-07-30T17:00:00", "#1677FF", "dispatch");
+        var feedbackCommand =
+                new cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoMesCommandApi.FeedbackCommand(
+                        "mes-feedback-001", "FB-001", 1, 12L, 13L, 14L,
+                        11L, 201L, 15L, "2027-07-30T23:59:59",
+                        "LOT-001", new BigDecimal("12"), new BigDecimal("12"),
+                        new BigDecimal("12"), BigDecimal.ZERO, BigDecimal.ZERO,
+                        BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                        226L, "2026-07-30T17:00:00", 227L, "qualified");
+
+        assertThat(adapter.createTask(taskCommand)).isEqualTo(201L);
+        assertThat(adapter.createFeedback(feedbackCommand)).isEqualTo(202L);
+
+        ArgumentCaptor<MesProTaskSaveReqVO> taskCaptor =
+                ArgumentCaptor.forClass(MesProTaskSaveReqVO.class);
+        verify(mesTaskService).createTask(taskCaptor.capture());
+        assertThat(taskCaptor.getValue().getWorkOrderId()).isEqualTo(11L);
+        assertThat(taskCaptor.getValue().getQuantity()).isEqualByComparingTo("12");
+        assertThat(taskCaptor.getValue().getStartTime())
+                .isEqualTo(LocalDateTime.of(2026, 7, 30, 9, 0));
+
+        ArgumentCaptor<MesProFeedbackSaveReqVO> feedbackCaptor =
+                ArgumentCaptor.forClass(MesProFeedbackSaveReqVO.class);
+        verify(mesFeedbackService).createFeedback(feedbackCaptor.capture());
+        assertThat(feedbackCaptor.getValue().getTaskId()).isEqualTo(201L);
+        assertThat(feedbackCaptor.getValue().getQualifiedQuantity()).isEqualByComparingTo("12");
+        assertThat(feedbackCaptor.getValue().getFeedbackUserId()).isEqualTo(226L);
+        assertThat(feedbackCaptor.getValue().getApproveUserId()).isEqualTo(227L);
+    }
+
+    @Test
+    void shouldExposeMesProductionTerminalQuantityAndReceiptEvidence() {
+        when(workOrderService.getWorkOrder(301L)).thenReturn(MesProWorkOrderDO.builder()
+                .id(301L).status(2).quantity(new BigDecimal("12"))
+                .quantityScheduled(new BigDecimal("12")).quantityProduced(new BigDecimal("12")).build());
+        when(mesTaskService.getTask(302L)).thenReturn(MesProTaskDO.builder()
+                .id(302L).status(4).quantity(new BigDecimal("12"))
+                .producedQuantity(new BigDecimal("12")).qualifyQuantity(new BigDecimal("12"))
+                .unqualifyQuantity(BigDecimal.ZERO).build());
+        when(mesFeedbackService.getFeedback(303L)).thenReturn(MesProFeedbackDO.builder()
+                .id(303L).status(4).feedbackQuantity(new BigDecimal("12"))
+                .qualifiedQuantity(new BigDecimal("12")).unqualifiedQuantity(BigDecimal.ZERO).build());
+        when(mesProductProduceService.getProductProduceByFeedbackId(303L))
+                .thenReturn(MesWmProductProduceDO.builder().id(304L).feedbackId(303L).status(4).build());
+        when(mesProductProduceLineService.getProductProduceLineListByProduceId(304L))
+                .thenReturn(List.of(MesWmProductProduceLineDO.builder()
+                        .produceId(304L).quantity(new BigDecimal("12"))
+                        .qualityStatus(1).batchCode("BATCH-001").build()));
+
+        YudaoLegacyOperationsQueryApi.MesProductionExecutionView result =
+                adapter.getMesProductionExecution(301L, 302L, 303L);
+
+        assertThat(result.closedLoop()).isTrue();
+        assertThat(result.outputQuantity()).isEqualByComparingTo("12");
+        assertThat(result.passedOutputQuantity()).isEqualByComparingTo("12");
+        assertThat(result.failedOutputQuantity()).isZero();
+        assertThat(result.outputBatchCodes()).containsExactly("BATCH-001");
     }
 
     @Test

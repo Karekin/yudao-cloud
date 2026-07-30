@@ -138,6 +138,20 @@ class CloudMoldCapabilityCatalogTest {
                     "cn.iocoder.yudao.module.cloudmold.partnermarketing.api.PartnerMarketingQueryApi");
             assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.READ);
         });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.integration.yudao-mes-command.create-feedback.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoMesCommandApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.WRITE);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.integration.yudao-legacy-operations-query.get-mes-production-execution.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoLegacyOperationsQueryApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.READ);
+        });
     }
 
     @Test

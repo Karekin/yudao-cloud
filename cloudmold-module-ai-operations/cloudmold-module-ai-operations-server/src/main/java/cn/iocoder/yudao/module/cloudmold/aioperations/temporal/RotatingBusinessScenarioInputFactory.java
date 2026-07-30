@@ -69,6 +69,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.crossborder.bonded-customs-lifecycle.v1";
     static final String PARTNER_MARKETING_KOL_MEDIA_OPERATIONS_SKILL =
             "skill.cloudmold.partner-marketing.kol-media-operations.v1";
+    static final String MES_PRODUCTION_EXECUTION_LIFECYCLE_SKILL =
+            "skill.cloudmold.mes.production-execution-lifecycle.v1";
     static final String READY_MASTER_SKILL = "skill.cloudmold.commerce.reuse-ready-master.v1";
     static final String LEGACY_PROJECTION_SKILL = "skill.cloudmold.commerce.legacy-projection-plan.v1";
     private static final String ZERO_UUID = "00000000-0000-0000-0000-000000000000";
@@ -355,6 +357,17 @@ class RotatingBusinessScenarioInputFactory {
                     operator.path("principalId").asText(),
                     "governance-user:" + reviewerUserId,
                     "finance-user:" + financeActorUserId);
+        } else if (MES_PRODUCTION_EXECUTION_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            TemporalApprovalPolicyRecord approvalPolicy = mapper.selectApprovalPolicy(tenantId);
+            long operatorUserId = seedProperties.getOperatorUserId();
+            Long reviewerUserId = approvalPolicy == null
+                    ? null : approvalPolicy.getGovernanceUserId();
+            if (operatorUserId <= 0 || reviewerUserId == null || reviewerUserId <= 0
+                    || reviewerUserId == operatorUserId) {
+                return Optional.empty();
+            }
+            output = mesProductionExecutionLifecycle(
+                    newPrefix, date, operatorUserId, reviewerUserId);
         } else if (CATEGORY_DAILY_OPERATIONS_SKILL.equals(targetSkillId)) {
             if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
                 return Optional.empty();
@@ -414,10 +427,166 @@ class RotatingBusinessScenarioInputFactory {
             case CROSSBORDER_FULFILLMENT_COMPLIANCE_LIFECYCLE_SKILL -> "b";
             case BONDED_CUSTOMS_LIFECYCLE_SKILL -> "t";
             case PARTNER_MARKETING_KOL_MEDIA_OPERATIONS_SKILL -> "o";
+            case MES_PRODUCTION_EXECUTION_LIFECYCLE_SKILL -> "z";
             case READY_MASTER_SKILL -> "m";
             case LEGACY_PROJECTION_SKILL -> "l";
             default -> throw new IllegalArgumentException("Unsupported rotating scenario Skill: " + skillId);
         };
+    }
+
+    private static ObjectNode mesProductionExecutionLifecycle(
+            String prefix, LocalDate date, long operatorUserId, long reviewerUserId) {
+        String codeToken = prefix.replace("-", "").toUpperCase(Locale.ROOT);
+        String businessStart = date + "T09:00:00";
+        String businessEnd = date + "T17:00:00";
+        String expireDate = date.plusYears(1) + "T23:59:59";
+        ObjectNode root = JsonNodeFactory.instance.objectNode();
+        root.putObject("runIds").put("readiness", prefix + "-production-readiness");
+        root.put("operatorUserId", operatorUserId);
+        root.put("reviewerUserId", reviewerUserId);
+
+        ObjectNode readiness = root.putObject("readiness");
+        readiness.putObject("unitMeasure")
+                .put("idempotencyKey", "pending-mes-unit")
+                .put("code", "CMU" + codeToken)
+                .put("name", "件")
+                .put("primaryFlag", true)
+                .putNull("primaryId")
+                .putNull("changeRate")
+                .put("status", 0)
+                .put("remark", "CloudMold AI 新品试产计量单位 " + prefix);
+        readiness.putObject("itemType")
+                .put("idempotencyKey", "pending-mes-item-type")
+                .put("parentId", 0)
+                .put("code", "CMT" + codeToken)
+                .put("name", "AI 新品试产产成品 " + codeToken)
+                .put("itemOrProduct", "PRODUCT")
+                .put("sort", 1)
+                .put("status", 0)
+                .put("remark", "CloudMold AI 新品试产分类 " + prefix);
+        readiness.putObject("item")
+                .put("idempotencyKey", "pending-mes-item")
+                .put("code", "CMI" + codeToken)
+                .put("name", "CloudMold AI 新品 " + codeToken)
+                .put("specification", "每日 occurrence 新建并完成试产")
+                .put("unitMeasureId", 0)
+                .put("itemTypeId", 0)
+                .put("safeStockFlag", true)
+                .put("minStock", 6)
+                .put("maxStock", 120)
+                .put("highValue", false)
+                // V1 models fresh-product trial production without raw-material or
+                // batch-attribute setup. Batch tracing is introduced with the BOM
+                // and material-issue slice instead of creating an invalid partial
+                // batch configuration here.
+                .put("batchFlag", false)
+                .put("remark", "由生产主管 Temporal 工作流创建");
+        readiness.putObject("workshop")
+                .put("idempotencyKey", "pending-mes-workshop")
+                .put("code", "CMW" + codeToken)
+                .put("name", "AI 新品试产车间 " + codeToken)
+                .put("area", 120)
+                .put("chargeUserId", operatorUserId)
+                .put("status", 0)
+                .put("remark", "试产车间 " + prefix);
+        readiness.putObject("process")
+                .put("idempotencyKey", "pending-mes-process")
+                .put("code", "CMP" + codeToken)
+                .put("name", "新品成型与终检 " + codeToken)
+                .put("attention", "按排产数量生产，报工合格数量必须与产出入库一致")
+                .put("status", 0)
+                .put("remark", "关键工序 " + prefix);
+        readiness.putObject("workstation")
+                .put("idempotencyKey", "pending-mes-workstation")
+                .put("code", "CMS" + codeToken)
+                .put("name", "AI 试产工作站 " + codeToken)
+                .put("address", "CloudMold TEST / " + prefix)
+                .put("workshopId", 0)
+                .put("processId", 0)
+                .putNull("warehouseId")
+                .putNull("locationId")
+                .putNull("areaId")
+                .put("status", 0)
+                .put("remark", "生产任务执行站");
+        readiness.putObject("route")
+                .put("idempotencyKey", "pending-mes-route")
+                .put("code", "CMR" + codeToken)
+                .put("name", "AI 新品试产路线 " + codeToken)
+                .put("description", "单一关键工序，完成合格品产出与入库")
+                .put("remark", "生产主管试产路线");
+        readiness.putObject("routeProcess")
+                .put("idempotencyKey", "pending-mes-route-process")
+                .put("routeId", 0)
+                .put("processId", 0)
+                .put("sort", 1)
+                .put("linkType", 0)
+                .put("prepareTime", 30)
+                .put("waitTime", 5)
+                .put("colorCode", "#1677FF")
+                .put("keyFlag", true)
+                .put("checkFlag", false)
+                .put("remark", "关键工序记录合格/不合格并触发产成品入库");
+        readiness.putObject("routeStatus")
+                .put("idempotencyKey", "pending-mes-route-status")
+                .put("routeId", 0)
+                .put("status", 0);
+
+        root.putObject("workOrder")
+                .put("idempotencyKey", "pending-mes-work-order")
+                .put("code", "CMO" + codeToken)
+                .put("name", "CloudMold AI 新品试产工单 " + codeToken)
+                .put("type", 1)
+                .put("orderSourceType", 2)
+                .put("orderSourceCode", "AI-STOCK-" + codeToken)
+                .put("productId", 0)
+                .put("quantity", 12)
+                .putNull("clientId")
+                .putNull("vendorId")
+                .put("batchCode", "CMB" + codeToken)
+                .put("requestDate", businessEnd)
+                .put("parentId", 0)
+                .put("remark", "每日 occurrence 新品试产工单");
+        root.putObject("documentAction")
+                .put("idempotencyKey", "pending-mes-document-action")
+                .put("documentId", 0);
+        root.putObject("task")
+                .put("idempotencyKey", "pending-mes-task")
+                .put("workOrderId", 0)
+                .put("workstationId", 0)
+                .put("routeId", 0)
+                .put("processId", 0)
+                .put("itemId", 0)
+                .put("quantity", 12)
+                .put("startTime", businessStart)
+                .put("duration", 1)
+                .put("endTime", businessEnd)
+                .put("colorCode", "#1677FF")
+                .put("remark", "生产主管派工任务");
+        root.putObject("feedback")
+                .put("idempotencyKey", "pending-mes-feedback")
+                .put("code", "CMF" + codeToken)
+                .put("type", 1)
+                .put("workstationId", 0)
+                .put("routeId", 0)
+                .put("processId", 0)
+                .put("workOrderId", 0)
+                .put("taskId", 0)
+                .put("itemId", 0)
+                .put("expireDate", expireDate)
+                .put("lotNumber", "CML" + codeToken)
+                .put("scheduledQuantity", 12)
+                .put("feedbackQuantity", 12)
+                .put("qualifiedQuantity", 12)
+                .put("unqualifiedQuantity", 0)
+                .put("uncheckQuantity", 0)
+                .put("laborScrapQuantity", 0)
+                .put("materialScrapQuantity", 0)
+                .put("otherScrapQuantity", 0)
+                .put("feedbackUserId", operatorUserId)
+                .put("feedbackTime", businessEnd)
+                .put("approveUserId", reviewerUserId)
+                .put("remark", "AI 生产主管报工；合格品审批后入库");
+        return root;
     }
 
     private boolean hydrateConsumerJourney(Long tenantId, ObjectNode consumer) {

@@ -48,7 +48,8 @@ final class AgentApprovalR3Policy {
                 "compensation.", "payment.refund", "trade.refund")) {
             return List.of("customer-service", "finance");
         }
-        if (action.equals("quality.inspection-recall")) {
+        if (action.equals("quality.inspection-recall")
+                || action.equals("production.execute")) {
             return List.of("quality", "operations-lead");
         }
         if (action.equals("fulfillment.exception-resolution")) {
