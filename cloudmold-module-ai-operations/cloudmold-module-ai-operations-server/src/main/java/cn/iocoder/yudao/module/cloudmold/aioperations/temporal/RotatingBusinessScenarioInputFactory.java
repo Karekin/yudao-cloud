@@ -39,6 +39,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.commerce.category-daily-operations.v1";
     static final String CATALOG_MATRIX_SKILL = "skill.cloudmold.commerce.catalog-matrix.v1";
     static final String AFTERSALE_SAGA_SKILL = "skill.cloudmold.commerce.aftersale-saga.v1";
+    static final String ORDER_CANCELLATION_OPERATIONS_SKILL =
+            "skill.cloudmold.commerce.order-cancellation-operational.v1";
     static final String CONSUMER_JOURNEY_SKILL = "skill.cloudmold.consumer.shopping-journey.v1";
     static final String MERCHANT_ONBOARDING_SKILL = "skill.cloudmold.merchant.onboarding-lifecycle.v1";
     static final String PROMOTION_CAMPAIGN_SKILL =
@@ -126,6 +128,21 @@ class RotatingBusinessScenarioInputFactory {
                 return Optional.empty();
             }
             output = aftersale;
+        } else if (ORDER_CANCELLATION_OPERATIONS_SKILL.equals(targetSkillId)) {
+            if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
+                return Optional.empty();
+            }
+            JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
+            if (operator.path("principalId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            ObjectNode consumer = consumerJourney(rotated, newPrefix, occurredAt,
+                    seedProperties.getSyntheticConsumerMemberUserId());
+            if (!hydrateConsumerJourney(tenantId, consumer)) {
+                return Optional.empty();
+            }
+            output = orderCancellationOperations(
+                    newPrefix, occurredAt, consumer, operator.path("principalId").asText());
         } else if (PRODUCT_TO_LISTING_SKILL.equals(targetSkillId)) {
             output = productToListing(rotated, newPrefix);
         } else if (READY_MASTER_SKILL.equals(targetSkillId)) {
@@ -411,6 +428,7 @@ class RotatingBusinessScenarioInputFactory {
             case CATEGORY_DAILY_OPERATIONS_SKILL -> "y";
             case CATALOG_MATRIX_SKILL -> "c";
             case AFTERSALE_SAGA_SKILL -> "a";
+            case ORDER_CANCELLATION_OPERATIONS_SKILL -> "i";
             case CONSUMER_JOURNEY_SKILL -> "u";
             case MERCHANT_ONBOARDING_SKILL -> "h";
             case PROMOTION_CAMPAIGN_SKILL -> "e";
@@ -819,6 +837,32 @@ class RotatingBusinessScenarioInputFactory {
                 "FULL_CYCLE_VERIFIED");
         output.set("product", productToListing(fullChain, prefix));
         output.set("consumer", consumer);
+        return output;
+    }
+
+    private static ObjectNode orderCancellationOperations(
+            String prefix, String occurredAt, ObjectNode consumer, String operatorPrincipalId) {
+        ObjectNode output = JsonNodeFactory.instance.objectNode();
+        output.putObject("runIds")
+                .put("orderScenario", prefix + "-paid-unshipped-order");
+        output.put("operatorPrincipalId", operatorPrincipalId);
+        output.set("orderScenario", consumer);
+        addRoleOperationsCase(output, prefix, occurredAt, operatorPrincipalId,
+                "AI_ORDER_CANCEL_", "order-cancellation:", "order_cancellation_",
+                "ORDER_EXCEPTION", "PAID_UNSHIPPED_CANCELLATION",
+                "CANCELLATION_REQUEST_RECEIVED", "ORDER_EXCEPTION_OPERATOR_ASSIGNED",
+                "CANCELLATION_COMPENSATION_VERIFIED");
+        output.putObject("cancellation")
+                .put("operation", "START")
+                .put("cancellationMode", "PAID_UNSHIPPED")
+                .put("responsibilityParty", "BUYER")
+                .put("responsibilityCode", "BUYER_CHANGED_MIND")
+                .put("reason", "AI 模拟消费者付款后、发货前申请取消")
+                .put("idempotencyKey", "pending-order-cancellation")
+                .put("runId", prefix + "-order-cancellation")
+                .put("orderId", ZERO_UUID)
+                .put("correlationId", stableUuid(prefix + ":order-cancellation"))
+                .put("occurredAt", occurredAt);
         return output;
     }
 

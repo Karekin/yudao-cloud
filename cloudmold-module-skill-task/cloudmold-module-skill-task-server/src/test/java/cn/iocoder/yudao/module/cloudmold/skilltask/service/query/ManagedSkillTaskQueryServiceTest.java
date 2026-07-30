@@ -230,7 +230,7 @@ class ManagedSkillTaskQueryServiceTest {
     void shouldDescribeOperationalOrderCancellationWithHonestPspBoundary() {
         SkillTaskDefinition definition = SkillTaskDefinition.builder()
                 .skillId("skill.cloudmold.commerce.order-cancellation-operational.v1")
-                .skillVersion("1.0.0")
+                .skillVersion("1.1.0")
                 .riskLevel("R3")
                 .maxAttempts(3)
                 .definitionSha256("d".repeat(64))
@@ -256,7 +256,7 @@ class ManagedSkillTaskQueryServiceTest {
 
         assertThat(workflows).singleElement().satisfies(item -> {
             assertThat(item.getDisplayName()).isEqualTo("订单取消补偿闭环");
-            assertThat(item.getDescription()).contains("真实订单取消补偿 Saga START", "真实 PSP");
+            assertThat(item.getDescription()).contains("每天新建", "履约关闭", "真实 PSP");
             assertThat(item.getRiskLevel()).isEqualTo("R3");
             assertThat(item.getWriteStepCount()).isEqualTo(1);
             assertThat(item.getApprovalRequired()).isTrue();

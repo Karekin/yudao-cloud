@@ -161,12 +161,27 @@ class SkillTaskDefinitionRegistryTest {
         SkillTaskDefinition definition = workspaceRegistry.require(
                 "skill.cloudmold.commerce.full-chain-hsf.v1", "1.3.0");
         SkillTaskDefinition cancellation = workspaceRegistry.require(
-                "skill.cloudmold.commerce.order-cancellation-operational.v1", "1.0.0");
+                "skill.cloudmold.commerce.order-cancellation-operational.v1", "1.1.0");
         assertThat(definition.getRiskLevel()).isEqualTo("R3");
         assertThat(definition.getSteps()).hasSize(8);
         assertThat(cancellation.getRiskLevel()).isEqualTo("R3");
+        assertThat(cancellation.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(cancellation.getOwnerRole()).isEqualTo("order-exception-operator");
+        assertThat(cancellation.getSteps()).hasSize(10);
+        assertThat(cancellation.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(5);
         assertThat(cancellation.getSteps()).extracting(SkillTaskDefinition.Step::getStepKind)
-                .containsExactly("CAPABILITY", "WAIT_CAPABILITY");
+                .containsExactly("SUBMIT_CHILD", "WAIT_CHILD", "CAPABILITY", "CAPABILITY",
+                        "CAPABILITY", "CAPABILITY", "WAIT_CAPABILITY", "CAPABILITY",
+                        "WAIT_CAPABILITY", "WAIT_CAPABILITY");
+        SkillTaskDefinition paidUnshippedOrder = workspaceRegistry.require(
+                "skill.cloudmold.consumer.paid-unshipped-order-scenario.v1", "1.0.0");
+        assertThat(paidUnshippedOrder.getWorkflowLevel()).isEqualTo("INTERNAL_SUBFLOW");
+        assertThat(paidUnshippedOrder.getSteps()).hasSize(9);
+        assertThat(paidUnshippedOrder.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(7);
         SkillTaskDefinition financeClose = workspaceRegistry.require(
                 "skill.cloudmold.finance.close-readiness.v1", "1.0.0");
         assertThat(financeClose.getSteps()).singleElement().satisfies(step -> {

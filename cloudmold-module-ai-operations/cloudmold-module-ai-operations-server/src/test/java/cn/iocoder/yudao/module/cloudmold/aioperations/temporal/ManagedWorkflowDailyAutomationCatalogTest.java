@@ -76,7 +76,7 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                 .hasSize(7);
         assertThat(ManagedWorkflowDailyAutomationFixtures.workflows())
                 .filteredOn(workflow -> "R3".equals(workflow.getRiskLevel()))
-                .hasSize(22);
+                .hasSize(23);
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .filter(ManagedWorkflowDailyAutomationCatalog::canRunWithoutBusinessInput))
                 .containsExactly(
@@ -89,7 +89,7 @@ class ManagedWorkflowDailyAutomationCatalogTest {
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("ROTATING_BUSINESS_SCENARIO"::equals)
-                .hasSize(25);
+                .hasSize(26);
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("DOMAIN_BACKLOG"::equals)

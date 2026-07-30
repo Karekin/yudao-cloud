@@ -32,6 +32,7 @@ final class ManagedWorkflowDailyAutomationCatalog {
     private static final Set<String> ROTATING_BUSINESS_SCENARIOS = Set.of(
             "skill.cloudmold.commerce.catalog-matrix.v1",
             "skill.cloudmold.commerce.aftersale-saga.v1",
+            "skill.cloudmold.commerce.order-cancellation-operational.v1",
             "skill.cloudmold.commerce.product-to-listing.v1",
             "skill.cloudmold.commerce.full-chain-hsf.v1",
             "skill.cloudmold.commerce.autonomous-day.v1",
@@ -123,6 +124,9 @@ final class ManagedWorkflowDailyAutomationCatalog {
                             "production.prepare")),
             Map.entry("skill.cloudmold.consumer.in-transit-order-scenario.v1",
                     new ApprovalRoute("logistics-operations", "fulfillment.exception-resolution")),
+            Map.entry("skill.cloudmold.consumer.paid-unshipped-order-scenario.v1",
+                    new ApprovalRoute("order-exception-operator",
+                            "customer-service.compensate")),
             Map.entry("skill.cloudmold.supply-planning.prepare.v1",
                     new ApprovalRoute("supply-planning", "replenishment.convert"))
     );

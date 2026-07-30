@@ -961,6 +961,59 @@ class RotatingBusinessScenarioInputFactoryTest {
     }
 
     @Test
+    void shouldBuildFreshPaidUnshippedOrderCancellationOperations() {
+        properties.setSyntheticConsumerMemberUserId(286L);
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
+                {
+                  "runIds":{"catalog":"base-cat"},
+                  "catalog":{},"master":{"identityReference":{},"warehouseReference":{}},
+                  "aftersale":{"commands":[
+                    {},{},{},{},{},{},
+                    {"operation":"RECEIVE"},{"operation":"PLACE_FROM_LISTING","items":[{}]},
+                    {"operation":"RESERVE"},{"operation":"CONFIRM_INVENTORY"},
+                    {"operation":"CAPTURE"},{"operation":"CONFIRM_PAYMENT"},
+                    {"operation":"CREATE","items":[{}]},{"operation":"SHIP"},
+                    {"operation":"SHIP"},{"operation":"CONFIRM_SHIPMENT"},
+                    {"operation":"IN_TRANSIT"},{"operation":"DELIVERED"},
+                    {"operation":"COMPLETE"},{"operation":"REQUEST"},
+                    {"operation":"APPROVE"},{"operation":"HANDOVER"},
+                    {"operation":"TRANSIT"},{"operation":"RECEIVE"},
+                    {"operation":"ACCEPT"}]},
+                  "readback":{}
+                }
+                """);
+
+        JsonNode first = build(
+                RotatingBusinessScenarioInputFactory.ORDER_CANCELLATION_OPERATIONS_SKILL);
+        JsonNode second = JsonUtils.parseTree(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.ORDER_CANCELLATION_OPERATIONS_SKILL,
+                "2026-07-29", "temporal-run-2").orElseThrow());
+
+        assertThat(first.path("runIds").path("orderScenario").asText())
+                .startsWith("i260729162-").endsWith("-paid-unshipped-order");
+        assertThat(first.path("runIds").path("orderScenario").asText())
+                .isNotEqualTo(second.path("runIds").path("orderScenario").asText());
+        assertThat(first.path("orderScenario").path("identityReference").path("sourceId").asText())
+                .isEqualTo("286");
+        assertThat(first.path("orderScenario").path("listingId").asText())
+                .isEqualTo("listing-1");
+        assertThat(first.path("orderScenario").path("commands").get(6)
+                .path("operation").asText()).isEqualTo("CREATE");
+        assertThat(first.path("operationsCommands")).hasSize(4);
+        assertThat(first.path("operationsCommands").get(0)
+                .path("operation").asText()).isEqualTo("OPEN_ALERT");
+        assertThat(first.path("operationsCommands").get(0).path("alert")
+                .path("category").asText()).isEqualTo("ORDER_EXCEPTION");
+        assertThat(first.path("cancellation").path("operation").asText()).isEqualTo("START");
+        assertThat(first.path("cancellation").path("cancellationMode").asText())
+                .isEqualTo("PAID_UNSHIPPED");
+        assertThat(first.path("cancellation").path("responsibilityCode").asText())
+                .isEqualTo("BUYER_CHANGED_MIND");
+    }
+
+    @Test
     void shouldBuildOccurrenceFreshMesProductionExecutionWithIndependentReview() {
         mockReadyMaster();
         when(mapper.selectLatestSuccessfulSkillTaskInput(

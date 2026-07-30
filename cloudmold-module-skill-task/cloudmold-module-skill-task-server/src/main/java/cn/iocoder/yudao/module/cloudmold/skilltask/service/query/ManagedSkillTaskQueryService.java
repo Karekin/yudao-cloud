@@ -129,8 +129,9 @@ public class ManagedSkillTaskQueryService {
                             "持续回读增长实验结果；样本或归因未齐备时保持等待并展示阻塞项。")),
             Map.entry("skill.cloudmold.commerce.order-cancellation-operational.v1",
                     new WorkflowPresentation("订单取消补偿闭环",
-                            "提交真实订单取消补偿 Saga START，并持续回读至成功或人工复核；"
-                                    + "PAID_UNSHIPPED 当前仅自动覆盖 INTERNAL_TEST 支付退款，真实 PSP 仍由外部权威负责。")),
+                            "模拟订单异常运营为每天新建的已支付未发货订单完成开案、通知、认领、"
+                                    + "履约关闭、退款、库存释放、订单取消、结案和双终态验收；"
+                                    + "当前支付退款使用 INTERNAL_TEST 权威，真实 PSP 仍由外部系统负责。")),
             Map.entry("skill.cloudmold.commerce.order-to-cash-readback.v1",
                     new WorkflowPresentation("订单到回款终态跟踪",
                             "持续核验订单、库存、支付与履约事实，直至订单到回款链路形成终态。")),

@@ -28,6 +28,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.commerce.terminal-readback.v1",
             "skill.cloudmold.customer-service.resolution-readback.v1",
             "skill.cloudmold.consumer.in-transit-order-scenario.v1",
+            "skill.cloudmold.consumer.paid-unshipped-order-scenario.v1",
             "skill.cloudmold.consumer.shopping-journey.v1",
             "skill.cloudmold.engagement.promotion-campaign-operations.v1",
             "skill.cloudmold.engagement.growth-experiment-readback.v1",
@@ -88,6 +89,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             ,"skill.cloudmold.finance.close-lifecycle.v1"
             ,"skill.cloudmold.quality.inspection-recall-lifecycle.v1"
             ,"skill.cloudmold.consumer.in-transit-order-scenario.v1"
+            ,"skill.cloudmold.consumer.paid-unshipped-order-scenario.v1"
             ,"skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1"
             ,"skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1"
             ,"skill.cloudmold.crossborder.bonded-customs-lifecycle.v1"
@@ -114,6 +116,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             ,"skill.cloudmold.finance.close-lifecycle.v1"
             ,"skill.cloudmold.quality.inspection-recall-lifecycle.v1"
             ,"skill.cloudmold.consumer.in-transit-order-scenario.v1"
+            ,"skill.cloudmold.consumer.paid-unshipped-order-scenario.v1"
             ,"skill.cloudmold.fulfillment.exception-resolution-lifecycle.v1"
             ,"skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1"
             ,"skill.cloudmold.crossborder.bonded-customs-lifecycle.v1"
@@ -129,6 +132,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.commerce.legacy-projection-plan.v1", "1.2.0",
             "skill.cloudmold.commerce.reuse-ready-master.v1", "1.2.1",
             "skill.cloudmold.commerce.terminal-readback.v1", "1.2.0"
+            ,"skill.cloudmold.commerce.order-cancellation-operational.v1", "1.1.0"
             ,"skill.cloudmold.wms.operations.v1", "1.1.0"
     );
 
