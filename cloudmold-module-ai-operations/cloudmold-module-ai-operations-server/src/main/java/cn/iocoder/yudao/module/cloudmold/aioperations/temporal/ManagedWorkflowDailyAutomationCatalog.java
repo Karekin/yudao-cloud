@@ -54,6 +54,7 @@ final class ManagedWorkflowDailyAutomationCatalog {
             "skill.cloudmold.crossborder.bonded-customs-lifecycle.v1",
             "skill.cloudmold.partner-marketing.kol-media-operations.v1",
             "skill.cloudmold.mes.production-execution-lifecycle.v1",
+            "skill.cloudmold.catalog.assortment-planning-lifecycle.v1",
             "skill.cloudmold.commerce.reuse-ready-master.v1",
             "skill.cloudmold.commerce.legacy-projection-plan.v1"
     );
@@ -119,6 +120,9 @@ final class ManagedWorkflowDailyAutomationCatalog {
             Map.entry("skill.cloudmold.mes.production-execution-lifecycle.v1",
                     new ApprovalRoute("production-supervisor",
                             "production.execute")),
+            Map.entry("skill.cloudmold.catalog.assortment-planning-lifecycle.v1",
+                    new ApprovalRoute("assortment-manager",
+                            "assortment.plan-release")),
             Map.entry("skill.cloudmold.mes.production-readiness.v1",
                     new ApprovalRoute("production-supervisor",
                             "production.prepare")),

@@ -13,6 +13,8 @@ cn.iocoder.yudao.module.cloudmold.aftersale.api.AfterSaleCommandApi
 cn.iocoder.yudao.module.cloudmold.aftersale.api.AfterSaleQueryApi
 cn.iocoder.yudao.module.cloudmold.aioperations.api.AiOperationsCommandApi
 cn.iocoder.yudao.module.cloudmold.aioperations.api.AiOperationsQueryApi
+cn.iocoder.yudao.module.cloudmold.catalog.api.AssortmentPlanningCommandApi
+cn.iocoder.yudao.module.cloudmold.catalog.api.AssortmentPlanningQueryApi
 cn.iocoder.yudao.module.cloudmold.catalog.api.CatalogCommandApi
 cn.iocoder.yudao.module.cloudmold.catalog.api.CatalogSkuProjectionApi
 cn.iocoder.yudao.module.cloudmold.catalog.api.CatalogSkuValidationApi

@@ -73,6 +73,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.partner-marketing.kol-media-operations.v1";
     static final String MES_PRODUCTION_EXECUTION_LIFECYCLE_SKILL =
             "skill.cloudmold.mes.production-execution-lifecycle.v1";
+    static final String ASSORTMENT_PLANNING_LIFECYCLE_SKILL =
+            "skill.cloudmold.catalog.assortment-planning-lifecycle.v1";
     static final String READY_MASTER_SKILL = "skill.cloudmold.commerce.reuse-ready-master.v1";
     static final String LEGACY_PROJECTION_SKILL = "skill.cloudmold.commerce.legacy-projection-plan.v1";
     private static final String ZERO_UUID = "00000000-0000-0000-0000-000000000000";
@@ -374,6 +376,13 @@ class RotatingBusinessScenarioInputFactory {
                     operator.path("principalId").asText(),
                     "governance-user:" + reviewerUserId,
                     "finance-user:" + financeActorUserId);
+        } else if (ASSORTMENT_PLANNING_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
+            if (operator.path("principalId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            output = assortmentPlanningLifecycle(
+                    newPrefix, date, occurredAt, operator.path("principalId").asText());
         } else if (MES_PRODUCTION_EXECUTION_LIFECYCLE_SKILL.equals(targetSkillId)) {
             TemporalApprovalPolicyRecord approvalPolicy = mapper.selectApprovalPolicy(tenantId);
             long operatorUserId = seedProperties.getOperatorUserId();
@@ -446,10 +455,153 @@ class RotatingBusinessScenarioInputFactory {
             case BONDED_CUSTOMS_LIFECYCLE_SKILL -> "t";
             case PARTNER_MARKETING_KOL_MEDIA_OPERATIONS_SKILL -> "o";
             case MES_PRODUCTION_EXECUTION_LIFECYCLE_SKILL -> "z";
+            case ASSORTMENT_PLANNING_LIFECYCLE_SKILL -> "aa";
             case READY_MASTER_SKILL -> "m";
             case LEGACY_PROJECTION_SKILL -> "l";
             default -> throw new IllegalArgumentException("Unsupported rotating scenario Skill: " + skillId);
         };
+    }
+
+    private static ObjectNode assortmentPlanningLifecycle(
+            String prefix, LocalDate date, String occurredAt, String actorPrincipalId) {
+        String token = prefix.replace("-", "").toUpperCase(Locale.ROOT);
+        String waveId = stableUuid(prefix + ":assortment-wave");
+        String correlationId = stableUuid(prefix + ":assortment-correlation");
+        String runId = prefix + "-assortment";
+        String season = switch (date.getMonthValue()) {
+            case 3, 4, 5 -> "SPRING";
+            case 6, 7, 8 -> "SUMMER";
+            case 9, 10, 11 -> "AUTUMN";
+            default -> "WINTER";
+        };
+        ObjectNode root = JsonNodeFactory.instance.objectNode();
+        root.put("waveId", waveId);
+        ArrayNode commands = root.putArray("commands");
+
+        ObjectNode create = assortmentCommand(
+                commands, "CREATE_WAVE", correlationId, runId, occurredAt, actorPrincipalId);
+        create.putObject("wave")
+                .put("waveId", waveId)
+                .put("waveCode", "ASW" + token)
+                .put("planningYear", date.getYear())
+                .put("seasonCode", season)
+                .put("categoryCode", "APPAREL")
+                .put("trendBrief", "结合站内搜索、社媒趋势与消费者研究生成的 occurrence 级新品波段")
+                .put("targetAudience", "重视通勤舒适、设计感与性价比的核心服饰消费者")
+                .put("targetStyleCount", 2)
+                .put("targetPriceFloorMinor", 10000)
+                .put("targetPriceCeilingMinor", 50000)
+                .put("targetGrossMarginBps", 4500)
+                .put("maxReturnRateBps", 1800)
+                .put("launchStartDate", date.plusDays(15).toString())
+                .put("launchEndDate", date.plusDays(45).toString())
+                .put("currencyCode", "CNY")
+                .put("reasonCode", "DAILY_ASSORTMENT_WAVE");
+
+        String entryId = stableUuid(prefix + ":assortment-entry");
+        String coreId = stableUuid(prefix + ":assortment-core");
+        String premiumId = stableUuid(prefix + ":assortment-premium");
+        addAssortmentCandidate(commands, correlationId, runId, occurredAt, actorPrincipalId,
+                waveId, 1L, entryId, "ASE" + token, "轻量通勤针织上衣",
+                "SEARCH_TREND", "trend:search:" + prefix, "ENTRY", 19900, 9000);
+        addAssortmentEvaluation(commands, correlationId, runId, occurredAt, actorPrincipalId,
+                waveId, 2L, entryId, 86, 83, 88, 24, 1200,
+                "搜索增长稳定、受众匹配高，供应风险可控");
+        addAssortmentCandidate(commands, correlationId, runId, occurredAt, actorPrincipalId,
+                waveId, 3L, coreId, "ASC" + token, "结构感通勤连衣裙",
+                "SOCIAL_TREND", "trend:social:" + prefix, "CORE", 29900, 14000);
+        addAssortmentEvaluation(commands, correlationId, runId, occurredAt, actorPrincipalId,
+                waveId, 4L, coreId, 91, 89, 90, 28, 1400,
+                "社媒内容增长与站内需求共振，适合作为核心价格带主推款");
+        addAssortmentCandidate(commands, correlationId, runId, occurredAt, actorPrincipalId,
+                waveId, 5L, premiumId, "ASP" + token, "高端羊毛混纺外套",
+                "COMPETITOR", "trend:competitor:" + prefix, "PREMIUM", 49900, 30000);
+        addAssortmentEvaluation(commands, correlationId, runId, occurredAt, actorPrincipalId,
+                waveId, 6L, premiumId, 94, 78, 82, 55, 2500,
+                "趋势热度高，但成本、供给风险和预测退货率不满足本波段约束");
+
+        ObjectNode select = assortmentCommand(
+                commands, "SELECT_PORTFOLIO", correlationId, runId, occurredAt, actorPrincipalId);
+        select.putObject("portfolio")
+                .put("waveId", waveId)
+                .put("expectedWaveVersion", 7)
+                .put("decisionPolicyVersion", "assortment-policy:v1")
+                .put("decisionEvidenceSha256", DigestUtil.sha256Hex(prefix + ":portfolio"))
+                .put("reasonCode", "AI_CONSTRAINED_PORTFOLIO");
+
+        ObjectNode approve = assortmentCommand(
+                commands, "APPROVE_WAVE", correlationId, runId, occurredAt, actorPrincipalId);
+        approve.putObject("approval")
+                .put("waveId", waveId)
+                .put("expectedWaveVersion", 8)
+                .put("approvalRef", "pending-temporal-approval")
+                .put("approvalNote", "独立审批确认组合符合毛利、退货率和价格带策略")
+                .put("reasonCode", "ASSORTMENT_APPROVED");
+
+        ObjectNode publish = assortmentCommand(
+                commands, "PUBLISH_WAVE", correlationId, runId, occurredAt, actorPrincipalId);
+        publish.putObject("publication")
+                .put("waveId", waveId)
+                .put("expectedWaveVersion", 9)
+                .put("launchCalendarRef", "calendar:assortment:" + prefix)
+                .put("downstreamHandoffRef", "handoff:product-development:" + prefix)
+                .put("publicationEvidenceSha256", DigestUtil.sha256Hex(prefix + ":publication"))
+                .put("reasonCode", "ASSORTMENT_PUBLISHED");
+        return root;
+    }
+
+    private static ObjectNode assortmentCommand(
+            ArrayNode commands, String operation, String correlationId, String runId,
+            String occurredAt, String actorPrincipalId) {
+        ObjectNode command = commands.addObject();
+        command.put("operation", operation)
+                .put("correlationId", correlationId)
+                .put("runId", runId)
+                .put("idempotencyKey", "pending-assortment-" + commands.size())
+                .put("occurredAt", occurredAt)
+                .put("actorPrincipalId", actorPrincipalId);
+        return command;
+    }
+
+    private static void addAssortmentCandidate(
+            ArrayNode commands, String correlationId, String runId, String occurredAt,
+            String actorPrincipalId, String waveId, long expectedVersion, String candidateId,
+            String candidateCode, String concept, String signalType, String signalRef,
+            String priceBand, long priceMinor, long costMinor) {
+        assortmentCommand(commands, "ADD_CANDIDATE", correlationId, runId, occurredAt, actorPrincipalId)
+                .putObject("candidate")
+                .put("waveId", waveId)
+                .put("expectedWaveVersion", expectedVersion)
+                .put("candidateId", candidateId)
+                .put("candidateCode", candidateCode)
+                .put("productConcept", concept)
+                .put("sourceSignalType", signalType)
+                .put("sourceSignalRef", signalRef)
+                .put("priceBandCode", priceBand)
+                .put("targetPriceMinor", priceMinor)
+                .put("expectedUnitCostMinor", costMinor)
+                .put("reasonCode", "CANDIDATE_DISCOVERED");
+    }
+
+    private static void addAssortmentEvaluation(
+            ArrayNode commands, String correlationId, String runId, String occurredAt,
+            String actorPrincipalId, String waveId, long expectedVersion, String candidateId,
+            int trendScore, int demandScore, int audienceFitScore, int supplyRiskScore,
+            int predictedReturnRateBps, String rationale) {
+        assortmentCommand(commands, "EVALUATE_CANDIDATE", correlationId, runId,
+                occurredAt, actorPrincipalId)
+                .putObject("evaluation")
+                .put("waveId", waveId)
+                .put("expectedWaveVersion", expectedVersion)
+                .put("candidateId", candidateId)
+                .put("trendScore", trendScore)
+                .put("demandScore", demandScore)
+                .put("audienceFitScore", audienceFitScore)
+                .put("supplyRiskScore", supplyRiskScore)
+                .put("predictedReturnRateBps", predictedReturnRateBps)
+                .put("evidenceSha256", DigestUtil.sha256Hex(candidateId + ":" + rationale))
+                .put("rationale", rationale)
+                .put("reasonCode", "AI_CANDIDATE_EVALUATED");
     }
 
     private static ObjectNode mesProductionExecutionLifecycle(

@@ -19,6 +19,8 @@ class CloudMoldDubboServiceAllowlistTest {
                         "cn.iocoder.yudao.module.cloudmold.dreamplant.api.DreamPlantQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.dreamplant.api.DreamPlantKnowledgeCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.dreamplant.api.DreamPlantKnowledgeQueryApi",
+                        "cn.iocoder.yudao.module.cloudmold.catalog.api.AssortmentPlanningCommandApi",
+                        "cn.iocoder.yudao.module.cloudmold.catalog.api.AssortmentPlanningQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.catalog.api.workflow.AssortmentWaveReadinessWorkflowQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryStockoutDiagnosisQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryCheckoutReservationApi",

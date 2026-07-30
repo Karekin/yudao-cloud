@@ -98,6 +98,20 @@ class CloudMoldCapabilityCatalogTest {
         });
         assertThat(catalog.all()).anySatisfy(capability -> {
             assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.catalog.assortment-planning-command.execute.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.catalog.api.AssortmentPlanningCommandApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.WRITE);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.catalog.assortment-planning-query.get-workflow.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.catalog.api.AssortmentPlanningQueryApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.READ);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
                     "capability.cloudmold.crossborder.cross-border-command.execute.v1");
             assertThat(capability.interfaceName()).isEqualTo(
                     "cn.iocoder.yudao.module.cloudmold.crossborder.api.CrossBorderCommandApi");
