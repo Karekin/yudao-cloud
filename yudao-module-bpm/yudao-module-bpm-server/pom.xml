@@ -125,6 +125,9 @@
                 <version>${spring.boot.version}</version>
                 <configuration>
                     <skip>${cloudmold.bpm.repackage.skip}</skip>
+                    <!-- BPM is embedded into yudao-server when the approval profile is
+                         active, so its main artifact must remain component-scannable. -->
+                    <classifier>exec</classifier>
                 </configuration>
                 <executions>
                     <execution>

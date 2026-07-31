@@ -63,6 +63,8 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(json.path("listing").path("commands").get(0).path("offers")).hasSize(6);
         assertThat(json.path("listing").path("commands").get(0).path("runId").asText())
                 .startsWith("p260729162-").endsWith("-aftersale");
+        assertThat(json.path("listing").path("commands").get(0).path("publishStartAt").asText())
+                .isEqualTo("2026-07-28T16:00:00Z");
         assertThat(json.path("readback").path("listingId").asText())
                 .isEqualTo("00000000-0000-0000-0000-000000000000");
         assertThat(json.path("master").path("merchantReference").path("merchantId").asText())
@@ -1054,6 +1056,372 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(first.path("feedback").path("unqualifiedQuantity").asInt()).isZero();
         assertThat(first.path("feedback").path("feedbackUserId").asLong()).isEqualTo(1L);
         assertThat(first.path("feedback").path("approveUserId").asLong()).isEqualTo(227L);
+    }
+
+    @Test
+    void shouldBuildProductManagementFromAssortmentThroughVerifiedMysteryBuyerQuality() {
+        properties.setSyntheticConsumerMemberUserId(286L);
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.READY_MASTER_SKILL,
+                "warehouse_network"))
+                .thenReturn("{\"warehouseId\":\"warehouse-1\",\"locationId\":\"location-1\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(completeAfterSaleTemplate()));
+
+        JsonNode input = build(
+                RotatingBusinessScenarioInputFactory.PRODUCT_MANAGEMENT_LIFECYCLE_SKILL);
+
+        assertThat(input.path("runIds").path("product").asText())
+                .startsWith("pm260729162-").endsWith("-product");
+        assertThat(input.path("managementDecision").path("supplyPoolScope").asText())
+                .isEqualTo("PLATFORM_ALL_ELIGIBLE_SUPPLY");
+        JsonNode qualityDimensions =
+                input.path("managementDecision").path("qualityDimensions");
+        assertThat(qualityDimensions).hasSize(4);
+        assertThat(qualityDimensions.get(0).asText()).isEqualTo("PATTERN_REVIEW");
+        assertThat(qualityDimensions.get(1).asText()).isEqualTo("PRICE_VERIFICATION");
+        assertThat(qualityDimensions.get(2).asText()).isEqualTo("CONTENT_SHOOTING");
+        assertThat(qualityDimensions.get(3).asText()).isEqualTo("MODEL_FITTING");
+        assertThat(input.path("operationsCommands")).hasSize(4);
+        assertThat(input.path("assortment").path("commands")).hasSize(10);
+        assertThat(input.path("product").path("listing").path("commands")).hasSize(6);
+        assertThat(input.path("mysteryPurchase").path("identityReference")
+                .path("sourceId").asText()).isEqualTo("286");
+        assertThat(input.path("quality").path("commands")).hasSize(8);
+        assertThat(input.path("quality").path("commands").get(6)
+                .path("inspectionTask").path("decision").asText()).isEqualTo("PASS");
+        assertThat(input.path("quality").path("commands").get(6)
+                .path("inspectionTask").path("evidenceRef").asText())
+                .startsWith("sha256:");
+        assertThat(input.path("campaign").path("campaignCommand")
+                .path("sourceType").asText()).isEqualTo("QUALITY_VERIFIED_NEW_PRODUCT");
+    }
+
+    @Test
+    void shouldBuildWarehouseAdmissionOnlyFromLatestVerifiedProductManagementResult() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(completeAfterSaleTemplate()));
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.PRODUCT_MANAGEMENT_LIFECYCLE_SKILL,
+                "wait_platform_store_listing")).thenReturn("""
+                {"outputs":{
+                  "wait_master":{"outputs":{
+                    "merchant_approve":{"merchantId":"merchant-product","shopId":"shop-product"},
+                    "principal":{"principalId":"principal-product"},
+                    "warehouse_network":{"warehouseId":"warehouse-product"}}},
+                  "listing_create":{"listingId":"listing-product"}}}
+                """);
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.PRODUCT_MANAGEMENT_LIFECYCLE_SKILL,
+                "wait_mystery_buyer_quality")).thenReturn("""
+                {"outputs":{"verify_quality_badge":{
+                  "canonicalSkuId":"sku-product","status":"VERIFIED",
+                  "inspectionStatus":"COMPLETED","decision":"PASS"}}}
+                """);
+
+        JsonNode input = build(
+                RotatingBusinessScenarioInputFactory.WAREHOUSE_ADMISSION_LIFECYCLE_SKILL);
+
+        assertThat(input.path("canonicalSkuId").asText()).isEqualTo("sku-product");
+        assertThat(input.path("admissionDecision").path("decision").asText())
+                .isEqualTo("APPROVE");
+        assertThat(input.path("admissionDecision").path("qualityPolicy").asText())
+                .isEqualTo("VERIFIED_ONLY");
+        assertThat(input.path("merchant").path("draftCommand")
+                .path("ownerPrincipalId").asText()).isEqualTo("principal-product");
+        assertThat(input.path("replenishment").path("procurement").path("purchaseOrder")
+                .path("canonicalSkuId").asText()).isEqualTo("sku-product");
+        assertThat(input.path("traffic").path("campaignCommand")
+                .path("sourceType").asText())
+                .isEqualTo("QUALITY_VERIFIED_WAREHOUSE_ADMISSION");
+        assertThat(input.path("traffic").path("campaignCommand")
+                .path("sourceId").asText()).isEqualTo("listing:listing-product");
+        assertThat(input.path("operationsCommands")).hasSize(4);
+    }
+
+    @Test
+    void shouldNotBuildWarehouseAdmissionWhenQualityIsNotVerified() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(completeAfterSaleTemplate()));
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.PRODUCT_MANAGEMENT_LIFECYCLE_SKILL,
+                "wait_platform_store_listing")).thenReturn("""
+                {"outputs":{"listing_create":{"listingId":"listing-product"}}}
+                """);
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.PRODUCT_MANAGEMENT_LIFECYCLE_SKILL,
+                "wait_mystery_buyer_quality")).thenReturn("""
+                {"outputs":{"verify_quality_badge":{
+                  "canonicalSkuId":"sku-product","status":"REJECTED"}}}
+                """);
+
+        assertThat(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.WAREHOUSE_ADMISSION_LIFECYCLE_SKILL,
+                "2026-07-29", "temporal-run-1")).isEmpty();
+    }
+
+    @Test
+    void shouldBuildFreshConsumerExperienceResponsibilityCaseWithCompensation() {
+        properties.setSyntheticConsumerMemberUserId(286L);
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(completeAfterSaleTemplate()));
+
+        JsonNode input = build(
+                RotatingBusinessScenarioInputFactory
+                        .CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL);
+
+        assertThat(input.path("runIds").path("consumer").asText())
+                .startsWith("cx260729162-").endsWith("-consumer-experience");
+        assertThat(input.path("consumer").path("identityReference")
+                .path("sourceId").asText()).isEqualTo("286");
+        assertThat(input.path("responsibilityDecision").path("responsibleParty").asText())
+                .isEqualTo("MERCHANT");
+        assertThat(input.path("responsibilityDecision").path("outcomeCode").asText())
+                .isEqualTo("MERCHANT_RESPONSIBLE");
+        assertThat(input.path("responsibilityDecision").path("reasonCode").asText())
+                .isEqualTo("PRODUCT_DESCRIPTION_MISMATCH");
+        assertThat(input.path("operationsCommands")).hasSize(4);
+        assertThat(input.path("ticketCommands")).hasSize(11);
+        assertThat(input.path("ticketCommands").get(6).path("operation").asText())
+                .isEqualTo("RECORD_QUALITY_REVIEW");
+        assertThat(input.path("ticketCommands").get(6).path("outcomeCode").asText())
+                .isEqualTo("MERCHANT_RESPONSIBLE");
+        assertThat(input.path("ticketCommands").get(7).path("operation").asText())
+                .isEqualTo("REQUEST_CLAIM");
+        assertThat(input.path("ticketCommands").get(9).path("operation").asText())
+                .isEqualTo("PAY_COMPENSATION");
+    }
+
+    @Test
+    void shouldBuildUnfulfillableOrderRefundInterceptAndCompensation() {
+        properties.setSyntheticConsumerMemberUserId(286L);
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(completeAfterSaleTemplate()));
+
+        JsonNode input = build(
+                RotatingBusinessScenarioInputFactory
+                        .UNFULFILLABLE_ORDER_COMPENSATION_LIFECYCLE_SKILL);
+
+        assertThat(input.path("runIds").path("orderCancellation").asText())
+                .startsWith("uc260729162-").endsWith("-unfulfillable-cancellation");
+        assertThat(input.path("orderCancellation").path("cancellation")
+                .path("cancellationMode").asText()).isEqualTo("PAID_UNSHIPPED");
+        assertThat(input.path("compensationPolicy").path("refundPolicy").asText())
+                .isEqualTo("INSTANT_FULL_REFUND_AND_SHIPMENT_INTERCEPT");
+        assertThat(input.path("ticketCommands")).hasSize(11);
+        assertThat(input.path("ticketCommands").get(0).path("channelCode").asText())
+                .isEqualTo("INTERNAL");
+        assertThat(input.path("ticketCommands").get(6).path("outcomeCode").asText())
+                .isEqualTo("PLATFORM_FULFILLMENT_RESPONSIBLE");
+        assertThat(input.path("ticketCommands").get(7).path("requestedAmountMinor").asLong())
+                .isEqualTo(5_000L);
+        assertThat(input.path("ticketCommands").get(0).path("occurredAt").asText())
+                .isEqualTo("2026-07-28T16:00:00Z");
+        assertThat(input.path("operationsCommands")).hasSize(4);
+    }
+
+    @Test
+    void shouldBuildRiskDisputeResolutionFromFreshPaidConsumerJourney() {
+        properties.setSyntheticConsumerMemberUserId(286L);
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(completeAfterSaleTemplate()));
+
+        JsonNode input = build(
+                RotatingBusinessScenarioInputFactory.RISK_DISPUTE_RESOLUTION_LIFECYCLE_SKILL);
+
+        assertThat(input.path("runIds").path("consumer").asText())
+                .startsWith("rd260729162-").endsWith("-risk-consumer");
+        assertThat(input.path("consumer").path("identityReference")
+                .path("sourceId").asText()).isEqualTo("286");
+        assertThat(input.path("operationsCommands")).hasSize(4);
+        assertThat(input.path("operationsCommands").get(0).path("alert")
+                .path("category").asText()).isEqualTo("RISK_OPERATIONS");
+        assertThat(input.path("riskCommands")).hasSize(8);
+        assertThat(input.path("riskCommands").get(0).path("operation").asText())
+                .isEqualTo("CREATE_CLUSTER");
+        assertThat(input.path("riskCommands").get(3).path("operation").asText())
+                .isEqualTo("OPEN_PAYMENT_DISPUTE");
+        assertThat(input.path("riskCommands").get(3).path("amountMinor").asLong())
+                .isEqualTo(39_800L);
+        assertThat(input.path("riskCommands").get(6).path("disputeStatus").asText())
+                .isEqualTo("LOST");
+        assertThat(input.path("riskCommands").get(7).path("lossEntryType").asText())
+                .isEqualTo("CHARGEBACK_LOSS");
+    }
+
+    @Test
+    void shouldBuildFreshDataQualityRecoveryEvidenceChain() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(completeAfterSaleTemplate()));
+
+        JsonNode input = build(
+                RotatingBusinessScenarioInputFactory.DATA_QUALITY_RECOVERY_LIFECYCLE_SKILL);
+
+        assertThat(input.path("operationsCommands")).hasSize(4);
+        assertThat(input.path("operationsCommands").get(0).path("alert")
+                .path("category").asText()).isEqualTo("DATA_AI_OPERATIONS");
+        assertThat(input.path("metadataCommands")).hasSize(14);
+        assertThat(input.path("metadataCommands").get(0).path("operation").asText())
+                .isEqualTo("PUBLISH_DATA_SOURCE");
+        assertThat(input.path("metadataCommands").get(3).path("operation").asText())
+                .isEqualTo("PUBLISH_LINEAGE");
+        assertThat(input.path("metadataCommands").get(8).path("runStatus").asText())
+                .isEqualTo("FAILED");
+        assertThat(input.path("metadataCommands").get(9).path("dqcResultStatus").asText())
+                .isEqualTo("FAIL");
+        assertThat(input.path("metadataCommands").get(12).path("runStatus").asText())
+                .isEqualTo("SUCCEEDED");
+        assertThat(input.path("metadataCommands").get(13).path("dqcResultStatus").asText())
+                .isEqualTo("PASS");
+        assertThat(input.path("metadataCommands").get(13).path("taskRunObservationSequence").asLong())
+                .isEqualTo(6L);
+    }
+
+    @Test
+    void shouldBuildThreeIndependentFinanceSettlementScenariosAndProfitLossCase() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(completeAfterSaleTemplate()));
+        when(mapper.selectApprovalPolicy(162L)).thenReturn(new TemporalApprovalPolicyRecord()
+                .setTenantId(162L).setGovernanceUserId(227L).setStatus("ACTIVE"));
+        when(mapper.selectFirstEffectiveAgentRoleActor(162L, "finance")).thenReturn(228L);
+
+        JsonNode logistics = build(
+                RotatingBusinessScenarioInputFactory.LOGISTICS_SERVICE_SETTLEMENT_LIFECYCLE_SKILL);
+        JsonNode merchant = build(
+                RotatingBusinessScenarioInputFactory.MERCHANT_SERVICE_FEE_SETTLEMENT_LIFECYCLE_SKILL);
+        JsonNode advertising = build(
+                RotatingBusinessScenarioInputFactory.ADVERTISING_FEE_SETTLEMENT_LIFECYCLE_SKILL);
+        JsonNode profitLoss = build(
+                RotatingBusinessScenarioInputFactory.PROFIT_LOSS_IMPROVEMENT_LIFECYCLE_SKILL);
+
+        assertThat(logistics.path("settlement").path("settlementContext")
+                .path("channelCode").asText()).isEqualTo("LOGISTICS_WAREHOUSE_DISPATCH_PICKUP");
+        assertThat(merchant.path("settlement").path("settlementContext")
+                .path("feeAmountMinor").asLong()).isEqualTo(45_000L);
+        assertThat(advertising.path("settlement").path("settlementContext")
+                .path("channelCode").asText()).isEqualTo("PLATFORM_ADVERTISING");
+        assertThat(logistics.path("settlement").path("commands")).hasSize(9);
+        assertThat(merchant.path("settlement").path("makerIdentityCommand")
+                .path("sourceId").asText()).isEqualTo("228");
+        assertThat(advertising.path("settlement").path("checkerIdentityCommand")
+                .path("sourceId").asText()).isEqualTo("227");
+        assertThat(profitLoss.path("improvementTargets")
+                .path("problemOrderRateDirection").asText()).isEqualTo("DOWN");
+        assertThat(profitLoss.path("improvementTargets")
+                .path("confirmedRevenueDirection").asText()).isEqualTo("UP");
+        assertThat(profitLoss.path("operationsCommands")).hasSize(4);
+        assertThat(profitLoss.path("operationsCommands").get(0)
+                .path("occurredAt").asText()).isEqualTo("2026-07-28T16:00:00Z");
+        assertThat(profitLoss.path("operationsCommands").get(0)
+                .path("alert").path("sourceRef").asText()).startsWith("profit-loss:");
+    }
+
+    @Test
+    void shouldBuildMerchantRectificationOnlyFromEffectiveResponsibilityAndPaidCompensation() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(completeAfterSaleTemplate()));
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L,
+                RotatingBusinessScenarioInputFactory
+                        .CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL,
+                "ticket_terminal_readback")).thenReturn("""
+                {"ticketId":"ticket-cx-1","ticketStatus":"CLOSED","ticketVersion":5}
+                """);
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L,
+                RotatingBusinessScenarioInputFactory
+                        .CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL,
+                "ticket_responsibility_decision")).thenReturn("""
+                {"reviewId":"review-cx-1","ticketId":"ticket-cx-1","ticketStatus":"RESOLVED"}
+                """);
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L,
+                RotatingBusinessScenarioInputFactory
+                        .CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL,
+                "ticket_pay_compensation")).thenReturn("""
+                {"claimStatus":"PAID","compensationEntryId":"compensation-cx-1"}
+                """);
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L,
+                RotatingBusinessScenarioInputFactory
+                        .CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL,
+                "wait_consumer_journey")).thenReturn("""
+                {"outputs":{
+                  "consumer_principal":{"principalId":"principal-customer-1"}
+                }}
+                """);
+
+        JsonNode input = build(
+                RotatingBusinessScenarioInputFactory
+                        .MERCHANT_EXPERIENCE_RECTIFICATION_LIFECYCLE_SKILL);
+
+        assertThat(input.path("ticketId").asText()).isEqualTo("ticket-cx-1");
+        assertThat(input.path("merchantReference").path("merchantId").asText())
+                .isEqualTo("merchant-1");
+        assertThat(input.path("trigger").path("triggerType").asText())
+                .isEqualTo("MERCHANT_RESPONSIBILITY_EFFECTIVE");
+        assertThat(input.path("trigger").path("responsibilityReviewId").asText())
+                .isEqualTo("review-cx-1");
+        assertThat(input.path("trigger").path("compensationEntryId").asText())
+                .isEqualTo("compensation-cx-1");
+        assertThat(input.path("operationsCommands").get(0).path("alert")
+                .path("sourceRef").asText()).contains("merchant-1");
+        assertThat(input.path("ticketCommands")).hasSize(6);
+        assertThat(input.path("ticketCommands").get(0).path("operation").asText())
+                .isEqualTo("REOPEN_TICKET");
+        assertThat(input.path("ticketCommands").get(3).path("outcomeCode").asText())
+                .isEqualTo("RECTIFICATION_VERIFIED");
+        assertThat(input.path("ticketCommands").get(4).path("customerPrincipalId").asText())
+                .isEqualTo("principal-customer-1");
+    }
+
+    @Test
+    void shouldNotBuildMerchantRectificationBeforeResponsibilityCompensationIsPaid() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
+                .thenReturn(JsonUtils.toJsonString(completeAfterSaleTemplate()));
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L,
+                RotatingBusinessScenarioInputFactory
+                        .CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL,
+                "ticket_terminal_readback")).thenReturn("""
+                {"ticketId":"ticket-cx-1","ticketStatus":"CLOSED","ticketVersion":5}
+                """);
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L,
+                RotatingBusinessScenarioInputFactory
+                        .CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL,
+                "ticket_responsibility_decision")).thenReturn("{\"reviewId\":\"review-cx-1\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L,
+                RotatingBusinessScenarioInputFactory
+                        .CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL,
+                "ticket_pay_compensation")).thenReturn("{\"claimStatus\":\"APPROVED\"}");
+
+        assertThat(factory.build(
+                162L,
+                RotatingBusinessScenarioInputFactory
+                        .MERCHANT_EXPERIENCE_RECTIFICATION_LIFECYCLE_SKILL,
+                "2026-07-29", "temporal-run-1")).isEmpty();
     }
 
     private JsonNode build(String skillId) {

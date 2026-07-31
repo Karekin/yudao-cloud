@@ -25,6 +25,12 @@ final class AgentApprovalR3Policy {
         if (action.equals("category.daily-operations")) {
             return List.of("risk", "operations-lead");
         }
+        if (action.equals("customer-experience.ticket-responsibility")) {
+            return List.of("customer-service", "operations-lead");
+        }
+        if (action.equals("merchant-experience.rectification")) {
+            return List.of("customer-service", "operations-lead");
+        }
         if (startsWithAny(action, "buyer.", "purchase.", "procurement.", "replenishment.",
                 "supply-planning.", "supplier.")) {
             return List.of("buyer", "finance");
@@ -41,11 +47,12 @@ final class AgentApprovalR3Policy {
         if (startsWithAny(action, "catalog.", "product.", "listing.", "pricing.", "merchandising.")) {
             return List.of("risk", "finance");
         }
-        if (startsWithAny(action, "merchant.", "merchant-operations.", "seller.", "shop.")) {
+        if (startsWithAny(action, "merchant.", "merchant-operations.", "merchant-experience.",
+                "seller.", "shop.")) {
             return List.of("risk", "legal");
         }
-        if (startsWithAny(action, "customer-service.", "after-sale.", "aftersale.", "refund.",
-                "compensation.", "payment.refund", "trade.refund")) {
+        if (startsWithAny(action, "customer-experience.", "customer-service.", "after-sale.",
+                "aftersale.", "refund.", "compensation.", "payment.refund", "trade.refund")) {
             return List.of("customer-service", "finance");
         }
         if (action.equals("quality.inspection-recall")

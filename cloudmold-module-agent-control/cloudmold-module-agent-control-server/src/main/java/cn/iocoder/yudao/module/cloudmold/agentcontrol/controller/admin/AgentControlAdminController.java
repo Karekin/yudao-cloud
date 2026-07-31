@@ -78,6 +78,13 @@ public class AgentControlAdminController {
         return success(queryApi.getApprovalDetail(approvalId));
     }
 
+    @GetMapping("/approval-board-stats")
+    @Operation(summary = "查询 AI 工作流审批门禁分层统计")
+    @PreAuthorize("@ss.hasPermission('cloudmold:agent-control:query')")
+    public CommonResult<AgentApprovalBoardStatsView> getApprovalBoardStats() {
+        return success(queryApi.getApprovalBoardStats());
+    }
+
     @GetMapping("/business-results/{resultId}")
     @PreAuthorize("@ss.hasPermission('cloudmold:agent-control:query')")
     public CommonResult<AgentControlResult> getBusinessResult(@PathVariable String resultId) {

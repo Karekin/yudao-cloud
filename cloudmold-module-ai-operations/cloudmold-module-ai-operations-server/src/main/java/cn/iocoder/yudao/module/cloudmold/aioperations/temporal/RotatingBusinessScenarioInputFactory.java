@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Iterator;
@@ -75,6 +76,30 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.mes.production-execution-lifecycle.v1";
     static final String ASSORTMENT_PLANNING_LIFECYCLE_SKILL =
             "skill.cloudmold.catalog.assortment-planning-lifecycle.v1";
+    static final String PRODUCT_MANAGEMENT_LIFECYCLE_SKILL =
+            "skill.cloudmold.commerce.product-management-lifecycle.v1";
+    static final String WAREHOUSE_ADMISSION_LIFECYCLE_SKILL =
+            "skill.cloudmold.supply.warehouse-admission-lifecycle.v1";
+    static final String CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL =
+            "skill.cloudmold.customer-experience.ticket-responsibility-lifecycle.v1";
+    static final String MERCHANT_EXPERIENCE_RECTIFICATION_LIFECYCLE_SKILL =
+            "skill.cloudmold.merchant-experience.rectification-lifecycle.v1";
+    static final String UNFULFILLABLE_ORDER_COMPENSATION_LIFECYCLE_SKILL =
+            "skill.cloudmold.customer-experience.unfulfillable-order-compensation-lifecycle.v1";
+    static final String LOGISTICS_SERVICE_SETTLEMENT_LIFECYCLE_SKILL =
+            "skill.cloudmold.finance.logistics-service-settlement-lifecycle.v1";
+    static final String MERCHANT_SERVICE_FEE_SETTLEMENT_LIFECYCLE_SKILL =
+            "skill.cloudmold.finance.merchant-service-fee-settlement-lifecycle.v1";
+    static final String ADVERTISING_FEE_SETTLEMENT_LIFECYCLE_SKILL =
+            "skill.cloudmold.finance.advertising-fee-settlement-lifecycle.v1";
+    static final String PROFIT_LOSS_IMPROVEMENT_LIFECYCLE_SKILL =
+            "skill.cloudmold.finance.profit-loss-improvement-lifecycle.v1";
+    static final String RISK_DISPUTE_RESOLUTION_LIFECYCLE_SKILL =
+            "skill.cloudmold.risk.dispute-resolution-lifecycle.v1";
+    static final String DATA_QUALITY_RECOVERY_LIFECYCLE_SKILL =
+            "skill.cloudmold.data-ai-operations.data-quality-recovery-lifecycle.v1";
+    static final String PRICING_REPRICE_LIFECYCLE_SKILL =
+            "skill.cloudmold.pricing.reprice-lifecycle.v1";
     static final String READY_MASTER_SKILL = "skill.cloudmold.commerce.reuse-ready-master.v1";
     static final String LEGACY_PROJECTION_SKILL = "skill.cloudmold.commerce.legacy-projection-plan.v1";
     private static final String ZERO_UUID = "00000000-0000-0000-0000-000000000000";
@@ -106,6 +131,8 @@ class RotatingBusinessScenarioInputFactory {
         String newPrefix = scenarioCode + date.format(DateTimeFormatter.ofPattern("yyMMdd"))
                 + String.format("%03d", Math.floorMod(tenantId, 1000)) + "-" + occurrenceToken;
         String occurredAt = date + "T00:00:00Z";
+        String businessOccurredAt = date.atStartOfDay(ZoneOffset.ofHours(8))
+                .toInstant().toString();
         String oldProductToken = productToken(template);
         String newProductToken = productToken(newPrefix);
         ObjectNode rotated = (ObjectNode) rotate(template, oldPrefix, newPrefix,
@@ -147,6 +174,19 @@ class RotatingBusinessScenarioInputFactory {
                     newPrefix, occurredAt, consumer, operator.path("principalId").asText());
         } else if (PRODUCT_TO_LISTING_SKILL.equals(targetSkillId)) {
             output = productToListing(rotated, newPrefix);
+        } else if (PRICING_REPRICE_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            JsonNode listing = result(tenantId, PRODUCT_TO_LISTING_SKILL, "listing_publish");
+            JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
+            if (!"PUBLISHED".equals(listing.path("currentStatus").asText())
+                    || listing.path("listingId").asText().isBlank()
+                    || listing.path("aggregateVersion").asLong() <= 0
+                    || !listing.path("offers").isArray()
+                    || listing.path("offers").isEmpty()
+                    || principal.path("principalId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            output = pricingRepriceLifecycle(newPrefix, businessOccurredAt,
+                    principal.path("principalId").asText(), listing);
         } else if (READY_MASTER_SKILL.equals(targetSkillId)) {
             output = reusableMaster.get();
         } else if (LEGACY_PROJECTION_SKILL.equals(targetSkillId)) {
@@ -285,6 +325,37 @@ class RotatingBusinessScenarioInputFactory {
             }
             output = financeCloseLifecycle(newPrefix, occurredAt,
                     financeMakerUserId, financeCheckerUserId);
+        } else if (LOGISTICS_SERVICE_SETTLEMENT_LIFECYCLE_SKILL.equals(targetSkillId)
+                || MERCHANT_SERVICE_FEE_SETTLEMENT_LIFECYCLE_SKILL.equals(targetSkillId)
+                || ADVERTISING_FEE_SETTLEMENT_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            TemporalApprovalPolicyRecord approvalPolicy = mapper.selectApprovalPolicy(tenantId);
+            Long financeMakerUserId = mapper.selectFirstEffectiveAgentRoleActor(tenantId, "finance");
+            Long financeCheckerUserId = approvalPolicy == null
+                    ? null : approvalPolicy.getGovernanceUserId();
+            if (financeMakerUserId == null || financeMakerUserId <= 0
+                    || financeCheckerUserId == null || financeCheckerUserId <= 0
+                    || financeMakerUserId.equals(financeCheckerUserId)) {
+                return Optional.empty();
+            }
+            if (LOGISTICS_SERVICE_SETTLEMENT_LIFECYCLE_SKILL.equals(targetSkillId)) {
+                output = financeSettlementParentInput(newPrefix,
+                        financeSettlementLifecycle(newPrefix, occurredAt,
+                        financeMakerUserId, financeCheckerUserId,
+                        "LOGISTICS_SERVICE", "LOGISTICS_WAREHOUSE_DISPATCH_PICKUP",
+                        240_000L, 0L, 0L, 10_000L));
+            } else if (MERCHANT_SERVICE_FEE_SETTLEMENT_LIFECYCLE_SKILL.equals(targetSkillId)) {
+                output = financeSettlementParentInput(newPrefix,
+                        financeSettlementLifecycle(newPrefix, occurredAt,
+                        financeMakerUserId, financeCheckerUserId,
+                        "MERCHANT_SERVICE_FEE", "MERCHANT_TECHNICAL_SERVICE",
+                        900_000L, 80_000L, 45_000L, 5_000L));
+            } else {
+                output = financeSettlementParentInput(newPrefix,
+                        financeSettlementLifecycle(newPrefix, occurredAt,
+                        financeMakerUserId, financeCheckerUserId,
+                        "ADVERTISING_FEE", "PLATFORM_ADVERTISING",
+                        300_000L, 15_000L, 0L, 5_000L));
+            }
         } else if (QUALITY_INSPECTION_RECALL_LIFECYCLE_SKILL.equals(targetSkillId)) {
             JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
             JsonNode warehouse = result(tenantId, READY_MASTER_SKILL, "warehouse_network");
@@ -383,6 +454,165 @@ class RotatingBusinessScenarioInputFactory {
             }
             output = assortmentPlanningLifecycle(
                     newPrefix, date, occurredAt, operator.path("principalId").asText());
+        } else if (PRODUCT_MANAGEMENT_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            if (seedProperties.getSyntheticConsumerMemberUserId() <= 0
+                    || seedProperties.getOperatorUserId() <= 0) {
+                return Optional.empty();
+            }
+            JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
+            JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
+            JsonNode warehouse = result(tenantId, READY_MASTER_SKILL, "warehouse_network");
+            JsonNode catalog = result(tenantId, CATALOG_MATRIX_SKILL, "define_1");
+            if (operator.path("principalId").asText().isBlank()
+                    || merchant.path("merchantId").asText().isBlank()
+                    || warehouse.path("warehouseId").asText().isBlank()
+                    || warehouse.path("locationId").asText().isBlank()
+                    || catalog.path("canonicalSkuId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            ObjectNode mysteryPurchase = consumerJourney(rotated, newPrefix, occurredAt,
+                    seedProperties.getSyntheticConsumerMemberUserId());
+            output = productManagementLifecycle(
+                    rotated, newPrefix, date, occurredAt, mysteryPurchase,
+                    operator.path("principalId").asText(),
+                    merchant.path("merchantId").asText(),
+                    warehouse.path("warehouseId").asText(),
+                    warehouse.path("locationId").asText(),
+                    catalog.path("canonicalSkuId").asText(),
+                    seedProperties.getOperatorUserId());
+        } else if (WAREHOUSE_ADMISSION_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            JsonNode listing = result(
+                    tenantId, PRODUCT_MANAGEMENT_LIFECYCLE_SKILL, "wait_platform_store_listing");
+            JsonNode quality = result(
+                    tenantId, PRODUCT_MANAGEMENT_LIFECYCLE_SKILL, "wait_mystery_buyer_quality");
+            String canonicalSkuId = quality.path("outputs").path("verify_quality_badge")
+                    .path("canonicalSkuId").asText();
+            String qualityStatus = quality.path("outputs").path("verify_quality_badge")
+                    .path("status").asText();
+            String merchantId = listing.path("outputs").path("wait_master").path("outputs")
+                    .path("merchant_approve").path("merchantId").asText();
+            String shopId = listing.path("outputs").path("wait_master").path("outputs")
+                    .path("merchant_approve").path("shopId").asText();
+            String principalId = listing.path("outputs").path("wait_master").path("outputs")
+                    .path("principal").path("principalId").asText();
+            String warehouseId = listing.path("outputs").path("wait_master").path("outputs")
+                    .path("warehouse_network").path("warehouseId").asText();
+            String listingId = listing.path("outputs").path("listing_create")
+                    .path("listingId").asText();
+            if (!"VERIFIED".equals(qualityStatus)
+                    || canonicalSkuId.isBlank() || merchantId.isBlank() || shopId.isBlank()
+                    || principalId.isBlank() || warehouseId.isBlank() || listingId.isBlank()) {
+                return Optional.empty();
+            }
+            output = warehouseAdmissionLifecycle(
+                    newPrefix, occurredAt, canonicalSkuId, listingId,
+                    merchantId, shopId, principalId, warehouseId);
+        } else if (CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL
+                .equals(targetSkillId)) {
+            if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
+                return Optional.empty();
+            }
+            JsonNode agent = result(tenantId, READY_MASTER_SKILL, "principal");
+            JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
+            if (agent.path("principalId").asText().isBlank()
+                    || merchant.path("merchantId").asText().isBlank()
+                    || merchant.path("shopId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            ObjectNode consumer = consumerJourney(
+                    rotated, newPrefix, businessOccurredAt,
+                    seedProperties.getSyntheticConsumerMemberUserId());
+            if (!hydrateConsumerJourney(tenantId, consumer)) {
+                return Optional.empty();
+            }
+            output = customerExperienceTicketResponsibilityLifecycle(
+                    newPrefix, businessOccurredAt, consumer,
+                    agent.path("principalId").asText(),
+                    merchant.path("merchantId").asText(),
+                    merchant.path("shopId").asText());
+        } else if (MERCHANT_EXPERIENCE_RECTIFICATION_LIFECYCLE_SKILL
+                .equals(targetSkillId)) {
+            JsonNode ticket = result(
+                    tenantId, CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL,
+                    "ticket_terminal_readback");
+            JsonNode decision = result(
+                    tenantId, CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL,
+                    "ticket_responsibility_decision");
+            JsonNode compensation = result(
+                    tenantId, CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL,
+                    "ticket_pay_compensation");
+            JsonNode consumerJourney = result(
+                    tenantId, CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL,
+                    "wait_consumer_journey");
+            JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
+            JsonNode agent = result(tenantId, READY_MASTER_SKILL, "principal");
+            String ticketId = ticket.path("ticketId").asText();
+            String customerPrincipalId = consumerJourney.path("outputs")
+                    .path("consumer_principal").path("principalId").asText();
+            if (!"CLOSED".equals(ticket.path("ticketStatus").asText())
+                    || ticket.path("ticketVersion").asLong() != 5L
+                    || decision.path("reviewId").asText().isBlank()
+                    || !"PAID".equals(compensation.path("claimStatus").asText())
+                    || compensation.path("compensationEntryId").asText().isBlank()
+                    || ticketId.isBlank() || customerPrincipalId.isBlank()
+                    || merchant.path("merchantId").asText().isBlank()
+                    || merchant.path("shopId").asText().isBlank()
+                    || agent.path("principalId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            output = merchantExperienceRectificationLifecycle(
+                    newPrefix, businessOccurredAt, ticketId, customerPrincipalId,
+                    agent.path("principalId").asText(),
+                    merchant.path("merchantId").asText(),
+                    merchant.path("shopId").asText(),
+                    decision.path("reviewId").asText(),
+                    compensation.path("compensationEntryId").asText());
+        } else if (UNFULFILLABLE_ORDER_COMPENSATION_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
+                return Optional.empty();
+            }
+            JsonNode agent = result(tenantId, READY_MASTER_SKILL, "principal");
+            if (agent.path("principalId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            ObjectNode consumer = consumerJourney(
+                    rotated, newPrefix, businessOccurredAt,
+                    seedProperties.getSyntheticConsumerMemberUserId());
+            if (!hydrateConsumerJourney(tenantId, consumer)) {
+                return Optional.empty();
+            }
+            output = unfulfillableOrderCompensationLifecycle(
+                    newPrefix, businessOccurredAt, consumer, agent.path("principalId").asText());
+        } else if (PROFIT_LOSS_IMPROVEMENT_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
+            if (operator.path("principalId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            output = profitLossImprovementLifecycle(
+                    newPrefix, businessOccurredAt, operator.path("principalId").asText());
+        } else if (RISK_DISPUTE_RESOLUTION_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
+                return Optional.empty();
+            }
+            JsonNode reviewer = result(tenantId, READY_MASTER_SKILL, "principal");
+            if (reviewer.path("principalId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            ObjectNode consumer = consumerJourney(
+                    rotated, newPrefix, businessOccurredAt,
+                    seedProperties.getSyntheticConsumerMemberUserId());
+            if (!hydrateConsumerJourney(tenantId, consumer)) {
+                return Optional.empty();
+            }
+            output = riskDisputeResolutionLifecycle(
+                    newPrefix, businessOccurredAt, consumer, reviewer.path("principalId").asText());
+        } else if (DATA_QUALITY_RECOVERY_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
+            if (operator.path("principalId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            output = dataQualityRecoveryLifecycle(
+                    newPrefix, businessOccurredAt, operator.path("principalId").asText());
         } else if (MES_PRODUCTION_EXECUTION_LIFECYCLE_SKILL.equals(targetSkillId)) {
             TemporalApprovalPolicyRecord approvalPolicy = mapper.selectApprovalPolicy(tenantId);
             long operatorUserId = seedProperties.getOperatorUserId();
@@ -433,6 +663,7 @@ class RotatingBusinessScenarioInputFactory {
         return switch (skillId) {
             case FULL_CHAIN_SKILL -> "f";
             case PRODUCT_TO_LISTING_SKILL -> "p";
+            case PRICING_REPRICE_LIFECYCLE_SKILL -> "pr";
             case AUTONOMOUS_DAY_SKILL -> "d";
             case CATEGORY_DAILY_OPERATIONS_SKILL -> "y";
             case CATALOG_MATRIX_SKILL -> "c";
@@ -456,6 +687,17 @@ class RotatingBusinessScenarioInputFactory {
             case PARTNER_MARKETING_KOL_MEDIA_OPERATIONS_SKILL -> "o";
             case MES_PRODUCTION_EXECUTION_LIFECYCLE_SKILL -> "z";
             case ASSORTMENT_PLANNING_LIFECYCLE_SKILL -> "aa";
+            case PRODUCT_MANAGEMENT_LIFECYCLE_SKILL -> "pm";
+            case WAREHOUSE_ADMISSION_LIFECYCLE_SKILL -> "wa";
+            case CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL -> "cx";
+            case MERCHANT_EXPERIENCE_RECTIFICATION_LIFECYCLE_SKILL -> "mr";
+            case UNFULFILLABLE_ORDER_COMPENSATION_LIFECYCLE_SKILL -> "uc";
+            case LOGISTICS_SERVICE_SETTLEMENT_LIFECYCLE_SKILL -> "ls";
+            case MERCHANT_SERVICE_FEE_SETTLEMENT_LIFECYCLE_SKILL -> "ms";
+            case ADVERTISING_FEE_SETTLEMENT_LIFECYCLE_SKILL -> "as";
+            case PROFIT_LOSS_IMPROVEMENT_LIFECYCLE_SKILL -> "pl";
+            case RISK_DISPUTE_RESOLUTION_LIFECYCLE_SKILL -> "rd";
+            case DATA_QUALITY_RECOVERY_LIFECYCLE_SKILL -> "dq";
             case READY_MASTER_SKILL -> "m";
             case LEGACY_PROJECTION_SKILL -> "l";
             default -> throw new IllegalArgumentException("Unsupported rotating scenario Skill: " + skillId);
@@ -947,6 +1189,11 @@ class RotatingBusinessScenarioInputFactory {
             listingCommands.add(sourceCommands.get(index).deepCopy());
         }
         if (!listingCommands.isEmpty() && listingCommands.get(0) instanceof ObjectNode createCommand) {
+            String publishStartAt = createCommand.path("publishStartAt").asText();
+            if (!publishStartAt.isBlank()) {
+                createCommand.put("publishStartAt", LocalDate.parse(publishStartAt.substring(0, 10))
+                        .atStartOfDay(ZoneOffset.ofHours(8)).toInstant().toString());
+            }
             JsonNode sourceOffer = createCommand.path("offers").path(0);
             if (sourceOffer.isObject()) {
                 ArrayNode offers = JsonNodeFactory.instance.arrayNode();
@@ -972,6 +1219,40 @@ class RotatingBusinessScenarioInputFactory {
                 .put("occurredAt", fullChain.path("catalog").path("definitions").path(0)
                         .path("occurredAt").asText());
         output.putObject("readback").put("listingId", ZERO_UUID);
+        return output;
+    }
+
+    private static ObjectNode pricingRepriceLifecycle(String prefix, String occurredAt, String principalId,
+                                                       JsonNode publishedListing) {
+        String listingId = publishedListing.path("listingId").asText();
+        long expectedVersion = publishedListing.path("aggregateVersion").asLong();
+        String correlationId = stableUuid(prefix + ":pricing-reprice");
+        ObjectNode output = JsonNodeFactory.instance.objectNode();
+        ObjectNode command = output.putObject("reprice")
+                .put("operation", "REPRICE")
+                .put("idempotencyKey", prefix + "-reprice")
+                .put("runId", prefix + "-pricing")
+                .put("listingId", listingId)
+                .put("expectedVersion", expectedVersion)
+                .put("publisherRef", principalId)
+                .put("reason", "daily controlled pricing adjustment with immutable listing revision")
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt);
+        ArrayNode offers = command.putArray("offers");
+        int index = 0;
+        for (JsonNode offer : publishedListing.path("offers")) {
+            offers.addObject().put("canonicalSkuId", offer.path("canonicalSkuId").asText())
+                    .put("priceMinor", offer.path("priceMinor").asLong() + (index++ == 0 ? 100L : 0L))
+                    .put("currencyCode", offer.path("currencyCode").asText("CNY"))
+                    .put("enabled", true);
+        }
+        output.putObject("receipt").put("idempotencyKey", prefix + "-reprice-receipt")
+                .put("listingId", listingId).put("expectedVersion", expectedVersion + 1)
+                .put("outcome", "CONFIRMED_PUBLISHED").put("channelListingId", "internal-channel:" + prefix)
+                .put("channelStatus", "ONLINE").put("confirmedAt", occurredAt)
+                .put("evidenceRef", "synthetic:yshopping-internal:reprice:" + prefix)
+                .put("correlationId", correlationId).put("occurredAt", occurredAt);
+        output.putObject("readback").put("listingId", listingId);
         return output;
     }
 
@@ -1055,6 +1336,561 @@ class RotatingBusinessScenarioInputFactory {
         output.set("campaign", promotionCampaign(prefix, occurredAt, operatorPrincipalId));
         output.set("consumer", consumer);
         return output;
+    }
+
+    private static ObjectNode productManagementLifecycle(
+            ObjectNode fullChain, String prefix, LocalDate date, String occurredAt,
+            ObjectNode mysteryPurchase, String operatorPrincipalId, String merchantId,
+            String warehouseId, String locationId, String canonicalSkuId,
+            long inspectorUserId) {
+        ObjectNode output = JsonNodeFactory.instance.objectNode();
+        output.putObject("runIds")
+                .put("assortment", prefix + "-assortment")
+                .put("product", prefix + "-product")
+                .put("mysteryPurchase", prefix + "-mystery-purchase")
+                .put("quality", prefix + "-mystery-quality")
+                .put("campaign", prefix + "-new-product-campaign");
+        output.put("operatorPrincipalId", operatorPrincipalId);
+        output.putObject("managementDecision")
+                .put("supplyPoolScope", "PLATFORM_ALL_ELIGIBLE_SUPPLY")
+                .put("targetStoreType", "PLATFORM_FLAGSHIP")
+                .put("qualityGate", "MYSTERY_BUYER_VERIFIED")
+                .put("incubationStrategy", "QUALITY_FIRST_NEW_PRODUCT")
+                .putArray("qualityDimensions")
+                .add("PATTERN_REVIEW")
+                .add("PRICE_VERIFICATION")
+                .add("CONTENT_SHOOTING")
+                .add("MODEL_FITTING");
+        addRoleOperationsCase(output, prefix, occurredAt, operatorPrincipalId,
+                "AI_PRODUCT_MANAGEMENT_", "product-management:", "product_management_",
+                "PRODUCT_MANAGEMENT", "NEW_PRODUCT_END_TO_END",
+                "PRODUCT_PLAN_DISPATCHED", "PRODUCT_OPERATOR_ASSIGNED",
+                "PRODUCT_LAUNCH_AND_QUALITY_VERIFIED");
+        output.set("assortment",
+                assortmentPlanningLifecycle(prefix + "-assortment", date, occurredAt,
+                        operatorPrincipalId));
+        output.set("product", productToListing(fullChain, prefix));
+        output.set("mysteryPurchase", mysteryPurchase);
+        output.set("quality", mysteryBuyerSampleVerification(
+                prefix, occurredAt, merchantId, warehouseId, locationId,
+                canonicalSkuId, operatorPrincipalId, inspectorUserId));
+        ObjectNode campaign = promotionCampaign(
+                prefix + "-new-product", occurredAt, operatorPrincipalId);
+        campaign.withObject("/campaignCommand")
+                .put("campaignName", "质检通过新品首发与爆款培育 " + prefix.toUpperCase())
+                .put("sourceType", "QUALITY_VERIFIED_NEW_PRODUCT")
+                .put("sourceId", "product-management:" + prefix);
+        output.set("campaign", campaign);
+        return output;
+    }
+
+    private static ObjectNode warehouseAdmissionLifecycle(
+            String prefix, String occurredAt, String canonicalSkuId, String listingId,
+            String merchantId, String shopId, String principalId, String warehouseId) {
+        ObjectNode output = JsonNodeFactory.instance.objectNode();
+        output.put("canonicalSkuId", canonicalSkuId);
+        output.putObject("runIds")
+                .put("merchant", prefix + "-bd-merchant")
+                .put("replenishment", prefix + "-platform-warehouse")
+                .put("traffic", prefix + "-quality-traffic");
+        output.putObject("admissionDecision")
+                .put("decision", "APPROVE")
+                .put("qualityPolicy", "VERIFIED_ONLY")
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("listingId", listingId)
+                .put("targetWarehouseId", warehouseId)
+                .put("trafficPolicy", "QUALITY_VERIFIED_PLATFORM_WAREHOUSE");
+        addRoleOperationsCase(output, prefix, occurredAt, principalId,
+                "AI_WAREHOUSE_ADMISSION_", "warehouse-admission:", "warehouse_admission_",
+                "WAREHOUSE_ADMISSION", "QUALITY_FIRST_INBOUND",
+                "WAREHOUSE_ADMISSION_READY", "SUPPLY_CHAIN_OPERATOR_ASSIGNED",
+                "INBOUND_FULFILLMENT_AND_TRAFFIC_VERIFIED");
+        output.set("merchant",
+                merchantOnboarding(prefix + "-bd", occurredAt, principalId));
+        output.set("replenishment", replenishmentLifecycle(
+                prefix + "-warehouse", occurredAt,
+                merchantId, shopId, principalId, canonicalSkuId, warehouseId));
+        ObjectNode traffic = promotionCampaign(
+                prefix + "-quality-traffic", occurredAt, principalId);
+        traffic.withObject("/campaignCommand")
+                .put("campaignName", "质检通过平台仓商品站内流量承接 " + prefix.toUpperCase())
+                .put("sourceType", "QUALITY_VERIFIED_WAREHOUSE_ADMISSION")
+                .put("sourceId", "listing:" + listingId);
+        output.set("traffic", traffic);
+        return output;
+    }
+
+    private static ObjectNode customerExperienceTicketResponsibilityLifecycle(
+            String prefix, String occurredAt, ObjectNode consumer,
+            String agentPrincipalId, String merchantId, String shopId) {
+        String runId = stableUuid(prefix + ":experience-ticket-run");
+        String correlationId = stableUuid(prefix + ":experience-ticket-correlation");
+        ObjectNode output = JsonNodeFactory.instance.objectNode();
+        output.putObject("runIds").put("consumer", prefix + "-consumer-experience");
+        output.putObject("responsibilityDecision")
+                .put("responsibleParty", "MERCHANT")
+                .put("outcomeCode", "MERCHANT_RESPONSIBLE")
+                .put("reasonCode", "PRODUCT_DESCRIPTION_MISMATCH")
+                .put("merchantId", merchantId)
+                .put("shopId", shopId)
+                .put("compensationPolicy", "SERVICE_COMPENSATION");
+        addRoleOperationsCase(output, prefix, occurredAt, agentPrincipalId,
+                "AI_CUSTOMER_EXPERIENCE_", "customer-experience:", "customer_experience_",
+                "CUSTOMER_EXPERIENCE", "TICKET_RESPONSIBILITY",
+                "EXPERIENCE_COMPLAINT_RECEIVED", "EXPERIENCE_OPERATOR_ASSIGNED",
+                "RESPONSIBILITY_AND_COMPENSATION_VERIFIED");
+        output.set("consumer", consumer);
+
+        ArrayNode commands = output.putArray("ticketCommands");
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "CREATE_TICKET")
+                .put("ticketNo", "AI-CX-" + prefix.toUpperCase(Locale.ROOT))
+                .put("customerPrincipalId", "pending-consumer:" + prefix)
+                .put("channelCode", "APP")
+                .put("priority", "HIGH")
+                .put("categoryCode", "EXPERIENCE_COMPLAINT")
+                .put("slaPolicyCode", "CONSUMER_EXPERIENCE_PRIORITY")
+                .put("slaPolicyVersion", 1)
+                .put("resolutionDeadlineAt",
+                        Instant.parse(occurredAt).plus(24, ChronoUnit.HOURS).toString())
+                .put("fcrWindowHours", 72));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "LINK_REFERENCE")
+                .put("ticketId", ZERO_UUID)
+                .put("referenceSourceSystem", "cloudmold-order")
+                .put("referenceType", "ORDER")
+                .put("referenceId", ZERO_UUID));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "RECORD_MESSAGE")
+                .put("ticketId", ZERO_UUID)
+                .put("direction", "INBOUND")
+                .put("senderType", "CUSTOMER")
+                .put("senderPrincipalId", "pending-consumer:" + prefix)
+                .put("messageType", "TEXT")
+                .put("contentToken", "restricted:experience_complaint_" + prefix));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "ASSIGN_AGENT")
+                .put("ticketId", ZERO_UUID)
+                .put("assignedAgentPrincipalId", agentPrincipalId));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "START_PROCESSING")
+                .put("ticketId", ZERO_UUID));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "RESOLVE_TICKET")
+                .put("ticketId", ZERO_UUID));
+        commands.add(customerServiceCommand(
+                        prefix, runId, occurredAt, correlationId, "RECORD_QUALITY_REVIEW")
+                .put("ticketId", ZERO_UUID)
+                .put("reviewerPrincipalId", agentPrincipalId)
+                .put("scoreBasisPoints", 7200)
+                .put("outcomeCode", "MERCHANT_RESPONSIBLE")
+                .put("reasonCode", "PRODUCT_DESCRIPTION_MISMATCH"));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "REQUEST_CLAIM")
+                .put("ticketId", ZERO_UUID)
+                .put("claimCode", "CX-" + prefix.toUpperCase(Locale.ROOT))
+                .put("claimType", "SERVICE_COMPENSATION")
+                .put("requestedAmountMinor", 5000)
+                .put("currencyCode", "CNY")
+                .put("reasonCode", "MERCHANT_EXPERIENCE_GAP"));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "APPROVE_CLAIM")
+                .put("claimId", ZERO_UUID)
+                .put("approvedAmountMinor", 3000));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "PAY_COMPENSATION")
+                .put("claimId", ZERO_UUID));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "CLOSE_TICKET")
+                .put("ticketId", ZERO_UUID));
+        return output;
+    }
+
+    private static ObjectNode merchantExperienceRectificationLifecycle(
+            String prefix, String occurredAt, String ticketId, String customerPrincipalId,
+            String agentPrincipalId, String merchantId, String shopId,
+            String responsibilityReviewId, String compensationEntryId) {
+        String runId = stableUuid(prefix + ":merchant-rectification-run");
+        String correlationId = stableUuid(prefix + ":merchant-rectification-correlation");
+        ObjectNode output = JsonNodeFactory.instance.objectNode();
+        output.put("ticketId", ticketId);
+        output.putObject("merchantReference")
+                .put("merchantId", merchantId)
+                .put("shopId", shopId);
+        output.putObject("trigger")
+                .put("triggerType", "MERCHANT_RESPONSIBILITY_EFFECTIVE")
+                .put("responsibilityReviewId", responsibilityReviewId)
+                .put("compensationEntryId", compensationEntryId)
+                .put("merchantId", merchantId)
+                .put("ticketId", ticketId);
+        addRoleOperationsCase(output, prefix, occurredAt, agentPrincipalId,
+                "AI_MERCHANT_RECTIFICATION_",
+                "merchant-experience:" + merchantId + ":",
+                "merchant_rectification_",
+                "MERCHANT_EXPERIENCE", "RESPONSIBILITY_RECTIFICATION",
+                "MERCHANT_RECTIFICATION_TRIGGERED", "MERCHANT_EXPERIENCE_OPERATOR_ASSIGNED",
+                "CONSUMER_EXPERIENCE_RECOVERY_VERIFIED");
+
+        ArrayNode commands = output.putArray("ticketCommands");
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "REOPEN_TICKET")
+                .put("ticketId", ticketId));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "RECORD_MESSAGE")
+                .put("ticketId", ticketId)
+                .put("direction", "OUTBOUND")
+                .put("senderType", "SYSTEM")
+                .put("messageType", "TEXT")
+                .put("contentToken", "restricted:merchant_rectification_progress_" + prefix));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "RESOLVE_TICKET")
+                .put("ticketId", ticketId));
+        commands.add(customerServiceCommand(
+                        prefix, runId, occurredAt, correlationId, "RECORD_QUALITY_REVIEW")
+                .put("ticketId", ticketId)
+                .put("reviewerPrincipalId", agentPrincipalId)
+                .put("scoreBasisPoints", 9600)
+                .put("outcomeCode", "RECTIFICATION_VERIFIED")
+                .put("reasonCode", "MERCHANT_ACTION_COMPLETED"));
+        commands.add(customerServiceCommand(
+                        prefix, runId, occurredAt, correlationId, "RECORD_BUYER_FEEDBACK")
+                .put("ticketId", ticketId)
+                .put("customerPrincipalId", customerPrincipalId)
+                .put("touchpointCode", "TICKET_RESOLUTION")
+                .put("sentimentCode", "SATISFIED")
+                .put("commentToken", "restricted:experience_recovery_satisfied_" + prefix));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "CLOSE_TICKET")
+                .put("ticketId", ticketId));
+        return output;
+    }
+
+    private static ObjectNode unfulfillableOrderCompensationLifecycle(
+            String prefix, String occurredAt, ObjectNode consumer, String agentPrincipalId) {
+        String runId = stableUuid(prefix + ":unfulfillable-compensation-run");
+        String correlationId = stableUuid(prefix + ":unfulfillable-compensation-correlation");
+        ObjectNode output = JsonNodeFactory.instance.objectNode();
+        output.putObject("runIds")
+                .put("orderCancellation", prefix + "-unfulfillable-cancellation");
+        output.putObject("compensationPolicy")
+                .put("trigger", "PAID_UNSHIPPED_ORDER_CANNOT_FULFILL")
+                .put("refundPolicy", "INSTANT_FULL_REFUND_AND_SHIPMENT_INTERCEPT")
+                .put("compensationType", "SERVICE_COMPENSATION")
+                .put("requestedAmountMinor", 5_000L)
+                .put("approvedAmountMinor", 5_000L)
+                .put("currencyCode", "CNY");
+        output.set("orderCancellation",
+                orderCancellationOperations(prefix + "-loss", occurredAt, consumer, agentPrincipalId));
+        addRoleOperationsCase(output, prefix, occurredAt, agentPrincipalId,
+                "AI_UNFULFILLABLE_COMPENSATION_", "unfulfillable-order:",
+                "unfulfillable_compensation_", "CUSTOMER_EXPERIENCE",
+                "UNFULFILLABLE_ORDER_COMPENSATION",
+                "UNFULFILLABLE_ORDER_CONFIRMED", "CUSTOMER_COMPENSATION_OPERATOR_ASSIGNED",
+                "REFUND_INTERCEPT_AND_COMPENSATION_VERIFIED");
+
+        ArrayNode commands = output.putArray("ticketCommands");
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "CREATE_TICKET")
+                .put("ticketNo", "AI-UC-" + prefix.toUpperCase(Locale.ROOT))
+                .put("customerPrincipalId", "pending-consumer:" + prefix)
+                .put("channelCode", "INTERNAL")
+                .put("priority", "URGENT")
+                .put("categoryCode", "UNFULFILLABLE_ORDER")
+                .put("slaPolicyCode", "UNFULFILLABLE_ORDER_PRIORITY")
+                .put("slaPolicyVersion", 1)
+                .put("resolutionDeadlineAt",
+                        Instant.parse(occurredAt).plus(2, ChronoUnit.HOURS).toString())
+                .put("fcrWindowHours", 24));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "LINK_REFERENCE")
+                .put("ticketId", ZERO_UUID)
+                .put("referenceSourceSystem", "cloudmold-order")
+                .put("referenceType", "ORDER")
+                .put("referenceId", ZERO_UUID));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "RECORD_MESSAGE")
+                .put("ticketId", ZERO_UUID)
+                .put("direction", "OUTBOUND")
+                .put("senderType", "SYSTEM")
+                .put("senderPrincipalId", agentPrincipalId)
+                .put("messageType", "TEXT")
+                .put("contentToken", "restricted:unfulfillable_refund_notice_" + prefix));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "ASSIGN_AGENT")
+                .put("ticketId", ZERO_UUID)
+                .put("assignedAgentPrincipalId", agentPrincipalId));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "START_PROCESSING")
+                .put("ticketId", ZERO_UUID));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "RESOLVE_TICKET")
+                .put("ticketId", ZERO_UUID));
+        commands.add(customerServiceCommand(
+                        prefix, runId, occurredAt, correlationId, "RECORD_QUALITY_REVIEW")
+                .put("ticketId", ZERO_UUID)
+                .put("reviewerPrincipalId", agentPrincipalId)
+                .put("scoreBasisPoints", 10_000)
+                .put("outcomeCode", "PLATFORM_FULFILLMENT_RESPONSIBLE")
+                .put("reasonCode", "ORDER_CANNOT_BE_FULFILLED"));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "REQUEST_CLAIM")
+                .put("ticketId", ZERO_UUID)
+                .put("claimCode", "UC-" + prefix.toUpperCase(Locale.ROOT))
+                .put("claimType", "SERVICE_COMPENSATION")
+                .put("requestedAmountMinor", 5_000L)
+                .put("currencyCode", "CNY")
+                .put("reasonCode", "UNFULFILLABLE_ORDER"));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "APPROVE_CLAIM")
+                .put("claimId", ZERO_UUID)
+                .put("approvedAmountMinor", 5_000L));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "PAY_COMPENSATION")
+                .put("claimId", ZERO_UUID));
+        commands.add(customerServiceCommand(prefix, runId, occurredAt, correlationId, "CLOSE_TICKET")
+                .put("ticketId", ZERO_UUID));
+        return output;
+    }
+
+    private static ObjectNode profitLossImprovementLifecycle(
+            String prefix, String occurredAt, String operatorPrincipalId) {
+        ObjectNode output = JsonNodeFactory.instance.objectNode();
+        output.putObject("improvementTargets")
+                .put("problemOrderRateDirection", "DOWN")
+                .put("returnRateDirection", "DOWN")
+                .put("confirmedRevenueDirection", "UP")
+                .put("problemOrderActions",
+                        "前置库存与履约可用性校验、异常订单分层拦截、工单判责和商家整改")
+                .put("returnRateActions",
+                        "按款色码复盘尺码版型与素材偏差、神秘买手质检、退货原因聚类和选品淘汰");
+        addRoleOperationsCase(output, prefix, occurredAt, operatorPrincipalId,
+                "AI_PROFIT_LOSS_IMPROVEMENT_", "profit-loss:",
+                "profit_loss_improvement_", "FINANCE_OPERATIONS",
+                "PROBLEM_ORDER_AND_RETURN_LOSS",
+                "WEEKLY_PNL_REVIEW_READY", "PROFIT_LOSS_OPERATOR_ASSIGNED",
+                "LOSS_REDUCTION_ACTIONS_VERIFIED");
+        return output;
+    }
+
+    private static ObjectNode riskDisputeResolutionLifecycle(
+            String prefix, String occurredAt, ObjectNode consumer, String reviewerPrincipalId) {
+        String runId = stableUuid(prefix + ":risk-dispute-run");
+        String correlationId = stableUuid(prefix + ":risk-dispute-correlation");
+        String token = prefix.toUpperCase(Locale.ROOT).replace('-', '_');
+        ObjectNode output = JsonNodeFactory.instance.objectNode();
+        output.putObject("runIds").put("consumer", prefix + "-risk-consumer");
+        output.set("consumer", consumer);
+        addRoleOperationsCase(output, prefix, occurredAt, reviewerPrincipalId,
+                "AI_PAYMENT_DISPUTE_", "risk-dispute:", "risk_dispute_",
+                "RISK_OPERATIONS", "PAYMENT_CHARGEBACK",
+                "PAYMENT_DISPUTE_IDENTIFIED", "RISK_OPERATOR_ASSIGNED",
+                "RISK_DISPUTE_AND_LOSS_RECONCILED");
+
+        ArrayNode commands = output.putArray("riskCommands");
+        commands.add(riskCommand(prefix, runId, occurredAt, correlationId, "CREATE_CLUSTER")
+                .put("clusterCode", "PAYMENT_CHARGEBACK_" + token)
+                .put("riskLevel", "HIGH"));
+        commands.add(riskCommand(prefix, runId, occurredAt, correlationId, "OPEN_REVIEW")
+                .put("clusterId", ZERO_UUID)
+                .put("reviewerPrincipalId", reviewerPrincipalId));
+        commands.add(riskCommand(prefix, runId, occurredAt, correlationId, "LINK_ORDER_REVIEW_CASE")
+                .put("caseId", ZERO_UUID)
+                .put("orderId", ZERO_UUID)
+                .put("paymentId", ZERO_UUID)
+                .put("riskType", "FRAUD")
+                .put("reasonCode", "SUSPICIOUS_CAPTURE"));
+        commands.add(riskCommand(prefix, runId, occurredAt, correlationId, "OPEN_PAYMENT_DISPUTE")
+                .put("caseId", ZERO_UUID)
+                .put("orderId", ZERO_UUID)
+                .put("paymentId", ZERO_UUID)
+                .put("disputeType", "CHARGEBACK")
+                .put("reasonCode", "CARDHOLDER_DISPUTE")
+                .put("amountMinor", 39_800L)
+                .put("currencyCode", "CNY")
+                .put("externalRef", "chargeback:" + prefix));
+        commands.add(riskCommand(prefix, runId, occurredAt, correlationId, "START_REVIEW")
+                .put("caseId", ZERO_UUID)
+                .put("expectedVersion", 1L));
+        commands.add(riskCommand(prefix, runId, occurredAt, correlationId, "DECIDE_REVIEW")
+                .put("caseId", ZERO_UUID)
+                .put("expectedVersion", 2L)
+                .put("decisionType", "CONFIRM_RISK")
+                .put("reasonCode", "CONFIRMED_CHARGEBACK")
+                .put("decidedByPrincipalId", reviewerPrincipalId));
+        commands.add(riskCommand(prefix, runId, occurredAt, correlationId, "RESOLVE_PAYMENT_DISPUTE")
+                .put("disputeId", ZERO_UUID)
+                .put("expectedVersion", 1L)
+                .put("disputeStatus", "LOST")
+                .put("decisionId", ZERO_UUID)
+                .put("reasonCode", "CHARGEBACK_LOST"));
+        commands.add(riskCommand(prefix, runId, occurredAt, correlationId, "POST_LOSS_ENTRY")
+                .put("orderId", ZERO_UUID)
+                .put("paymentId", ZERO_UUID)
+                .put("disputeId", ZERO_UUID)
+                .put("lossEntryType", "CHARGEBACK_LOSS")
+                .put("signedAmountMinor", 39_800L)
+                .put("currencyCode", "CNY")
+                .put("externalRef", "chargeback:" + prefix));
+        return output;
+    }
+
+    private static ObjectNode riskCommand(
+            String prefix, String runId, String occurredAt, String correlationId, String operation) {
+        return JsonNodeFactory.instance.objectNode()
+                .put("operation", operation)
+                .put("idempotencyKey", prefix + "-risk-" + operation.toLowerCase(Locale.ROOT))
+                .put("runId", runId)
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt);
+    }
+
+    /**
+     * Builds a fresh, INTERNAL_TEST metadata incident rather than pretending to repair a live warehouse.
+     * The durable metadata definitions and append-only DQC evidence are nevertheless created through the
+     * normal metadata authority, so the workflow can be used as an operational acceptance exercise.
+     */
+    private static ObjectNode dataQualityRecoveryLifecycle(
+            String prefix, String occurredAt, String operatorPrincipalId) {
+        String token = stableUuid(prefix + ":data-quality").replace("-", "").substring(0, 16);
+        String runTraceId = stableUuid(prefix + ":data-quality-run");
+        String correlationId = stableUuid(prefix + ":data-quality-correlation");
+        String sourceId = "data-source-" + token;
+        String rawDatasetId = "dataset-raw-" + token;
+        String metricDatasetId = "dataset-metric-" + token;
+        String lineageId = "lineage-dqc-" + token;
+        String taskId = "task-dqc-" + token;
+        String ruleId = "rule-dqc-" + token;
+        String taskRunId = "task-run-dqc-" + token;
+        ObjectNode output = JsonNodeFactory.instance.objectNode();
+
+        addRoleOperationsCase(output, prefix, occurredAt, operatorPrincipalId,
+                "AI_DATA_QUALITY_", "data-quality:", "data_quality_",
+                "DATA_AI_OPERATIONS", "DATA_QUALITY",
+                "DQC_FAILURE_IDENTIFIED", "DATA_AI_OPERATOR_ASSIGNED", "DQC_RECOVERY_VERIFIED");
+        ArrayNode commands = output.putArray("metadataCommands");
+        commands.add(metadataPublish(prefix, runTraceId, occurredAt, correlationId,
+                        "PUBLISH_DATA_SOURCE", sourceId, "DATA_SOURCE_DQC_" + token.toUpperCase(Locale.ROOT),
+                        "数据质量测试数据源 " + token, operatorPrincipalId)
+                .put("sourceType", "STARROCKS")
+                .put("environment", "TEST")
+                .put("endpointRef", "restricted:starrocks-" + token)
+                .put("credentialRef", "restricted:credential-" + token)
+                .put("namespaceRef", "restricted:analytics-" + token));
+        commands.add(metadataDatasetPublish(prefix, runTraceId, occurredAt, correlationId,
+                rawDatasetId, "DATASET_RAW_DQC_" + token.toUpperCase(Locale.ROOT),
+                "数据质量原始订单数据集 " + token, operatorPrincipalId, "ODS", "ORDER_DAY", token));
+        commands.add(metadataDatasetPublish(prefix, runTraceId, occurredAt, correlationId,
+                metricDatasetId, "DATASET_METRIC_DQC_" + token.toUpperCase(Locale.ROOT),
+                "数据质量指标数据集 " + token, operatorPrincipalId, "ADS", "METRIC_DAY", token));
+        commands.add(metadataPublish(prefix, runTraceId, occurredAt, correlationId,
+                        "PUBLISH_LINEAGE", lineageId, "LINEAGE_DQC_" + token.toUpperCase(Locale.ROOT),
+                        "订单指标血缘 " + token, operatorPrincipalId)
+                .put("sourceDatasetId", ZERO_UUID).put("sourceDatasetVersion", 1L)
+                .put("targetDatasetId", ZERO_UUID).put("targetDatasetVersion", 1L)
+                .put("lineageDirection", "SOURCE_TO_TARGET")
+                .put("transformSha256", DigestUtil.sha256Hex("dqc-transform:" + token))
+                .put("transformationRef", "restricted:transform-" + token));
+        ObjectNode task = metadataPublish(prefix, runTraceId, occurredAt, correlationId,
+                "PUBLISH_TASK", taskId, "TASK_DQC_" + token.toUpperCase(Locale.ROOT),
+                "数据质量修复任务 " + token, operatorPrincipalId);
+        task.put("taskType", "QUALITY")
+                .put("executableArtifactRef", "restricted:dqc-task-" + token)
+                .put("codeSha256", DigestUtil.sha256Hex("dqc-task-code:" + token))
+                .put("scheduleSha256", DigestUtil.sha256Hex("dqc-task-schedule:" + token))
+                .put("resourceGroupRef", "restricted:dqc-resource-" + token);
+        task.putObject("sla").put("serviceLevelCode", "DQC_DAILY")
+                .put("deadlineMinuteUtc", 120).put("maximumDurationMillis", 60_000L)
+                .put("maximumFreshnessMillis", 86_400_000L)
+                .put("approvedByPrincipalId", operatorPrincipalId);
+        commands.add(task);
+        commands.add(metadataPublish(prefix, runTraceId, occurredAt, correlationId,
+                        "PUBLISH_DQC_RULE", ruleId, "RULE_DQC_" + token.toUpperCase(Locale.ROOT),
+                        "订单指标行数质量规则 " + token, operatorPrincipalId)
+                .put("targetDatasetId", ZERO_UUID).put("targetDatasetVersion", 1L)
+                .put("targetDatasetField", "orderCount").put("ruleType", "ROW_COUNT")
+                .put("severity", "CRITICAL")
+                .put("expressionSha256", DigestUtil.sha256Hex("dqc-rule:" + token))
+                .put("thresholdValue", 100).put("thresholdComparator", "GTE"));
+
+        Instant scheduledAt = Instant.parse(occurredAt);
+        commands.add(metadataObservation(prefix, runTraceId, occurredAt, correlationId, taskRunId,
+                1, 0L, "SCHEDULED", scheduledAt, null, null, null, token));
+        commands.add(metadataObservation(prefix, runTraceId, occurredAt, correlationId, taskRunId,
+                1, 1L, "RUNNING", scheduledAt, scheduledAt.plusSeconds(60), null, null, token));
+        commands.add(metadataObservation(prefix, runTraceId, occurredAt, correlationId, taskRunId,
+                1, 2L, "FAILED", scheduledAt, scheduledAt.plusSeconds(60),
+                scheduledAt.plusSeconds(120), "restricted:dqc-failure-" + token, token));
+        commands.add(metadataDqcResult(prefix, runTraceId, occurredAt, correlationId,
+                "dqc-result-fail-" + token, taskRunId, 3L, "FAIL", 0, 1_000L, token));
+        commands.add(metadataObservation(prefix, runTraceId, occurredAt, correlationId, taskRunId,
+                2, 3L, "SCHEDULED", scheduledAt.plusSeconds(180), null, null, null, token));
+        commands.add(metadataObservation(prefix, runTraceId, occurredAt, correlationId, taskRunId,
+                2, 4L, "RUNNING", scheduledAt.plusSeconds(180), scheduledAt.plusSeconds(240), null, null, token));
+        commands.add(metadataObservation(prefix, runTraceId, occurredAt, correlationId, taskRunId,
+                2, 5L, "SUCCEEDED", scheduledAt.plusSeconds(180), scheduledAt.plusSeconds(240),
+                scheduledAt.plusSeconds(300), null, token));
+        commands.add(metadataDqcResult(prefix, runTraceId, occurredAt, correlationId,
+                "dqc-result-pass-" + token, taskRunId, 6L, "PASS", 120, 0L, token));
+        return output;
+    }
+
+    private static ObjectNode metadataPublish(String prefix, String runTraceId, String occurredAt,
+                                              String correlationId, String operation, String definitionId,
+                                              String definitionCode, String displayName,
+                                              String ownerPrincipalId) {
+        return metadataCommand(prefix, runTraceId, occurredAt, correlationId, operation)
+                .put("definitionId", definitionId).put("definitionCode", definitionCode)
+                .put("displayName", displayName).put("expectedVersion", 0L)
+                .put("ownerPrincipalId", ownerPrincipalId)
+                .put("specificationSha256", DigestUtil.sha256Hex(operation + ":" + definitionId))
+                .put("artifactRef", "restricted:metadata-" + definitionId);
+    }
+
+    private static ObjectNode metadataDatasetPublish(
+            String prefix, String runTraceId, String occurredAt, String correlationId, String definitionId,
+            String definitionCode, String displayName, String ownerPrincipalId, String layerCode,
+            String grainCode, String token) {
+        ObjectNode dataset = metadataPublish(prefix, runTraceId, occurredAt, correlationId,
+                "PUBLISH_DATASET", definitionId, definitionCode, displayName, ownerPrincipalId)
+                .put("dataSourceId", ZERO_UUID).put("dataSourceVersion", 1L)
+                .put("datasetType", "TABLE").put("qualifiedName", "analytics.dqc_" + token)
+                .put("layerCode", layerCode).put("grainCode", grainCode)
+                .put("schemaSha256", DigestUtil.sha256Hex("dqc-schema:" + definitionId))
+                .put("storageLocationRef", "restricted:storage-" + definitionId)
+                .put("retentionDays", 90);
+        ArrayNode fields = dataset.putArray("fields");
+        fields.addObject().put("fieldCode", "metricDate").put("dataType", "DATE")
+                .put("nullable", false).put("primaryKeyPart", true)
+                .put("semanticType", "BUSINESS_DATE").put("classification", "INTERNAL");
+        fields.addObject().put("fieldCode", "orderCount").put("dataType", "BIGINT")
+                .put("nullable", false).put("primaryKeyPart", false)
+                .put("semanticType", "MEASURE").put("classification", "INTERNAL");
+        return dataset;
+    }
+
+    private static ObjectNode metadataObservation(
+            String prefix, String runTraceId, String occurredAt, String correlationId, String taskRunId,
+            int attempt, long expectedSequence, String status, Instant scheduledAt, Instant startedAt,
+            Instant finishedAt, String errorRef, String token) {
+        ObjectNode observation = metadataCommand(prefix, runTraceId, occurredAt, correlationId,
+                "OBSERVE_TASK_RUN")
+                .put("taskId", ZERO_UUID).put("taskVersion", 1L).put("taskRunId", taskRunId)
+                .put("attempt", attempt).put("expectedObservationSequence", expectedSequence)
+                .put("runStatus", status).put("scheduledAt", scheduledAt.toString())
+                .put("durationMillis", finishedAt == null ? 0L : 60_000L)
+                .put("computeCostMinor", 0L).put("costCurrency", "CNY")
+                .put("resourceMillis", 0L).put("rowsRead", 1_000L).put("rowsWritten", 1_000L);
+        if (startedAt != null) {
+            observation.put("startedAt", startedAt.toString());
+        }
+        if (finishedAt != null) {
+            observation.put("finishedAt", finishedAt.toString());
+        }
+        if ("SUCCEEDED".equals(status)) {
+            observation.put("outputSnapshotRef", "restricted:dqc-output-" + token);
+        }
+        if (errorRef != null) {
+            observation.put("errorRef", errorRef);
+        }
+        return observation;
+    }
+
+    private static ObjectNode metadataDqcResult(
+            String prefix, String runTraceId, String occurredAt, String correlationId, String resultId,
+            String taskRunId, long observationSequence, String status, int actualValue,
+            long violations, String token) {
+        return metadataCommand(prefix, runTraceId, occurredAt, correlationId, "RECORD_DQC_RESULT")
+                .put("dqcResultId", resultId).put("dqcRuleId", ZERO_UUID).put("dqcRuleVersion", 1L)
+                .put("targetDatasetId", ZERO_UUID).put("targetDatasetVersion", 1L)
+                .put("taskRunId", taskRunId).put("taskRunObservationSequence", observationSequence)
+                .put("dqcResultStatus", status).put("expectedValue", 100).put("actualValue", actualValue)
+                .put("evaluatedRows", 1_000L).put("violationCount", violations)
+                .put("evidenceRef", "restricted:dqc-evidence-" + token + "-" + status.toLowerCase(Locale.ROOT));
+    }
+
+    private static ObjectNode metadataCommand(
+            String prefix, String runTraceId, String occurredAt, String correlationId, String operation) {
+        return JsonNodeFactory.instance.objectNode().put("operation", operation)
+                .put("idempotencyKey", prefix + "-metadata-" + operation.toLowerCase(Locale.ROOT))
+                .put("runTraceId", runTraceId).put("correlationId", correlationId)
+                .put("occurredAt", occurredAt);
     }
 
     private static void addRoleOperationsCase(
@@ -1710,20 +2546,42 @@ class RotatingBusinessScenarioInputFactory {
 
     private static ObjectNode financeCloseLifecycle(String prefix, String occurredAt,
                                                     long makerUserId, long checkerUserId) {
+        return financeSettlementLifecycle(prefix, occurredAt, makerUserId, checkerUserId,
+                "DAILY_CLOSE", "YSHOPPING_INTERNAL",
+                1_200_000L, 100_000L, 50_000L, 10_000L);
+    }
+
+    private static ObjectNode financeSettlementParentInput(
+            String prefix, ObjectNode settlementInput) {
+        ObjectNode input = JsonNodeFactory.instance.objectNode();
+        input.putObject("runIds").put("settlement", prefix + "-finance-settlement");
+        input.set("settlement", settlementInput);
+        return input;
+    }
+
+    private static ObjectNode financeSettlementLifecycle(
+            String prefix, String occurredAt, long makerUserId, long checkerUserId,
+            String scenarioCode, String channelCode, long grossAmountMinor,
+            long refundAmountMinor, long feeAmountMinor, long differenceAmountMinor) {
         LocalDate date = Instant.parse(occurredAt).atZone(java.time.ZoneOffset.UTC).toLocalDate();
-        String runId = prefix + "-finance-close";
-        String correlationId = stableUuid(prefix + ":finance-close-correlation");
-        String periodId = stableUuid(prefix + ":accounting-period");
-        String statementId = stableUuid(prefix + ":channel-statement");
-        String settlementId = stableUuid(prefix + ":settlement-batch");
-        String journalId = stableUuid(prefix + ":journal-entry");
-        long grossAmountMinor = 1_200_000L;
-        long refundAmountMinor = 100_000L;
-        long feeAmountMinor = 50_000L;
+        String scenarioToken = scenarioCode.toLowerCase(Locale.ROOT);
+        String runId = prefix + "-" + scenarioToken;
+        String correlationId = stableUuid(prefix + ":" + scenarioToken + "-correlation");
+        String periodId = stableUuid(prefix + ":" + scenarioToken + "-accounting-period");
+        String statementId = stableUuid(prefix + ":" + scenarioToken + "-statement");
+        String settlementId = stableUuid(prefix + ":" + scenarioToken + "-settlement");
+        String journalId = stableUuid(prefix + ":" + scenarioToken + "-journal");
         long netAmountMinor = grossAmountMinor - refundAmountMinor - feeAmountMinor;
-        long differenceAmountMinor = 10_000L;
 
         ObjectNode input = JsonNodeFactory.instance.objectNode();
+        input.putObject("settlementContext")
+                .put("scenarioCode", scenarioCode)
+                .put("channelCode", channelCode)
+                .put("grossAmountMinor", grossAmountMinor)
+                .put("refundAmountMinor", refundAmountMinor)
+                .put("feeAmountMinor", feeAmountMinor)
+                .put("netSettlementAmountMinor", netAmountMinor)
+                .put("currencyCode", "CNY");
         input.set("makerIdentityCommand", financeIdentityCommand(
                 runId, correlationId, occurredAt, makerUserId));
         input.set("checkerIdentityCommand", financeIdentityCommand(
@@ -1733,17 +2591,17 @@ class RotatingBusinessScenarioInputFactory {
         commands.add(financeCommand(runId, correlationId, occurredAt, "OPEN_ACCOUNTING_PERIOD")
                 .set("period", JsonNodeFactory.instance.objectNode()
                         .put("periodId", periodId)
-                        .put("periodCode", "AI-" + date.toString())
+                        .put("periodCode", "AI-" + scenarioCode + "-" + date)
                         .put("periodStart", date.toString())
                         .put("periodEnd", date.toString())
                         .put("currencyCode", "CNY")
-                        .put("reasonCode", "AI_DAILY_CLOSE")));
+                        .put("reasonCode", "AI_" + scenarioCode)));
         commands.add(financeCommand(runId, correlationId, occurredAt, "IMPORT_CHANNEL_STATEMENT")
                 .set("statement", JsonNodeFactory.instance.objectNode()
                         .put("statementId", statementId)
-                        .put("statementCode", "AI-ST-" + prefix.toUpperCase())
+                        .put("statementCode", "AI-" + scenarioCode + "-ST-" + prefix.toUpperCase())
                         .put("periodId", periodId)
-                        .put("channelCode", "YSHOPPING_INTERNAL")
+                        .put("channelCode", channelCode)
                         .put("statementDate", date.toString())
                         .put("currencyCode", "CNY")
                         .put("grossAmountMinor", grossAmountMinor)
@@ -1753,14 +2611,14 @@ class RotatingBusinessScenarioInputFactory {
                         .put("expectedBusinessNetAmountMinor",
                                 netAmountMinor - differenceAmountMinor)
                         .put("evidenceSha256",
-                                DigestUtil.sha256Hex(prefix + ":statement-evidence"))
-                        .put("reasonCode", "AI_CHANNEL_STATEMENT_IMPORT")));
+                                DigestUtil.sha256Hex(prefix + ":" + scenarioToken + "-statement-evidence"))
+                        .put("reasonCode", "AI_" + scenarioCode + "_STATEMENT_IMPORT")));
         commands.add(financeCommand(runId, correlationId, occurredAt,
                         "RECONCILE_CHANNEL_STATEMENT")
                 .set("statement", JsonNodeFactory.instance.objectNode()
                         .put("statementId", statementId)
                         .put("expectedVersion", 1)
-                        .put("reasonCode", "AI_RECONCILIATION")));
+                        .put("reasonCode", "AI_" + scenarioCode + "_RECONCILIATION")));
         commands.add(financeCommand(runId, correlationId, occurredAt,
                         "RESOLVE_RECONCILIATION_DIFFERENCE")
                 .set("differenceResolution", JsonNodeFactory.instance.objectNode()
@@ -1768,51 +2626,51 @@ class RotatingBusinessScenarioInputFactory {
                         .put("adjustmentAmountMinor", differenceAmountMinor)
                         .put("resolutionType", "CHANNEL_ADJUSTMENT")
                         .put("resolutionEvidenceSha256",
-                                DigestUtil.sha256Hex(prefix + ":difference-evidence"))
+                                DigestUtil.sha256Hex(prefix + ":" + scenarioToken + "-difference-evidence"))
                         .put("expectedVersion", 1)
-                        .put("reasonCode", "AI_CHANNEL_ADJUSTMENT")));
+                        .put("reasonCode", "AI_" + scenarioCode + "_ADJUSTMENT")));
         commands.add(financeCommand(runId, correlationId, occurredAt,
                         "CREATE_SETTLEMENT_BATCH")
                 .set("settlement", JsonNodeFactory.instance.objectNode()
                         .put("settlementBatchId", settlementId)
-                        .put("settlementCode", "AI-SE-" + prefix.toUpperCase())
+                        .put("settlementCode", "AI-" + scenarioCode + "-SE-" + prefix.toUpperCase())
                         .put("periodId", periodId)
                         .put("statementId", statementId)
                         .put("expectedAmountMinor", netAmountMinor)
-                        .put("reasonCode", "AI_SETTLEMENT_PREPARE")));
+                        .put("reasonCode", "AI_" + scenarioCode + "_SETTLEMENT_PREPARE")));
         commands.add(financeCommand(runId, correlationId, occurredAt, "CONFIRM_SETTLEMENT")
                 .set("settlement", JsonNodeFactory.instance.objectNode()
                         .put("settlementBatchId", settlementId)
                         .put("settledAmountMinor", netAmountMinor)
-                        .put("bankReference", "AI-BANK-" + prefix.toUpperCase())
+                        .put("bankReference", "AI-" + scenarioCode + "-BANK-" + prefix.toUpperCase())
                         .put("settlementEvidenceSha256",
-                                DigestUtil.sha256Hex(prefix + ":settlement-evidence"))
+                                DigestUtil.sha256Hex(prefix + ":" + scenarioToken + "-settlement-evidence"))
                         .put("expectedVersion", 1)
-                        .put("reasonCode", "AI_BANK_RECEIPT_VERIFIED")));
+                        .put("reasonCode", "AI_" + scenarioCode + "_RECEIPT_VERIFIED")));
         commands.add(financeCommand(runId, correlationId, occurredAt, "PREPARE_JOURNAL_ENTRY")
                 .set("journalEntry", JsonNodeFactory.instance.objectNode()
                         .put("journalEntryId", journalId)
-                        .put("journalCode", "AI-JE-" + prefix.toUpperCase())
+                        .put("journalCode", "AI-" + scenarioCode + "-JE-" + prefix.toUpperCase())
                         .put("periodId", periodId)
                         .put("sourceType", "SETTLEMENT_BATCH")
                         .put("sourceId", settlementId)
                         .put("debitTotalMinor", netAmountMinor)
                         .put("creditTotalMinor", netAmountMinor)
                         .put("evidenceSha256",
-                                DigestUtil.sha256Hex(prefix + ":journal-evidence"))
-                        .put("reasonCode", "AI_JOURNAL_PREPARE")));
+                                DigestUtil.sha256Hex(prefix + ":" + scenarioToken + "-journal-evidence"))
+                        .put("reasonCode", "AI_" + scenarioCode + "_JOURNAL_PREPARE")));
         commands.add(financeCommand(runId, correlationId, occurredAt, "POST_JOURNAL_ENTRY")
                 .set("journalEntry", JsonNodeFactory.instance.objectNode()
                         .put("journalEntryId", journalId)
                         .put("expectedVersion", 1)
-                        .put("reasonCode", "AI_JOURNAL_POST")));
+                        .put("reasonCode", "AI_" + scenarioCode + "_JOURNAL_POST")));
         commands.add(financeCommand(runId, correlationId, occurredAt, "CLOSE_ACCOUNTING_PERIOD")
                 .set("period", JsonNodeFactory.instance.objectNode()
                         .put("periodId", periodId)
                         .put("expectedVersion", 1)
                         .put("evidenceSha256",
-                                DigestUtil.sha256Hex(prefix + ":close-evidence"))
-                        .put("reasonCode", "AI_DAILY_CLOSE_COMPLETE")));
+                                DigestUtil.sha256Hex(prefix + ":" + scenarioToken + "-close-evidence"))
+                        .put("reasonCode", "AI_" + scenarioCode + "_CLOSE_COMPLETE")));
         return input;
     }
 
@@ -2001,6 +2859,115 @@ class RotatingBusinessScenarioInputFactory {
                         .put("ownerPrincipalId", managerPrincipalId)
                         .put("expectedVersion", 2)
                         .put("resolutionCode", "QUARANTINED_DESTROYED")));
+        return input;
+    }
+
+    private static ObjectNode mysteryBuyerSampleVerification(
+            String prefix, String occurredAt, String merchantId, String warehouseId,
+            String locationId, String canonicalSkuId, String managerPrincipalId,
+            long inspectorUserId) {
+        LocalDate date = Instant.parse(occurredAt).atZone(java.time.ZoneOffset.UTC).toLocalDate();
+        String runId = prefix + "-mystery-buyer-quality";
+        String correlationId = stableUuid(prefix + ":mystery-buyer-quality-correlation");
+        String inspectionTaskId = stableUuid(prefix + ":mystery-buyer-inspection");
+        String standardId = stableUuid(prefix + ":mystery-buyer-standard");
+
+        ObjectNode input = JsonNodeFactory.instance.objectNode();
+        input.put("canonicalSkuId", canonicalSkuId);
+        input.put("managerPrincipalId", managerPrincipalId);
+        input.set("inspectorIdentityCommand", financeIdentityCommand(
+                runId, correlationId, occurredAt, inspectorUserId));
+        input.set("lotCommand", JsonNodeFactory.instance.objectNode()
+                .put("operation", "REGISTER")
+                .put("idempotencyKey", "pending-mystery-buyer-lot")
+                .put("runId", runId)
+                .put("ownerType", "MERCHANT")
+                .put("ownerId", merchantId)
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("lotCode", "AI-MB-" + prefix.toUpperCase())
+                .put("manufacturedOn", date.minusDays(30).toString())
+                .put("expiresOn", date.plusDays(365).toString())
+                .put("receivedAt", occurredAt)
+                .put("reasonCode", "MYSTERY_BUYER_PURCHASED_SAMPLE")
+                .put("evidenceRef", "restricted:mystery-buyer-order/" + prefix)
+                .put("traceId", runId)
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt));
+        input.set("stockCommand", JsonNodeFactory.instance.objectNode()
+                .put("operation", "RECEIVE")
+                .put("idempotencyKey", "pending-mystery-buyer-stock")
+                .put("ownerType", "MERCHANT")
+                .put("ownerId", merchantId)
+                .put("canonicalSkuId", canonicalSkuId)
+                .put("warehouseId", warehouseId)
+                .put("locationId", locationId)
+                .put("lotId", ZERO_UUID)
+                .put("stockStatus", "NON_SELLABLE")
+                .put("qualityStatus", "PENDING_QC")
+                .put("baseUomCode", "EA")
+                .put("quantity", 1)
+                .put("businessType", "MYSTERY_BUYER_SAMPLE")
+                .put("businessId", inspectionTaskId)
+                .put("businessItemId", inspectionTaskId)
+                .put("businessNo", "AI-MBQC-" + prefix.toUpperCase())
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt));
+
+        ArrayNode commands = input.putArray("commands");
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "CREATE_STANDARD")
+                .set("standard", JsonNodeFactory.instance.objectNode()
+                        .put("standardId", standardId)
+                        .put("standardCode", "AI-MBQS-" + prefix.toUpperCase())
+                        .put("categoryCode", "APPAREL")
+                        .put("brandCode", "CLOUDMOLD")
+                        .put("applicableSkuId", canonicalSkuId)
+                        .put("contentSha256", DigestUtil.sha256Hex(
+                                prefix + ":pattern:price:content-shooting:model-fitting"))));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "PUBLISH_STANDARD")
+                .set("standard", JsonNodeFactory.instance.objectNode()
+                        .put("standardId", standardId)
+                        .put("expectedVersion", 1)
+                        .put("approverPrincipalId", managerPrincipalId)));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "CERTIFY_AUTHENTICATOR")
+                .set("certification", JsonNodeFactory.instance.objectNode()
+                        .put("certificationId", stableUuid(prefix + ":mystery-buyer-certification"))
+                        .put("authenticatorPrincipalId", ZERO_UUID)
+                        .put("standardId", standardId)
+                        .put("certificationLevel", "EXPERT")
+                        .put("effectiveFrom", date.minusDays(1).toString())
+                        .put("effectiveTo", date.plusDays(365).toString())
+                        .put("evidenceSha256",
+                                DigestUtil.sha256Hex(prefix + ":mystery-buyer-certification"))));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "CREATE_INSPECTION_TASK")
+                .set("inspectionTask", JsonNodeFactory.instance.objectNode()
+                        .put("taskId", inspectionTaskId)
+                        .put("standardId", standardId)
+                        .put("subjectType", "LISTING_SAMPLE")
+                        .put("subjectRef", "mystery-buyer-order:" + prefix)
+                        .put("canonicalSkuId", canonicalSkuId)
+                        .put("lotId", ZERO_UUID)
+                        .put("warehouseId", warehouseId)
+                        .put("priority", "HIGH")));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "ASSIGN_INSPECTION_TASK")
+                .set("inspectionTask", JsonNodeFactory.instance.objectNode()
+                        .put("taskId", inspectionTaskId)
+                        .put("expectedVersion", 1)
+                        .put("authenticatorPrincipalId", ZERO_UUID)));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "START_INSPECTION_TASK")
+                .set("inspectionTask", JsonNodeFactory.instance.objectNode()
+                        .put("taskId", inspectionTaskId)
+                        .put("expectedVersion", 2)));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "DECIDE_INSPECTION_TASK")
+                .set("inspectionTask", JsonNodeFactory.instance.objectNode()
+                        .put("taskId", inspectionTaskId)
+                        .put("expectedVersion", 3)
+                        .put("decision", "PASS")
+                        .put("evidenceRef", qualityEvidence(
+                                prefix, "pattern-price-content-fitting-pass"))));
+        commands.add(qualityCommand(runId, correlationId, occurredAt, "COMPLETE_INSPECTION_TASK")
+                .set("inspectionTask", JsonNodeFactory.instance.objectNode()
+                        .put("taskId", inspectionTaskId)
+                        .put("expectedVersion", 4)));
         return input;
     }
 

@@ -254,6 +254,8 @@ class AgentControlServiceImplTest {
                 .setWorkOrderId("wo-risk-reject").setActionCode("purchase.commit").setRequesterUserId(100L)
                 .setScopeHash(scopeHash(row)).setStatus("PENDING").setVersion(1L);
         approval.set(approvalRow);
+        // A policy change must not prevent a BPM-attested rejection from cancelling the frozen work.
+        approvalPolicy.setVersion(2L);
         when(mapper.selectActionPolicy(17L, "buyer", "purchase.commit")).thenReturn(approvalPolicy);
         when(mapper.decideApproval(eq(17L), eq("approval-reject"), eq(1L), eq("REJECTED"), eq(200L),
                 eq("OUTSIDE_POLICY"), any()))
@@ -279,6 +281,34 @@ class AgentControlServiceImplTest {
                 eq("agent_control.work_order.cancelled"),
                 argThat(payload -> payload.contains("\"notificationType\":\"WORK_ORDER_CANCELLED\"")
                         && payload.contains("\"approvalId\":\"approval-reject\"")), any());
+    }
+
+    @Test
+    void approvalStillFailsClosedWhenTheFrozenPolicySnapshotHasAdvanced() {
+        WorkOrder row = new WorkOrder().setWorkOrderId("wo-policy-drift").setTenantId(17L)
+                .setRoleCode("buyer").setActionCode("purchase.commit")
+                .setRequesterUserId(100L).setApprovalId("approval-policy-drift")
+                .setStatus("WAITING_APPROVAL").setVersion(2L);
+        RoleActionPolicy approvalPolicy = policy("buyer", "purchase.commit", true);
+        freeze(row, approvalPolicy, "{}");
+        workOrder.set(row);
+        Approval approvalRow = new Approval().setApprovalId("approval-policy-drift").setTenantId(17L)
+                .setWorkOrderId("wo-policy-drift").setActionCode("purchase.commit").setRequesterUserId(100L)
+                .setScopeHash(scopeHash(row)).setStatus("PENDING").setVersion(1L);
+        approval.set(approvalRow);
+        approvalPolicy.setVersion(2L);
+        when(mapper.selectActionPolicy(17L, "buyer", "purchase.commit")).thenReturn(approvalPolicy);
+
+        assertThatThrownBy(() -> service.execute(base(AgentControlOperation.DECIDE_APPROVAL,
+                "approval-policy-drift")
+                .approval(AgentControlCommand.ApprovalDefinition.builder()
+                        .approvalId("approval-policy-drift").decision("APPROVE")
+                        .reasonCode("WITHIN_BUDGET").approvalExpectedVersion(1L)
+                        .workOrderExpectedVersion(2L).build())
+                .build(), 200L))
+                .hasMessage("work order action policy snapshot no longer matches the configured policy");
+        verify(mapper, never()).decideApproval(anyLong(), anyString(), anyLong(), anyString(), anyLong(),
+                anyString(), any());
     }
 
     @Test

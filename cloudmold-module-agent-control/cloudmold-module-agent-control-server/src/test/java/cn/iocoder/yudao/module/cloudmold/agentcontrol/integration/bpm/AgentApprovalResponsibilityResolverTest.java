@@ -148,6 +148,10 @@ class AgentApprovalResponsibilityResolverTest {
                 .containsExactly("risk", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("merchant.penalty"))
                 .containsExactly("risk", "legal");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("merchant-experience.rectification"))
+                .containsExactly("customer-service", "operations-lead");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("customer-experience.ticket-responsibility"))
+                .containsExactly("customer-service", "operations-lead");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("customer-service.compensate"))
                 .containsExactly("customer-service", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("quality.recall"))

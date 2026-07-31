@@ -197,17 +197,22 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
         require(header != null, "canonical listing does not exist");
         require(Objects.equals(header.getVersion(), command.getExpectedVersion()), "canonical listing version conflict");
         Transition next = resolveTransition(command, header);
-        if (command.getOperation() == ListingOperation.PUBLISH) {
+        if (command.getOperation() == ListingOperation.PUBLISH || command.getOperation() == ListingOperation.REPRICE) {
             requireActiveMerchantPublisher(header.getMerchantId(), header.getChannelCode(), header.getShopId(),
                     command.getPublisherRef() != null ? command.getPublisherRef() : header.getPublisherRef());
         }
         if ("REJECTED".equals(next.reviewDecision())) requireText(command.getReason(), "reason", 256);
         List<ListingOfferDO> offers;
-        if (command.getOperation() == ListingOperation.REVISE) {
+        if (command.getOperation() == ListingOperation.REVISE || command.getOperation() == ListingOperation.REPRICE) {
             List<ListingOfferCommand> revisedOffers = command.getOffers();
-            if (revisedOffers == null || revisedOffers.isEmpty()) {
+            if (command.getOperation() == ListingOperation.REVISE && (revisedOffers == null || revisedOffers.isEmpty())) {
                 revisedOffers = offerMapper.selectByListingRevision(tenantId, header.getListingId(), header.getRevision())
                         .stream().map(ListingCommandServiceImpl::toCommand).toList();
+            }
+            if (command.getOperation() == ListingOperation.REPRICE) {
+                require(revisedOffers != null && !revisedOffers.isEmpty(), "REPRICE requires replacement offers");
+                validateRepriceOffers(offerMapper.selectByListingRevision(tenantId, header.getListingId(), header.getRevision()),
+                        revisedOffers);
             }
             offers = buildOffers(tenantId, header.getListingId(), next.revision(), header.getCanonicalSpuId(),
                     revisedOffers, now);
@@ -221,7 +226,7 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
         require(headerMapper.transition(tenantId, header.getListingId(), header.getVersion(), previous,
                 next.status(), next.revision(), next.completionPassed(), next.businessApproved(),
                 next.riskApproved(), command.getPublisherRef(), now) == 1, "canonical listing transition conflict");
-        if (command.getOperation() == ListingOperation.REVISE) {
+        if (command.getOperation() == ListingOperation.REVISE || command.getOperation() == ListingOperation.REPRICE) {
             offers.forEach(offerMapper::insert);
         }
         header.setStatus(next.status()).setRevision(next.revision()).setCompletionPassed(next.completionPassed())
@@ -266,6 +271,12 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
                 require("REJECTED".equals(status), "REVISE requires REJECTED");
                 yield new Transition("DRAFT", Math.addExact(revision, 1), false, false, false, null, null);
             }
+            case REPRICE -> {
+                require("PUBLISHED".equals(status), "REPRICE requires PUBLISHED");
+                require(completion && business && risk, "REPRICE requires all three approvals on the current listing");
+                requireText(command.getReason(), "reason", 256);
+                yield new Transition("PUBLISHED", Math.addExact(revision, 1), true, true, true, null, null);
+            }
             case PUBLISH -> {
                 require("RISK_APPROVED".equals(status) || "UNPUBLISHED".equals(status) || "SUSPENDED".equals(status),
                         "PUBLISH requires RISK_APPROVED, UNPUBLISHED, or SUSPENDED");
@@ -290,6 +301,23 @@ public class ListingCommandServiceImpl implements ListingCommandApi, ListingQuer
             }
             case CREATE_DRAFT -> throw new IllegalArgumentException("CREATE_DRAFT is not a transition");
         };
+    }
+
+    private static void validateRepriceOffers(List<ListingOfferDO> currentOffers, List<ListingOfferCommand> replacements) {
+        require(currentOffers != null && !currentOffers.isEmpty(), "REPRICE requires current offers");
+        require(replacements.size() == currentOffers.size(), "REPRICE must include every current SKU exactly once");
+        Map<String, Long> currentBySku = new HashMap<>();
+        for (ListingOfferDO offer : currentOffers) currentBySku.put(offer.getCanonicalSkuId(), offer.getPriceMinor());
+        Set<String> replacementSkus = new HashSet<>();
+        boolean changed = false;
+        for (ListingOfferCommand replacement : replacements) {
+            require(replacement != null && replacement.getCanonicalSkuId() != null, "REPRICE offer SKU is required");
+            require(replacementSkus.add(replacement.getCanonicalSkuId()), "REPRICE contains duplicate SKU");
+            Long currentPrice = currentBySku.get(replacement.getCanonicalSkuId());
+            require(currentPrice != null, "REPRICE cannot add or remove SKU");
+            changed |= !Objects.equals(currentPrice, replacement.getPriceMinor());
+        }
+        require(changed, "REPRICE requires at least one changed price");
     }
 
     private static Transition reject(String actualStatus, String expectedStatus, int revision, String stage) {

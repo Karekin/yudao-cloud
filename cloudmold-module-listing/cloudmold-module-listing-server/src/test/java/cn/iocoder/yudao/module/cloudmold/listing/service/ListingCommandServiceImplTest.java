@@ -253,6 +253,51 @@ class ListingCommandServiceImplTest {
     }
 
     @Test
+    void shouldCreateImmutablePublishedPriceRevisionAndRequireFreshChannelReadback() {
+        ListingCommandResult result = service.execute(createCommand("listing-reprice-create"));
+        result = service.execute(transition(ListingOperation.SUBMIT, result, "listing-reprice-submit"));
+        result = service.execute(transition(ListingOperation.PASS_COMPLETION, result, "listing-reprice-completion"));
+        result = service.execute(transition(ListingOperation.APPROVE_BUSINESS, result, "listing-reprice-business"));
+        result = service.execute(transition(ListingOperation.APPROVE_RISK, result, "listing-reprice-risk"));
+        ListingCommand publish = transition(ListingOperation.PUBLISH, result, "listing-reprice-publish");
+        publish.setPublisherRef("internal-agent");
+        result = service.execute(publish);
+
+        ListingCommand reprice = transition(ListingOperation.REPRICE, result, "listing-reprice-change");
+        reprice.setPublisherRef("internal-agent");
+        reprice.setReason("weekly margin guardrail adjustment");
+        reprice.setOffers(List.of(offer("sku-1", 10500L), offer("sku-2", 10900L)));
+        result = service.execute(reprice);
+
+        assertThat(result.getCurrentStatus()).isEqualTo("PUBLISHED");
+        assertThat(result.getRevision()).isEqualTo(2);
+        assertThat(result.getAggregateVersion()).isEqualTo(7L);
+        assertThat(result.getOffers()).extracting(ListingOfferView::getPriceMinor).containsExactly(10500L, 10900L);
+        assertThat(storedOffers).extracting(ListingOfferDO::getRevision).containsExactly(1, 1, 2, 2);
+        ListingTerminalReadbackView readback = service.getListingTerminalReadback(
+                new ListingTerminalReadbackCommand().setListingId(result.getListingId()));
+        assertThat(readback.getOverallResultCode()).isEqualTo("PENDING_CONFIRMATION");
+        verify(principalValidationApi, times(3)).requireActivePrincipal("internal-agent");
+    }
+
+    @Test
+    void shouldRejectRepriceWithoutEverySkuOrAnyPriceChange() {
+        storedHeader.set(publishedHeader());
+        storedOffers.add(listingOffer("listing-1", 1, "sku-1", 9900L));
+        storedOffers.add(listingOffer("listing-1", 1, "sku-2", 10900L));
+        ListingCommand unchanged = transition(ListingOperation.REPRICE,
+                ListingCommandResult.builder().listingId("listing-1").aggregateVersion(6L).build(), "listing-reprice-unchanged");
+        unchanged.setPublisherRef("internal-agent");
+        unchanged.setReason("weekly margin guardrail adjustment");
+        unchanged.setOffers(List.of(offer("sku-1", 9900L), offer("sku-2", 10900L)));
+
+        assertThatThrownBy(() -> service.execute(unchanged)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("REPRICE requires at least one changed price");
+        verify(headerMapper, never()).transition(anyLong(), anyString(), anyLong(), anyString(), anyString(),
+                anyInt(), anyBoolean(), anyBoolean(), anyBoolean(), any(), any());
+    }
+
+    @Test
     void shouldRecordRejectionThenCreateImmutableRevisionForResubmit() {
         ListingCommandResult result = service.execute(createCommand("listing-reject-create"));
         result = service.execute(transition(ListingOperation.SUBMIT, result, "listing-reject-submit"));

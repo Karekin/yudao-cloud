@@ -209,7 +209,13 @@ public class InboundCommandServiceImpl implements InboundCommandApi {
         payload.put("receipt_no", receiptNo);
         payload.put("asn_id", asn.getAsnId());
         payload.put("warehouse_id", asn.getWarehouseId());
+        payload.put("source_business_type", asn.getSourceBusinessType());
         payload.put("source_business_ref", asn.getSourceBusinessRef());
+        // Keep the supplier identifier on the immutable receipt event. A later
+        // performance projector may only use this alongside a verified PO and
+        // receipt fact; it must not infer supplier performance from the WMS
+        // document number or a legacy replenishment recommendation.
+        payload.put("supplier_ref", asn.getSupplierRef());
         payload.put("receipt_status", "COMPLETED");
         payload.put("asn_status", "RECEIVED");
         return outcome("inbound.receipt.completed", "inbound_receipt", receiptId, 2L, payload,

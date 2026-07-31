@@ -111,6 +111,8 @@ cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommandApi
 cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementQueryApi
 cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierSourcingCommandApi
 cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierSourcingQueryApi
+cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierPerformanceCommandApi
+cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierPerformanceQueryApi
 cn.iocoder.yudao.module.cloudmold.quality.api.QualityCommandApi
 cn.iocoder.yudao.module.cloudmold.quality.api.QualityConsumerEvidenceApi
 cn.iocoder.yudao.module.cloudmold.quality.api.workflow.QualityRecallWorkflowQueryApi

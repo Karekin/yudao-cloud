@@ -73,10 +73,10 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                 .hasSize(24);
         assertThat(ManagedWorkflowDailyAutomationFixtures.workflows())
                 .filteredOn(workflow -> "R2".equals(workflow.getRiskLevel()))
-                .hasSize(7);
+                .hasSize(8);
         assertThat(ManagedWorkflowDailyAutomationFixtures.workflows())
                 .filteredOn(workflow -> "R3".equals(workflow.getRiskLevel()))
-                .hasSize(23);
+                .hasSize(33);
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .filter(ManagedWorkflowDailyAutomationCatalog::canRunWithoutBusinessInput))
                 .containsExactly(
@@ -89,7 +89,7 @@ class ManagedWorkflowDailyAutomationCatalogTest {
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("ROTATING_BUSINESS_SCENARIO"::equals)
-                .hasSize(26);
+                .hasSize(37);
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("DOMAIN_BACKLOG"::equals)
@@ -109,6 +109,14 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                 "skill.cloudmold.commerce.product-to-listing.v1"))
                 .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
                         "product-listing-operator", "catalog.publish"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.risk.dispute-resolution-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "risk-operations", "risk.dispute-resolve"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.data-ai-operations.data-quality-recovery-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "data-ai-operations", "data-quality.recover"));
         assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
                 "skill.cloudmold.crossborder.fulfillment-compliance-lifecycle.v1"))
                 .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
@@ -130,6 +138,49 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                 "skill.cloudmold.mes.production-execution-lifecycle.v1"))
                 .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
                         "production-supervisor", "production.execute"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.commerce.product-management-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "product-operations", "product.management"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.supply.warehouse-admission-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "supply-chain-operator", "warehouse.admission"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.customer-experience.ticket-responsibility-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "consumer-experience-operator",
+                        "customer-experience.ticket-responsibility"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.merchant-experience.rectification-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "merchant-experience-operator",
+                        "merchant-experience.rectification"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.customer-experience.unfulfillable-order-compensation-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "consumer-compensation-operator",
+                        "customer-experience.unfulfillable-compensation"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.finance.logistics-service-settlement-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "logistics-settlement-operator",
+                        "finance.logistics-settlement"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.finance.merchant-service-fee-settlement-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "merchant-settlement-operator",
+                        "finance.merchant-service-fee-settlement"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.finance.advertising-fee-settlement-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "advertising-settlement-operator",
+                        "finance.advertising-fee-settlement"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.finance.profit-loss-improvement-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "profit-loss-operator",
+                        "finance.profit-loss-improvement"));
     }
 
     @Test

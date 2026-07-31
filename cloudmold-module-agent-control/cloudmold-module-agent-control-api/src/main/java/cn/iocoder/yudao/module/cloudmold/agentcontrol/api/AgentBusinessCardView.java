@@ -29,6 +29,8 @@ public class AgentBusinessCardView implements Serializable {
     private Long requesterUserId;
     private Long approverUserId;
     private String processInstanceId;
+    /** 当前 BPM 待办的实际办理人；审批流已推进时不再使用初始审批人。 */
+    private String activeAssigneeUserIds;
     private String outcomeCode;
     private String summary;
     private Instant occurredAt;

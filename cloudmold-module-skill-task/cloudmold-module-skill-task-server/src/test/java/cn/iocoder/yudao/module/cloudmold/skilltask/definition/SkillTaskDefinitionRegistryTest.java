@@ -200,6 +200,26 @@ class SkillTaskDefinitionRegistryTest {
                 .hasSize(11);
         assertThat(financeLifecycle.getSteps().get(financeLifecycle.getSteps().size() - 1).getWaitSuccess()
                 .path("/status").asText()).isEqualTo("CLOSED");
+        for (String settlementSkillId : List.of(
+                "skill.cloudmold.finance.logistics-service-settlement-lifecycle.v1",
+                "skill.cloudmold.finance.merchant-service-fee-settlement-lifecycle.v1",
+                "skill.cloudmold.finance.advertising-fee-settlement-lifecycle.v1")) {
+            SkillTaskDefinition settlement = workspaceRegistry.require(settlementSkillId, "1.0.0");
+            assertThat(settlement.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+            assertThat(settlement.getRiskLevel()).isEqualTo("R3");
+            assertThat(settlement.getSteps()).extracting(SkillTaskDefinition.Step::getStepKind)
+                    .containsExactly("SUBMIT_CHILD", "WAIT_CHILD");
+            assertThat(settlement.getSteps().get(0).getChildSkillId())
+                    .isEqualTo("skill.cloudmold.finance.close-lifecycle.v1");
+        }
+        SkillTaskDefinition profitLoss = workspaceRegistry.require(
+                "skill.cloudmold.finance.profit-loss-improvement-lifecycle.v1", "1.0.0");
+        assertThat(profitLoss.getOwnerRole()).isEqualTo("profit-loss-operator");
+        assertThat(profitLoss.getSteps()).hasSize(6);
+        assertThat(profitLoss.getSteps().get(0).getOperationType()).isEqualTo("READ");
+        assertThat(profitLoss.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(4);
         SkillTaskDefinition qualityLifecycle = workspaceRegistry.require(
                 "skill.cloudmold.quality.inspection-recall-lifecycle.v1", "1.0.0");
         assertThat(qualityLifecycle.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
@@ -216,6 +236,89 @@ class SkillTaskDefinitionRegistryTest {
                             "capability.cloudmold.quality.quality-recall-workflow-query.inspect.v1");
                     assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("SUCCEEDED");
                 });
+        SkillTaskDefinition mysteryBuyerQuality = workspaceRegistry.require(
+                "skill.cloudmold.quality.mystery-buyer-sample-verification.v1", "1.0.0");
+        assertThat(mysteryBuyerQuality.getWorkflowLevel()).isEqualTo("INTERNAL_SUBFLOW");
+        assertThat(mysteryBuyerQuality.getOwnerRole()).isEqualTo("quality-operations");
+        assertThat(mysteryBuyerQuality.getRiskLevel()).isEqualTo("R3");
+        assertThat(mysteryBuyerQuality.getSteps()).hasSize(12);
+        assertThat(mysteryBuyerQuality.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(11);
+        assertThat(mysteryBuyerQuality.getSteps().get(11)).satisfies(step -> {
+            assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
+            assertThat(step.getCapabilityId()).isEqualTo(
+                    "capability.cloudmold.quality.quality-consumer-evidence.get-latest-by-sku.v1");
+            assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("VERIFIED");
+            assertThat(step.getWaitSuccess().path("/decision").asText()).isEqualTo("PASS");
+        });
+        SkillTaskDefinition productManagement = workspaceRegistry.require(
+                "skill.cloudmold.commerce.product-management-lifecycle.v1", "1.0.0");
+        assertThat(productManagement.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(productManagement.getOwnerRole()).isEqualTo("product-operations");
+        assertThat(productManagement.getRiskLevel()).isEqualTo("R3");
+        assertThat(productManagement.getSteps()).hasSize(15);
+        assertThat(productManagement.getSteps())
+                .filteredOn(step -> "SUBMIT_CHILD".equals(step.getStepKind()))
+                .extracting(SkillTaskDefinition.Step::getChildSkillId)
+                .containsExactly(
+                        "skill.cloudmold.catalog.assortment-planning-lifecycle.v1",
+                        "skill.cloudmold.commerce.product-to-listing.v1",
+                        "skill.cloudmold.consumer.shopping-journey.v1",
+                        "skill.cloudmold.quality.mystery-buyer-sample-verification.v1",
+                        "skill.cloudmold.engagement.promotion-campaign-operations.v1");
+        SkillTaskDefinition warehouseAdmission = workspaceRegistry.require(
+                "skill.cloudmold.supply.warehouse-admission-lifecycle.v1", "1.0.0");
+        assertThat(warehouseAdmission.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(warehouseAdmission.getOwnerRole()).isEqualTo("supply-chain-operator");
+        assertThat(warehouseAdmission.getRiskLevel()).isEqualTo("R3");
+        assertThat(warehouseAdmission.getSteps()).hasSize(12);
+        assertThat(warehouseAdmission.getSteps().get(3)).satisfies(step -> {
+            assertThat(step.getStepCode()).isEqualTo("verify_quality_first_admission_gate");
+            assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("VERIFIED");
+            assertThat(step.getWaitFailure().path("/status")).hasSize(2);
+        });
+        SkillTaskDefinition ticketResponsibility = workspaceRegistry.require(
+                "skill.cloudmold.customer-experience.ticket-responsibility-lifecycle.v1", "1.0.0");
+        assertThat(ticketResponsibility.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(ticketResponsibility.getOwnerRole()).isEqualTo("consumer-experience-operator");
+        assertThat(ticketResponsibility.getRiskLevel()).isEqualTo("R3");
+        assertThat(ticketResponsibility.getSteps()).hasSize(19);
+        assertThat(ticketResponsibility.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(15);
+        assertThat(ticketResponsibility.getSteps().get(11)).satisfies(step -> {
+            assertThat(step.getStepCode()).isEqualTo("ticket_responsibility_decision");
+            assertThat(step.getCapabilityId()).isEqualTo(
+                    "capability.cloudmold.customerservice.customer-service-command.execute.v1");
+        });
+        assertThat(ticketResponsibility.getSteps().get(18).getWaitSuccess()
+                .path("/ticketStatus").asText()).isEqualTo("CLOSED");
+        SkillTaskDefinition unfulfillableCompensation = workspaceRegistry.require(
+                "skill.cloudmold.customer-experience.unfulfillable-order-compensation-lifecycle.v1",
+                "1.0.0");
+        assertThat(unfulfillableCompensation.getOwnerRole())
+                .isEqualTo("consumer-compensation-operator");
+        assertThat(unfulfillableCompensation.getRiskLevel()).isEqualTo("R3");
+        assertThat(unfulfillableCompensation.getSteps()).hasSize(19);
+        assertThat(unfulfillableCompensation.getSteps().get(0).getChildSkillId())
+                .isEqualTo("skill.cloudmold.commerce.order-cancellation-operational.v1");
+        assertThat(unfulfillableCompensation.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(15);
+        SkillTaskDefinition merchantRectification = workspaceRegistry.require(
+                "skill.cloudmold.merchant-experience.rectification-lifecycle.v1", "1.0.0");
+        assertThat(merchantRectification.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(merchantRectification.getOwnerRole()).isEqualTo("merchant-experience-operator");
+        assertThat(merchantRectification.getRiskLevel()).isEqualTo("R3");
+        assertThat(merchantRectification.getSteps()).hasSize(13);
+        assertThat(merchantRectification.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(10);
+        assertThat(merchantRectification.getSteps().get(0).getCapabilityId()).isEqualTo(
+                "capability.cloudmold.merchant.merchant-reference-validation.require-active-reference.v1");
+        assertThat(merchantRectification.getSteps().get(12).getWaitSuccess()
+                .path("/ticketStatus").asText()).isEqualTo("CLOSED");
         SkillTaskDefinition inTransitScenario = workspaceRegistry.require(
                 "skill.cloudmold.consumer.in-transit-order-scenario.v1", "1.0.0");
         assertThat(inTransitScenario.getWorkflowLevel()).isEqualTo("INTERNAL_SUBFLOW");
@@ -362,6 +465,21 @@ class SkillTaskDefinitionRegistryTest {
             assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("RESOLVED");
             assertThat(step.getWaitSuccess().path("/aggregateVersion").asInt()).isEqualTo(4);
         });
+        SkillTaskDefinition dataQualityRecovery = workspaceRegistry.require(
+                "skill.cloudmold.data-ai-operations.data-quality-recovery-lifecycle.v1", "1.0");
+        assertThat(dataQualityRecovery.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(dataQualityRecovery.getOwnerRole()).isEqualTo("data-ai-operations");
+        assertThat(dataQualityRecovery.getRiskLevel()).isEqualTo("R2");
+        assertThat(dataQualityRecovery.getSteps()).hasSize(20);
+        assertThat(dataQualityRecovery.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(18);
+        assertThat(dataQualityRecovery.getSteps().get(18)).satisfies(step -> {
+            assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
+            assertThat(step.getCapabilityId()).isEqualTo(
+                    "capability.cloudmold.metadata.metadata-query.get-dqc-result.v1");
+            assertThat(step.getWaitSuccess().path("/resultStatus").asText()).isEqualTo("PASS");
+        });
         assertThat(workspaceRegistry.all()).extracting(SkillTaskDefinition::getSkillId)
                 .contains("skill.cloudmold.commerce.catalog-matrix.v1",
                         "skill.cloudmold.commerce.order-cancellation-operational.v1",
@@ -374,6 +492,7 @@ class SkillTaskDefinitionRegistryTest {
                         "skill.cloudmold.partner-marketing.kol-media-operations.v1",
                         "skill.cloudmold.mes.production-readiness.v1",
                         "skill.cloudmold.mes.production-execution-lifecycle.v1",
+                        "skill.cloudmold.data-ai-operations.data-quality-recovery-lifecycle.v1",
                         "skill.cloudmold.commerce.terminal-readback.v1");
         List<String> readbackSkillIds = List.of(
                 "skill.cloudmold.operations.daily-business-control.v1",

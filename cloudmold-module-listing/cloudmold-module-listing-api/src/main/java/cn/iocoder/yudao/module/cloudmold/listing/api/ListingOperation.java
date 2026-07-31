@@ -10,6 +10,7 @@ public enum ListingOperation {
     REJECT_BUSINESS,
     REJECT_RISK,
     REVISE,
+    REPRICE,
     PUBLISH,
     UNPUBLISH,
     SUSPEND,

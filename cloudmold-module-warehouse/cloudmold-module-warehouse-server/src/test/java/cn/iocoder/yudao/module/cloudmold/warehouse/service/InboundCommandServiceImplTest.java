@@ -70,6 +70,7 @@ class InboundCommandServiceImplTest {
         // ASN 已在途，version=1
         AsnDO asn = new AsnDO().setAsnId(ASN_ID).setTenantId(1L).setAsnNo("ASN-1")
                 .setSourceBusinessType("REPLENISHMENT").setSourceBusinessRef("REC-1")
+                .setSupplierRef("supplier-1")
                 .setWarehouseId(WAREHOUSE).setStatus("IN_TRANSIT").setVersion(1L);
         when(asnMapper.selectForUpdate(1L, ASN_ID)).thenReturn(asn);
         // ASN 行预期量 10，收 7 → short=3
@@ -121,7 +122,10 @@ class InboundCommandServiceImplTest {
         assertThat(rl.getInventoryOperationId()).isEqualTo(201L);
         // 事件 inbound.receipt.completed
         verify(outboxAppender).append(argThat(event -> "inbound.receipt.completed".equals(event.getEventType())
-                && "inbound_receipt".equals(event.getAggregateType())));
+                && "inbound_receipt".equals(event.getAggregateType())
+                && "REPLENISHMENT".equals(event.getPayload().get("source_business_type"))
+                && "REC-1".equals(event.getPayload().get("source_business_ref"))
+                && "supplier-1".equals(event.getPayload().get("supplier_ref"))));
     }
 
     @Test

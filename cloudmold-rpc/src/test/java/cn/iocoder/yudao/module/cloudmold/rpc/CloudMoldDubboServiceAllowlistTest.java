@@ -43,6 +43,8 @@ class CloudMoldDubboServiceAllowlistTest {
                         "cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierSourcingCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierSourcingQueryApi",
+                        "cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierPerformanceCommandApi",
+                        "cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierPerformanceQueryApi",
                         "cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.supplyplanning.api.SupplyPlanningQueryApi");
         assertThat(services).allSatisfy(service -> {

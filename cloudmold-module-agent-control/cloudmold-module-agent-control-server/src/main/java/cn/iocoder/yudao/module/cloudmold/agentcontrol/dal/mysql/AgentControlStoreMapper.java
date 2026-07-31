@@ -2,6 +2,7 @@ package cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.mysql;
 
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.ActorRoleGrantView;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentApprovalDetailView;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentApprovalBoardStatsView;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentBusinessCardView;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.*;
 import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
@@ -72,9 +73,11 @@ public interface AgentControlStoreMapper {
 
     @Select("""
             <script>
-            SELECT card_type,card_id,mission_id,work_order_id,title,role_code,from_role_code,action_code,
-                   scope_hash,status,workflow_status,risk_level,requester_user_id,approver_user_id,
-                   process_instance_id,outcome_code,summary,occurred_at
+            SELECT cards.card_type,cards.card_id,cards.mission_id,cards.work_order_id,cards.title,
+                   cards.role_code,cards.from_role_code,cards.action_code,cards.scope_hash,cards.status,
+                   cards.workflow_status,cards.risk_level,cards.requester_user_id,cards.approver_user_id,
+                   cards.process_instance_id,active_tasks.active_assignee_user_ids,cards.outcome_code,
+                   cards.summary,cards.occurred_at
             FROM (
               SELECT 'APPROVAL' AS card_type,a.approval_id AS card_id,w.mission_id,w.work_order_id,w.title,
                      w.role_code,NULL AS from_role_code,w.action_code,a.scope_hash,a.status,
@@ -111,6 +114,14 @@ public interface AgentControlStoreMapper {
                 ON w.tenant_id=r.tenant_id AND w.work_order_id=r.work_order_id
               WHERE r.tenant_id=#{tenantId}
             ) cards
+            LEFT JOIN (
+              SELECT PROC_INST_ID_ AS process_instance_id,
+                     GROUP_CONCAT(DISTINCT ASSIGNEE_ ORDER BY ASSIGNEE_ SEPARATOR ',')
+                       AS active_assignee_user_ids
+              FROM ACT_RU_TASK
+              WHERE ASSIGNEE_ IS NOT NULL
+              GROUP BY PROC_INST_ID_
+            ) active_tasks ON active_tasks.process_instance_id=CAST(cards.process_instance_id AS CHAR)
             WHERE 1=1
             <if test="roleCode != null">AND role_code=#{roleCode}</if>
             <if test="cardType != null">AND card_type=#{cardType}</if>
@@ -124,6 +135,21 @@ public interface AgentControlStoreMapper {
                                                     @Param("cardType") String cardType,
                                                     @Param("status") String status,
                                                     @Param("limit") int limit);
+
+    @Select("""
+            SELECT
+              COALESCE(SUM(CASE WHEN a.status='PENDING' AND w.status='WAITING_APPROVAL' THEN 1 ELSE 0 END), 0) AS pending_total,
+              COALESCE(SUM(CASE WHEN a.status='PENDING' AND b.status='RUNNING' THEN 1 ELSE 0 END), 0) AS bpm_in_progress,
+              COALESCE(SUM(CASE WHEN a.status='PENDING' AND b.status='START_REQUESTED' THEN 1 ELSE 0 END), 0) AS approver_assignment_required,
+              COALESCE(SUM(CASE WHEN a.status='PENDING' AND b.status='START_UNCERTAIN' THEN 1 ELSE 0 END), 0) AS start_uncertain,
+              COALESCE(SUM(CASE WHEN a.status='PENDING' AND b.status='BPM_APPROVED_PENDING_ATTESTATION' THEN 1 ELSE 0 END), 0) AS bpm_terminal_pending_safety,
+              COALESCE(SUM(CASE WHEN a.status='APPROVED' AND w.status='READY' THEN 1 ELSE 0 END), 0) AS released_waiting_execution
+            FROM cloudmold_agent_approval a
+            JOIN cloudmold_agent_work_order w ON w.tenant_id=a.tenant_id AND w.work_order_id=a.work_order_id
+            LEFT JOIN cloudmold_agent_approval_workflow_binding b ON b.tenant_id=a.tenant_id AND b.approval_id=a.approval_id
+            WHERE a.tenant_id=#{tenantId}
+            """)
+    AgentApprovalBoardStatsView selectApprovalBoardStats(@Param("tenantId") Long tenantId);
 
     @Select("""
             <script>

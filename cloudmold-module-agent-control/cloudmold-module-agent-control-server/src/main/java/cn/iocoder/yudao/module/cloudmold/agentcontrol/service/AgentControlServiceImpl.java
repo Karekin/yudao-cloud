@@ -336,15 +336,20 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
                 "approval is not bound to the current waiting work order");
         require(Objects.equals(approval.getScopeHash(), approvalScopeHash(workOrder)),
                 "approval scope drifted after the request was frozen");
-        RoleActionPolicy policy = requireNonNull(mapper.selectActionPolicy(tenantId, workOrder.getRoleCode(),
-                workOrder.getActionCode()), "work order action policy not found");
-        require(Boolean.TRUE.equals(policy.getEnabled()) && "ALLOW".equals(policy.getPermissionMode())
-                        && Boolean.TRUE.equals(policy.getApprovalRequired()),
-                "work order action policy is not approval-enabled");
-        require(Objects.equals(workOrder.getActionPolicyId(), policy.getPolicyId())
-                        && Objects.equals(workOrder.getActionPolicyVersion(), policy.getVersion())
-                        && Objects.equals(workOrder.getRiskLevel(), policy.getRiskLevel()),
-                "work order action policy snapshot no longer matches the configured policy");
+        if ("APPROVE".equals(input.getDecision())) {
+            RoleActionPolicy policy = requireNonNull(mapper.selectActionPolicy(tenantId, workOrder.getRoleCode(),
+                    workOrder.getActionCode()), "work order action policy not found");
+            require(Boolean.TRUE.equals(policy.getEnabled()) && "ALLOW".equals(policy.getPermissionMode())
+                            && Boolean.TRUE.equals(policy.getApprovalRequired()),
+                    "work order action policy is not approval-enabled");
+            require(Objects.equals(workOrder.getActionPolicyId(), policy.getPolicyId())
+                            && Objects.equals(workOrder.getActionPolicyVersion(), policy.getVersion())
+                            && Objects.equals(workOrder.getRiskLevel(), policy.getRiskLevel()),
+                    "work order action policy snapshot no longer matches the configured policy");
+        }
+        // A rejection only cancels the frozen work order; it never enables the governed action.
+        // Let an independently attested BPM rejection close historical approvals even after the
+        // action policy has been versioned forward, while approvals remain strictly fail-closed.
         if ("R3".equals(workOrder.getRiskLevel())) {
             require(approvalAttestations.supportsR3MultiPartyApproval(),
                     "R3 decision requires the governed multi-party BPM approval gate");
@@ -461,6 +466,13 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
         Long tenantId = TenantContextHolder.getRequiredTenantId();
         return requireNonNull(mapper.selectApprovalDetail(tenantId, requireRef(approvalId, "approvalId")),
                 "approval not found");
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AgentApprovalBoardStatsView getApprovalBoardStats() {
+        AgentApprovalBoardStatsView stats = mapper.selectApprovalBoardStats(TenantContextHolder.getRequiredTenantId());
+        return stats == null ? new AgentApprovalBoardStatsView() : stats;
     }
 
     @Override
