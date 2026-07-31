@@ -239,30 +239,31 @@ spring:
     zhipuai: # 智谱 AI
       api-key: ${SPRING_AI_ZHIPUAI_API_KEY:}
     openai: # OpenAI 官方
-      api-key: ${SPRING_AI_OPENAI_API_KEY:}
-      base-url: https://api.gptsapi.net
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      api-key: ${OPENAI_API_KEY:${SPRING_AI_OPENAI_API_KEY:}}
     azure: # OpenAI 微软
       openai:
         endpoint: https://eastusprejade.openai.azure.com
     anthropic: # Anthropic Claude
-      api-key: ${SPRING_AI_ANTHROPIC_API_KEY:}
+      base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
+      api-key: ${ANTHROPIC_API_KEY:${SPRING_AI_ANTHROPIC_API_KEY:}}
     ollama:
       base-url: http://127.0.0.1:11434
       chat:
         model: llama3
     stabilityai:
-      api-key: ${SPRING_AI_STABILITYAI_API_KEY:}
+      api-key: ${STABILITYAI_API_KEY:${SPRING_AI_STABILITYAI_API_KEY:}}
     dashscope: # 通义千问
-      api-key: ${SPRING_AI_DASHSCOPE_API_KEY:}
+      api-key: ${DASHSCOPE_API_KEY:${SPRING_AI_DASHSCOPE_API_KEY:}}
     minimax: # Minimax：https://www.minimaxi.com/
       api-key: ${SPRING_AI_MINIMAX_API_KEY:}
     moonshot: # 月之暗面（KIMI）
       api-key: ${SPRING_AI_MOONSHOT_API_KEY:}
     deepseek: # DeepSeek
-      api-key: ${SPRING_AI_DEEPSEEK_API_KEY:}
+      api-key: ${DEEPSEEK_API_KEY:${SPRING_AI_DEEPSEEK_API_KEY:}}
       chat:
         options:
-          model: deepseek-chat
+          model: deepseek-v4-flash
     model:
       rerank: false # 是否开启“通义千问”的 Rerank 模型，填写 dashscope 开启
     mcp:
@@ -310,6 +311,30 @@ yudao:
       enable: ${YUDAO_AI_BAICHUAN_ENABLED:false}
       api-key: ${YUDAO_AI_BAICHUAN_API_KEY:}
       model: Baichuan4-Turbo
+    yiyan: # 文心一言
+      enable: ${YUDAO_AI_YIYAN_ENABLED:false}
+      api-key: ${YUDAO_AI_YIYAN_API_KEY:}
+      model: ernie-5.1
+    zhipu: # 智谱 AI（GLM）
+      enable: ${YUDAO_AI_ZHIPU_ENABLED:false}
+      api-key: ${YUDAO_AI_ZHIPU_API_KEY:}
+      model: glm-5.2
+    minimax: # MiniMax
+      enable: ${YUDAO_AI_MINIMAX_ENABLED:false}
+      api-key: ${YUDAO_AI_MINIMAX_API_KEY:}
+      model: MiniMax-M3
+    moonshot: # 月之暗面（KIMI）
+      enable: ${YUDAO_AI_MOONSHOT_ENABLED:false}
+      api-key: ${YUDAO_AI_MOONSHOT_API_KEY:}
+      model: kimi-k2.6
+    stepfun: # 阶跃星辰
+      enable: ${YUDAO_AI_STEPFUN_ENABLED:false}
+      api-key: ${YUDAO_AI_STEPFUN_API_KEY:}
+      model: step-3.7-flash
+    grok: # Grok
+      enable: ${YUDAO_AI_GROK_ENABLED:false}
+      api-key: ${YUDAO_AI_GROK_API_KEY:}
+      model: grok-4.3
     midjourney:
       enable: ${YUDAO_AI_MIDJOURNEY_ENABLED:false}
   #    base-url: https://api.holdai.top/mj-relax/mj
