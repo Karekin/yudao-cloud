@@ -10,18 +10,20 @@ import java.time.LocalDateTime;
 
 @Data
 @Accessors(chain = true)
-@TableName("cloudmold_ai_ops_workflow_registry_pointer")
-public class WorkflowRegistryPointerDO {
+@TableName("cloudmold_ai_ops_workflow_registry_validation_request")
+public class WorkflowRegistryValidationRequestDO {
+
     @TableId(type = IdType.INPUT)
-    private String pointerId;
+    private String validationRequestId;
     private Long tenantId;
     private String skillId;
-    private String stableVersionId;
-    private String candidateVersionId;
+    private String registryVersionId;
     private Long pointerVersion;
-    private Boolean killSwitchEnabled;
-    private String createdBy;
-    private String updatedBy;
+    private String challenge;
+    private String requestStatus;
+    private String requestedBySubject;
+    private String idempotencyKey;
+    private LocalDateTime expiresAt;
+    private LocalDateTime consumedAt;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
 }

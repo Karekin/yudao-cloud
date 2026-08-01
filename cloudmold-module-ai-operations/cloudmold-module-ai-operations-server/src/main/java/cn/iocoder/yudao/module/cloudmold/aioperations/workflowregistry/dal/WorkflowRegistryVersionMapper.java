@@ -5,6 +5,7 @@ import cn.iocoder.yudao.module.cloudmold.aioperations.workflowregistry.dal.datao
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface WorkflowRegistryVersionMapper extends BaseMapperX<WorkflowRegistryVersionDO> {
@@ -16,4 +17,15 @@ public interface WorkflowRegistryVersionMapper extends BaseMapperX<WorkflowRegis
     @Select("SELECT * FROM cloudmold_ai_ops_workflow_registry_version WHERE tenant_id=#{tenantId} AND proposal_id=#{proposalId}")
     WorkflowRegistryVersionDO selectByProposalId(@Param("tenantId") Long tenantId,
                                                  @Param("proposalId") String proposalId);
+
+    @Update("""
+            UPDATE cloudmold_ai_ops_workflow_registry_version
+               SET registry_status=#{targetStatus}
+             WHERE tenant_id=#{tenantId} AND registry_version_id=#{versionId}
+               AND registry_status=#{expectedStatus}
+            """)
+    int updateStatus(@Param("tenantId") Long tenantId,
+                     @Param("versionId") String versionId,
+                     @Param("expectedStatus") String expectedStatus,
+                     @Param("targetStatus") String targetStatus);
 }
