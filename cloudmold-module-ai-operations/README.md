@@ -57,3 +57,7 @@ Main APIs:
 - `GET /cloudmold/ai-operations/workflow-evidence/{query|digests/daily|digests/weekly}`
 
 Migrations `V20260801_123` through `V20260801_126` install the immutable registry, validation/approval/release ledger, evidence hub, persistent kill switch, and SkillTask runtime lineage.
+
+## DeerFlow 岗位能力只读桥接
+
+AI 运营控制台不直接持有 DeerFlow 内部凭据。`GET /cloudmold/ai-operations/job-capabilities` 代理 DeerFlow 当前有效的“业务板块 → 业务领域 → 岗位 → Skill”目录，`GET /cloudmold/ai-operations/job-capabilities/{skillName}` 只读返回对应 `SKILL.md` 内容和摘要；两者均复用 `cloudmold:ai-operations:query` 权限。服务端通过 `CLOUDMOLD_DEER_FLOW_BASE_URL` 和只允许读取这两个目录接口的 `CLOUDMOLD_DEER_FLOW_CATALOG_TOKEN` 连接 DeerFlow，不持有 Gateway 全局内部令牌；客户端会拒绝重定向、非法 Skill 名称、超大响应和非 JSON 响应，且不会向浏览器返回令牌或 DeerFlow 主机路径。

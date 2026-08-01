@@ -26,6 +26,9 @@ spring:
 # but must never try to export duplicate providers.
 cloudmold:
   ai-operations:
+    deer-flow:
+      base-url: ${CLOUDMOLD_DEER_FLOW_BASE_URL:http://127.0.0.1:2026}
+      catalog-token: ${CLOUDMOLD_DEER_FLOW_CATALOG_TOKEN:}
     temporal:
       enabled: ${CLOUDMOLD_AI_OPERATIONS_TEMPORAL_ENABLED:false}
       target: ${CLOUDMOLD_TEMPORAL_TARGET:127.0.0.1:7233}
