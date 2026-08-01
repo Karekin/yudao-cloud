@@ -212,8 +212,7 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
                                     .build())
                             .build();
                 }
-                SkillTaskTerminalProofView proof = "SUCCEEDED".equals(status)
-                        ? skillTaskQueries.getTerminalProof(current.getTaskId()) : null;
+                SkillTaskTerminalProofView proof = skillTaskQueries.getTerminalProof(current.getTaskId());
                 if ("SUCCEEDED".equals(status) && isReplenishmentPrepareSkill(request)) {
                     String recommendationId = current.getBusinessReferenceId() != null
                             ? current.getBusinessReferenceId() : requireReplenishmentRecommendationId(request);

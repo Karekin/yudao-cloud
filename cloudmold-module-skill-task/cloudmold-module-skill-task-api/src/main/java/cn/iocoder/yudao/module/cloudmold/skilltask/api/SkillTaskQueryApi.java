@@ -5,7 +5,6 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskD
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskRunPageRequest;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskRunView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowView;
-import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowDetailView;
 
 import java.util.List;
 
@@ -20,8 +19,6 @@ public interface SkillTaskQueryApi {
     SkillTaskTerminalProofView getTerminalProof(String taskId);
 
     List<ManagedSkillTaskWorkflowView> listManagedWorkflows();
-
-    ManagedSkillTaskWorkflowDetailView getManagedWorkflow(String skillId);
 
     PageResult<ManagedSkillTaskRunView> pageManagedRuns(ManagedSkillTaskRunPageRequest request);
 

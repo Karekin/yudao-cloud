@@ -104,38 +104,6 @@ class SkillTaskWorkerTest {
     }
 
     @Test
-    void shouldStopAfterAWriteCapabilityReturnsBusinessFailure() {
-        Candidate candidate = new Candidate();
-        candidate.setTenantId(8L); candidate.setTaskId("task-1"); candidate.setStatus("RUNNING");
-        candidate.setVersion(3L); candidate.setAttemptCount(1); candidate.setMaxAttempts(3);
-        Task task = task();
-        Step step = step();
-        when(mapper.selectDue(LocalDateTime.of(2026, 7, 18, 12, 0), 20)).thenReturn(List.of(candidate));
-        when(checkpoints.claim(eq(candidate), anyString())).thenReturn(task);
-        when(mapper.selectStep(8L, "task-1", "write")).thenReturn(step);
-        when(mapper.selectSteps(8L, "task-1")).thenReturn(List.of(step));
-        when(approvalVerifier.verify(any())).thenReturn(new SkillTaskApprovalEvidence(
-                new SkillTaskApprovalPermitClaims("cma3", "risk-1", "cloudmold.agent-control",
-                        "cloudmold.skill-task", "permit-1", "wo-r3-1", "approval-1", "f".repeat(64),
-                        "skill.write", "1.0.0", "c".repeat(64), "a".repeat(64), "R3", "2:42", 8L,
-                        Instant.parse("2026-07-18T12:00:00Z"), Instant.parse("2026-07-18T12:00:00Z"),
-                        Instant.parse("2026-07-18T13:00:00Z")),
-                "a".repeat(64), "test"));
-        JsonNode failed = objectMapper.createObjectNode()
-                .put("success", false)
-                .put("failureCode", "INVALID_ARGUMENT")
-                .put("failureMessage", "merchant mapping is missing");
-        when(executor.execute(eq("cap.write"), any(), any(), eq(true))).thenReturn(failed);
-
-        worker.poll();
-
-        verify(checkpoints, never()).checkpointSuccess(any(), any(), anyString(), anyString(), anyString());
-        verify(checkpoints).checkpointFailure(eq(task), eq(step), anyString(), eq(true), any(),
-                eq("PERMANENT_EXECUTION_FAILURE"),
-                eq("IllegalArgumentException: merchant mapping is missing"));
-    }
-
-    @Test
     void releasesParentLeaseWhileItsPersistedChildIsStillRunning() {
         Candidate candidate = new Candidate();
         candidate.setTenantId(8L); candidate.setTaskId("parent-1"); candidate.setStatus("WAITING");

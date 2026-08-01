@@ -8,9 +8,6 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskR
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskRunView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskStepView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowView;
-import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowDetailView;
-import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowIdempotencyBindingView;
-import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowStepView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskMapper;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Step;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Task;
@@ -260,41 +257,6 @@ public class ManagedSkillTaskQueryService {
                         .thenComparing(SkillTaskDefinition::getSkillVersion))
                 .map(this::toWorkflowItem)
                 .toList();
-    }
-
-    public ManagedSkillTaskWorkflowDetailView getManagedWorkflow(String skillId) {
-        String normalizedSkillId = normalizeRequired(skillId, "skillId");
-        SkillTaskDefinition definition = definitionRegistry.all().stream()
-                .filter(item -> normalizedSkillId.equals(item.getSkillId()))
-                .filter(item -> "BUSINESS_ROLE".equals(item.getWorkflowLevel()))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("Managed workflow is not registered: " + normalizedSkillId));
-        return ManagedSkillTaskWorkflowDetailView.builder()
-                .workflow(toWorkflowItem(definition))
-                .steps(definition.getSteps().stream()
-                        .map(step -> ManagedSkillTaskWorkflowStepView.builder()
-                                .stepOrder(step.getStepOrder())
-                                .stepCode(step.getStepCode())
-                                .displayName(outcomePresenter.stepDisplayName(
-                                        step.getStepCode(), step.getChildSkillId()))
-                                .stepKind(step.getStepKind())
-                                .operationType(step.getOperationType())
-                                .approvalRequired(step.getApprovalRequired())
-                                .capabilityId(step.getCapabilityId())
-                                .childSkillId(step.getChildSkillId())
-                                .childSkillVersion(step.getChildSkillVersion())
-                                .pollIntervalSeconds(step.getPollIntervalSeconds())
-                                .idempotencyBinding(step.getIdempotencyBinding() == null ? null
-                                        : ManagedSkillTaskWorkflowIdempotencyBindingView.builder()
-                                        .argumentIndex(step.getIdempotencyBinding().getArgumentIndex())
-                                        .jsonPointer(step.getIdempotencyBinding().getJsonPointer())
-                                        .build())
-                                .waitSuccessJson(step.getWaitSuccess() == null ? null : step.getWaitSuccess().toString())
-                                .waitFailureJson(step.getWaitFailure() == null ? null : step.getWaitFailure().toString())
-                                .argumentsJson(step.getArguments() == null ? null : step.getArguments().toString())
-                                .build())
-                        .toList())
-                .build();
     }
 
     public PageResult<ManagedSkillTaskRunView> getManagedRunPage(ManagedSkillTaskRunPageRequest request) {

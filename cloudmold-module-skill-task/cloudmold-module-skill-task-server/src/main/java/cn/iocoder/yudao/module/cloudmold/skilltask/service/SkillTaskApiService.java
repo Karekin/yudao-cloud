@@ -15,7 +15,6 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskD
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskRunPageRequest;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskRunView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowView;
-import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowDetailView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalRefCodec;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskApprovalPermitClaims;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.approval.SkillTaskMissionLeaseFencePort;
@@ -221,11 +220,6 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
     }
 
     @Override
-    public ManagedSkillTaskWorkflowDetailView getManagedWorkflow(String skillId) {
-        return managedSkillTaskQueryService.getManagedWorkflow(skillId);
-    }
-
-    @Override
     public PageResult<ManagedSkillTaskRunView> pageManagedRuns(ManagedSkillTaskRunPageRequest request) {
         Objects.requireNonNull(request, "request");
         return managedSkillTaskQueryService.getManagedRunPage(request);
@@ -388,7 +382,7 @@ public class SkillTaskApiService implements SkillTaskCommandApi, SkillTaskQueryA
 
     private void insertSteps(long tenantId, String taskId, SkillTaskDefinition definition, LocalDateTime now) {
         for (SkillTaskDefinition.Step step : definition.getSteps()) {
-            String idempotencyKey = taskId + "." + step.getStepCode();
+            String idempotencyKey = taskId + ":" + step.getStepCode();
             if (step.getStepKind() == null || "CAPABILITY".equals(step.getStepKind())) {
                 mapper.insertStep(tenantId, taskId, step.getStepCode(), step.getStepOrder(), step.getCapabilityId(),
                         step.getOperationType(), json.canonical(step.getArguments()), idempotencyKey, now);

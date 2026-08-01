@@ -10,7 +10,6 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskD
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskRunPageRequest;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskRunView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowView;
-import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowDetailView;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -30,11 +29,6 @@ public class AiOperationsManagedRunQueryService {
 
     public List<ManagedSkillTaskWorkflowView> listManagedWorkflows() {
         return queryWithRpcContext("managed-workflows", skillTaskQueryApi::listManagedWorkflows);
-    }
-
-    public ManagedSkillTaskWorkflowDetailView getManagedWorkflow(String skillId) {
-        return queryWithRpcContext("managed-workflows:" + normalize(skillId),
-                () -> skillTaskQueryApi.getManagedWorkflow(skillId));
     }
 
     public List<ManagedSkillTaskWorkflowView> listManagedWorkflowsAs(Long operatorUserId,

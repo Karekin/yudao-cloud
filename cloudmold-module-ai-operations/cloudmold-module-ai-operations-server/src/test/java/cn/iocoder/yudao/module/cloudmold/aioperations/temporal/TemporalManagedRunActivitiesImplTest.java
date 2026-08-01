@@ -32,7 +32,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.never;
 
 class TemporalManagedRunActivitiesImplTest {
 
@@ -180,32 +179,6 @@ class TemporalManagedRunActivitiesImplTest {
         TemporalManagedRunState refreshed = activities.refreshSkillTask(request, running);
         assertThat(refreshed.getStatus()).isEqualTo("SUCCEEDED");
         assertThat(refreshed.getBusinessResult().getEvidenceRef()).isEqualTo("proof-1");
-    }
-
-    @Test
-    void shouldCloseNeedsReviewWithoutRequestingSuccessOnlyTerminalProof() {
-        TemporalManagedRunRequest request = TemporalManagedRunRequest.builder()
-                .tenantId(162L).scheduleId("cloudmold-t162-managed-daily-failing")
-                .skillId("skill.cloudmold.test.failure.v1").skillVersion("1.0.0")
-                .inputJson("{}").operatorUserId(225L).operatorUserType(2)
-                .build();
-        TemporalManagedRunState running = TemporalManagedRunState.builder()
-                .status("RUNNING").phase("SKILL_TASK")
-                .temporalRunId("run-needs-review").temporalWorkflowId("workflow-needs-review")
-                .managedRunId("managed-needs-review").taskId("task-needs-review")
-                .build();
-        when(skillTaskQueries.get("task-needs-review")).thenReturn(SkillTaskView.builder()
-                .taskId("task-needs-review").runId("managed-needs-review")
-                .status("NEEDS_REVIEW").build());
-
-        TemporalManagedRunState refreshed = activities.refreshSkillTask(request, running);
-
-        assertThat(refreshed.getStatus()).isEqualTo("NEEDS_REVIEW");
-        assertThat(refreshed.getErrorCode()).isEqualTo("NEEDS_REVIEW");
-        assertThat(refreshed.getBusinessResult().getEvidenceRef()).isEqualTo("managed-needs-review");
-        verify(skillTaskQueries, never()).getTerminalProof("task-needs-review");
-        verify(mapper).updateRunBinding(eq(162L), eq("run-needs-review"), eq("NEEDS_REVIEW"),
-                eq("NEEDS_REVIEW"), eq("managed-needs-review"), eq("task-needs-review"), any());
     }
 
     @Test

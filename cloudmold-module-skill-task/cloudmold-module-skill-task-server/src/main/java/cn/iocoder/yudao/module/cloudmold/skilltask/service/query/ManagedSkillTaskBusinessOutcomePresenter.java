@@ -729,36 +729,32 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
     }
 
     public String stepDisplayName(Step step) {
-        return stepDisplayName(step.getStepCode(), childWorkflowSkillId(step));
-    }
-
-    public String stepDisplayName(String stepCode, String childSkillId) {
-        String explicit = STEP_NAMES.get(stepCode);
+        String explicit = STEP_NAMES.get(step.getStepCode());
         if (explicit != null) {
             return explicit;
         }
-        if (stepCode.startsWith("define_")) {
-            return "创建第 " + numericSuffix(stepCode) + " 个 SKU";
+        if (step.getStepCode().startsWith("define_")) {
+            return "创建第 " + numericSuffix(step.getStepCode()) + " 个 SKU";
         }
-        if (stepCode.startsWith("activate_sku_")) {
-            return "启用第 " + numericSuffix(stepCode) + " 个 SKU";
+        if (step.getStepCode().startsWith("activate_sku_")) {
+            return "启用第 " + numericSuffix(step.getStepCode()) + " 个 SKU";
         }
-        if (stepCode.startsWith("activate_size_")) {
-            return "启用尺码 " + stepCode.substring("activate_size_".length()).toUpperCase(Locale.ROOT);
+        if (step.getStepCode().startsWith("activate_size_")) {
+            return "启用尺码 " + step.getStepCode().substring("activate_size_".length()).toUpperCase(Locale.ROOT);
         }
-        if (stepCode.startsWith("activate_color_")) {
-            return "启用颜色 " + stepCode.substring("activate_color_".length());
+        if (step.getStepCode().startsWith("activate_color_")) {
+            return "启用颜色 " + step.getStepCode().substring("activate_color_".length());
         }
-        if (stepCode.startsWith("plan_")) {
-            return "生成第 " + numericSuffix(stepCode) + " 个 SKU 投影方案";
+        if (step.getStepCode().startsWith("plan_")) {
+            return "生成第 " + numericSuffix(step.getStepCode()) + " 个 SKU 投影方案";
         }
-        if (stepCode.startsWith("submit_")) {
-            return "启动子流程：" + skillDisplayName(childSkillId);
+        if (step.getStepCode().startsWith("submit_")) {
+            return "启动子流程：" + childSkillName(step);
         }
-        if (stepCode.startsWith("wait_")) {
-            return "等待子流程完成：" + skillDisplayName(childSkillId);
+        if (step.getStepCode().startsWith("wait_")) {
+            return "等待子流程完成：" + childSkillName(step);
         }
-        return stepCode;
+        return step.getStepCode();
     }
 
     public String stepResultSummary(Step step) {

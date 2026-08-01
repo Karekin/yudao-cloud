@@ -49,7 +49,6 @@ public class TemporalManagedRunWorkflowImpl implements TemporalManagedRunWorkflo
                             .build());
             current = approvalChild.run(request, current);
             acceptedApprovalDecision = null;
-            current = persistApprovalTerminal(request, current);
             refreshVisibility(request);
         }
         if (!current.isTerminal()) {
@@ -141,16 +140,6 @@ public class TemporalManagedRunWorkflowImpl implements TemporalManagedRunWorkflo
         memo.put("approvalId", current.getApprovalId());
         Workflow.upsertMemo(memo);
         Workflow.upsertSearchAttributes(TemporalManagedSearchAttributes.from(request, current));
-    }
-
-    private TemporalManagedRunState persistApprovalTerminal(TemporalManagedRunRequest request,
-                                                             TemporalManagedRunState state) {
-        return switch (state.getStatus()) {
-            case "REJECTED" -> activities.reject(request, state);
-            case "TIMED_OUT" -> activities.timeout(request, state);
-            case "CANCELLED" -> activities.cancel(request, state, state.getCancelReason());
-            default -> state;
-        };
     }
 
 }

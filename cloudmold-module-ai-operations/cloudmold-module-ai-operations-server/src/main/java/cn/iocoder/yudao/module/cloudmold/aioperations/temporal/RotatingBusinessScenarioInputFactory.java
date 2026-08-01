@@ -2,8 +2,6 @@ package cn.iocoder.yudao.module.cloudmold.aioperations.temporal;
 
 import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
-import cn.iocoder.yudao.module.cloudmold.identity.api.IdentityQueryApi;
-import cn.iocoder.yudao.module.cloudmold.identity.api.SourceIdentityReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -110,7 +108,6 @@ class RotatingBusinessScenarioInputFactory {
 
     private final AiOperationsTemporalMapper mapper;
     private final AiOperationsTemporalSeedProperties seedProperties;
-    private final IdentityQueryApi identityQueries;
 
     Optional<String> build(Long tenantId, String targetSkillId, String businessDate,
                            String occurrenceKey) {
@@ -241,41 +238,25 @@ class RotatingBusinessScenarioInputFactory {
         } else if (WMS_OPERATIONS_SKILL.equals(targetSkillId)) {
             JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
             JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
-            JsonNode warehouse = result(tenantId, READY_MASTER_SKILL, "warehouse_network");
-            JsonNode catalogDefinition = input(tenantId, CATALOG_MATRIX_SKILL)
-                    .path("definitions").path(0);
             if (merchant.path("merchantId").asText().isBlank()
                     || merchant.path("shopId").asText().isBlank()
-                    || principal.path("principalId").asText().isBlank()
-                    || warehouse.path("warehouseId").asText().isBlank()
-                    || catalogDefinition.path("skuCode").asText().isBlank()
-                    || catalogDefinition.path("barcode").asText().isBlank()
-                    || catalogDefinition.path("baseUomCode").asText().isBlank()) {
+                    || principal.path("principalId").asText().isBlank()) {
                 return Optional.empty();
             }
             output = wmsOperations(newPrefix, occurredAt,
                     merchant.path("merchantId").asText(),
                     merchant.path("shopId").asText(),
-                    principal.path("principalId").asText(),
-                    warehouse.path("warehouseId").asText(),
-                    catalogDefinition.path("skuCode").asText(),
-                    catalogDefinition.path("barcode").asText(),
-                    catalogDefinition.path("baseUomCode").asText());
+                    principal.path("principalId").asText());
         } else if (REPLENISHMENT_LIFECYCLE_SKILL.equals(targetSkillId)) {
             JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
             JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
             JsonNode catalog = result(tenantId, CATALOG_MATRIX_SKILL, "define_1");
-            JsonNode catalogDefinition = input(tenantId, CATALOG_MATRIX_SKILL)
-                    .path("definitions").path(0);
             JsonNode warehouse = result(tenantId, READY_MASTER_SKILL, "warehouse_network");
             if (merchant.path("merchantId").asText().isBlank()
                     || merchant.path("shopId").asText().isBlank()
                     || principal.path("principalId").asText().isBlank()
                     || catalog.path("canonicalSkuId").asText().isBlank()
-                    || warehouse.path("warehouseId").asText().isBlank()
-                    || catalogDefinition.path("skuCode").asText().isBlank()
-                    || catalogDefinition.path("barcode").asText().isBlank()
-                    || catalogDefinition.path("baseUomCode").asText().isBlank()) {
+                    || warehouse.path("warehouseId").asText().isBlank()) {
                 return Optional.empty();
             }
             output = replenishmentLifecycle(newPrefix, occurredAt,
@@ -283,10 +264,7 @@ class RotatingBusinessScenarioInputFactory {
                     merchant.path("shopId").asText(),
                     principal.path("principalId").asText(),
                     catalog.path("canonicalSkuId").asText(),
-                    warehouse.path("warehouseId").asText(),
-                    catalogDefinition.path("skuCode").asText(),
-                    catalogDefinition.path("barcode").asText(),
-                    catalogDefinition.path("baseUomCode").asText());
+                    warehouse.path("warehouseId").asText());
         } else if (SUPPLY_PLANNING_SOP_LIFECYCLE_SKILL.equals(targetSkillId)) {
             JsonNode catalog = result(tenantId, CATALOG_MATRIX_SKILL, "define_1");
             JsonNode canonicalWarehouse = result(
@@ -458,14 +436,10 @@ class RotatingBusinessScenarioInputFactory {
                     mapper.selectFirstEffectiveAgentRoleActor(tenantId, "finance");
             Long reviewerUserId = approvalPolicy == null
                     ? null : approvalPolicy.getGovernanceUserId();
-            String reviewerPrincipalId = resolveSystemPrincipal(reviewerUserId);
-            String financePrincipalId = resolveSystemPrincipal(financeActorUserId);
             if (operator.path("principalId").asText().isBlank()
                     || reviewerUserId == null || reviewerUserId <= 0
                     || financeActorUserId == null || financeActorUserId <= 0
-                    || reviewerUserId.equals(financeActorUserId)
-                    || reviewerPrincipalId == null || financePrincipalId == null
-                    || reviewerPrincipalId.equals(financePrincipalId)) {
+                    || reviewerUserId.equals(financeActorUserId)) {
                 return Optional.empty();
             }
             ObjectNode consumer = consumerJourney(rotated, newPrefix, occurredAt,
@@ -473,7 +447,8 @@ class RotatingBusinessScenarioInputFactory {
             output = partnerMarketingKolMediaOperations(
                     rotated, newPrefix, occurredAt, consumer,
                     operator.path("principalId").asText(),
-                    reviewerPrincipalId, financePrincipalId);
+                    "governance-user:" + reviewerUserId,
+                    "finance-user:" + financeActorUserId);
         } else if (ASSORTMENT_PLANNING_LIFECYCLE_SKILL.equals(targetSkillId)) {
             JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
             if (operator.path("principalId").asText().isBlank()) {
@@ -1079,18 +1054,6 @@ class RotatingBusinessScenarioInputFactory {
         return true;
     }
 
-    private String resolveSystemPrincipal(Long userId) {
-        if (userId == null || userId <= 0) {
-            return null;
-        }
-        try {
-            return identityQueries.resolveActiveSource(new SourceIdentityReference(
-                    "SYSTEM", "SYSTEM_ADMIN_USER", Long.toString(userId))).getPrincipalId();
-        } catch (RuntimeException exception) {
-            return null;
-        }
-    }
-
     private boolean hydrateAfterSaleScenario(Long tenantId, ObjectNode aftersale) {
         JsonNode listing = result(tenantId, PRODUCT_TO_LISTING_SKILL, "listing_create");
         JsonNode catalog = result(tenantId, CATALOG_MATRIX_SKILL, "define_1");
@@ -1213,12 +1176,6 @@ class RotatingBusinessScenarioInputFactory {
         String result = mapper.selectLatestSuccessfulSkillTaskStepResult(tenantId, skillId, stepCode);
         return result == null || result.isBlank()
                 ? JsonNodeFactory.instance.missingNode() : JsonUtils.parseTree(result);
-    }
-
-    private JsonNode input(Long tenantId, String skillId) {
-        String input = mapper.selectLatestSuccessfulSkillTaskInput(tenantId, skillId);
-        return input == null || input.isBlank()
-                ? JsonNodeFactory.instance.missingNode() : JsonUtils.parseTree(input);
     }
 
     private static ObjectNode productToListing(ObjectNode fullChain, String prefix) {
@@ -1996,13 +1953,10 @@ class RotatingBusinessScenarioInputFactory {
         input.putObject("draftCommand")
                 .put("legalName", "AI 模拟商家 " + prefix.toUpperCase())
                 .put("registrationHashToken", "sha256:" + stableUuid(prefix + ":registration").replace("-", ""))
-                .put("businessLicenseToken", "sha256:"
-                        + DigestUtil.sha256Hex(prefix + ":merchant-license"))
+                .put("businessLicenseToken", "restricted:merchant-license:" + prefix)
                 .put("ownerPrincipalId", ownerPrincipalId)
                 .put("channelCode", "YSHOPPING_INTERNAL")
                 .put("externalShopId", "ai-shop-" + prefix)
-                .put("sourceSystem", "CLOUDMOLD_AI")
-                .put("traceId", correlationId)
                 .put("correlationId", correlationId)
                 .put("occurredAt", occurredAt);
         return input;
@@ -2079,7 +2033,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("campaignCode", "AI-GROWTH-" + prefix.toUpperCase())
                 .put("campaignKind", "GENERAL")
                 .put("name", "AI 每日转化优化实验 " + prefix.toUpperCase())
-                .put("startsAt", runningAt)
+                .put("startsAt", base.toString())
                 .put("endsAt", base.plus(1, ChronoUnit.DAYS).toString());
         ObjectNode experiment = input.putObject("experiment")
                 .put("experimentId", experimentId)
@@ -2088,25 +2042,20 @@ class RotatingBusinessScenarioInputFactory {
                 .put("name", "AI 商详到支付转化实验 " + prefix.toUpperCase())
                 .put("hypothesis", "个性化卖点排序能够提高支付转化率")
                 .put("primaryMetricCode", "PAYMENT_CONVERSION")
-                .put("minimumSampleSizePerVariant", 30)
-                .put("startsAt", runningAt)
+                .put("minimumSampleSizePerVariant", 1)
+                .put("startsAt", base.toString())
                 .put("endsAt", concludedAt);
         ArrayNode variants = experiment.putArray("variants");
         variants.addObject().put("variantCode", "CONTROL")
                 .put("variantKind", "CONTROL").put("allocationBasisPoints", 5000);
         variants.addObject().put("variantCode", "TREATMENT")
                 .put("variantKind", "TREATMENT").put("allocationBasisPoints", 5000);
-        for (int sample = 1; sample <= 30; sample++) {
-            String suffix = sample == 1 ? "" : String.format("%02d", sample);
-            growthExposure(input, "controlExposure" + suffix,
-                    prefix, experimentId, "CONTROL", sample);
-            growthExposure(input, "treatmentExposure" + suffix,
-                    prefix, experimentId, "TREATMENT", sample);
-        }
+        growthExposure(input, "controlExposure", prefix, experimentId, "CONTROL");
+        growthExposure(input, "treatmentExposure", prefix, experimentId, "TREATMENT");
         growthMetric(input, "controlMetric", prefix, experimentId, "CONTROL",
-                Instant.parse(runningAt), snapshotAt, concludedAt, 420_000L);
+                base, snapshotAt, concludedAt, 420_000L);
         growthMetric(input, "treatmentMetric", prefix, experimentId, "TREATMENT",
-                Instant.parse(runningAt), snapshotAt, concludedAt, 610_000L);
+                base, snapshotAt, concludedAt, 610_000L);
         input.putObject("conclusion")
                 .put("experimentId", experimentId)
                 .put("decision", "TREATMENT")
@@ -2118,14 +2067,14 @@ class RotatingBusinessScenarioInputFactory {
     }
 
     private static void growthExposure(ObjectNode input, String field, String prefix,
-                                       String experimentId, String variantCode, int sample) {
+                                       String experimentId, String variantCode) {
         String suffix = variantCode.toLowerCase();
         input.putObject(field)
-                .put("exposureId", stableUuid(prefix + ":growth-exposure:" + suffix + ":" + sample))
-                .put("exposureKey", "exposure:" + prefix + ":" + suffix + ":" + sample)
+                .put("exposureId", stableUuid(prefix + ":growth-exposure:" + suffix))
+                .put("exposureKey", "exposure:" + prefix + ":" + suffix)
                 .put("experimentId", experimentId)
                 .put("variantCode", variantCode)
-                .put("principalId", "synthetic-buyer:" + prefix + ":" + suffix + ":" + sample)
+                .put("principalId", "synthetic-buyer:" + prefix + ":" + suffix)
                 .put("assignmentVersion", "v1");
     }
 
@@ -2141,7 +2090,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("metricCode", "PAYMENT_CONVERSION")
                 .put("measuredFrom", measuredFrom.toString())
                 .put("measuredTo", measuredTo)
-                .put("sampleCount", 30)
+                .put("sampleCount", 1)
                 .put("metricValueMicros", valueMicros)
                 .put("dataFreshUntil", freshUntil)
                 .put("evidenceRef", "evidence://growth/" + prefix + "/" + suffix);
@@ -2278,16 +2227,11 @@ class RotatingBusinessScenarioInputFactory {
 
     private static ObjectNode wmsOperations(String prefix, String occurredAt,
                                             String merchantId, String shopId,
-                                            String principalId, String canonicalWarehouseId,
-                                            String canonicalSkuCode, String canonicalBarcode,
-                                            String canonicalBaseUomCode) {
+                                            String principalId) {
         String compact = prefix.replace("-", "").toUpperCase();
         String code = compact.length() > 16 ? compact.substring(0, 16) : compact;
         String date = occurredAt.substring(0, 10);
         ObjectNode input = JsonNodeFactory.instance.objectNode();
-        input.put("occurredAt", occurredAt)
-                .put("correlationId", stableUuid(prefix + ":wms-correlation"))
-                .put("canonicalWarehouseId", canonicalWarehouseId);
         input.putObject("authority").putObject("reference")
                 .put("merchantId", merchantId)
                 .put("shopId", shopId);
@@ -2319,18 +2263,19 @@ class RotatingBusinessScenarioInputFactory {
         input.putObject("category")
                 .put("parentId", 0)
                 .put("code", "AIC" + code)
-                .put("name", "AI 每日仓储商品 " + prefix.toUpperCase())
+                .put("name", "AI 每日仓储商品")
                 .put("sort", 1)
                 .put("status", 0);
         ObjectNode item = input.putObject("item")
                 .put("code", "AII" + code)
                 .put("name", "AI 仓储全链路商品 " + prefix.toUpperCase())
-                .put("unit", canonicalBaseUomCode)
+                .put("unit", "件")
                 .put("remark", "每日唯一收货、调拨、出库与盘点商品");
         item.putArray("skus").addObject()
                 .put("name", "标准款")
-                .put("barCode", canonicalBarcode)
-                .put("code", canonicalSkuCode)
+                .put("barCode", "697" + String.format("%010d",
+                        Math.floorMod(prefix.hashCode(), 10_000_000_000L)))
+                .put("code", "AIK" + code)
                 .put("length", 10)
                 .put("width", 8)
                 .put("height", 2)
@@ -2371,9 +2316,7 @@ class RotatingBusinessScenarioInputFactory {
     private static ObjectNode replenishmentLifecycle(String prefix, String occurredAt,
                                                      String merchantId, String shopId,
                                                      String principalId, String canonicalSkuId,
-                                                     String warehouseId, String canonicalSkuCode,
-                                                     String canonicalBarcode,
-                                                     String canonicalBaseUomCode) {
+                                                     String warehouseId) {
         LocalDate date = Instant.parse(occurredAt).atZone(java.time.ZoneOffset.UTC).toLocalDate();
         boolean promotion = date.getDayOfMonth() % 5 == 0;
         int orderedQuantity = promotion ? 2_000 : 500;
@@ -2391,8 +2334,7 @@ class RotatingBusinessScenarioInputFactory {
                         ? "AI 根据大促销量预测与安全库存缺口下发加急补货"
                         : "AI 根据日销、在途与安全库存缺口下发日常补货");
         ObjectNode physical = wmsOperations(prefix + "-wms", occurredAt,
-                merchantId, shopId, principalId, warehouseId, canonicalSkuCode,
-                canonicalBarcode, canonicalBaseUomCode);
+                merchantId, shopId, principalId);
         if (promotion) {
             physical.withObject("/quantities")
                     .put("receipt", 30)
@@ -2529,7 +2471,6 @@ class RotatingBusinessScenarioInputFactory {
                 .put("sourceWarehouseId", sourceWarehouseId)
                 .put("targetWarehouseId", targetWarehouseId)
                 .put("wmsSkuId", wmsSkuId)
-                .put("unitCostMinor", 1_000)
                 .put("proposedByPrincipalId", actorPrincipalId)
                 .put("policyCode", "SOP_TRANSFER_V1")
                 .put("policySha256",
@@ -2652,8 +2593,7 @@ class RotatingBusinessScenarioInputFactory {
         commands.add(financeCommand(runId, correlationId, occurredAt, "OPEN_ACCOUNTING_PERIOD")
                 .set("period", JsonNodeFactory.instance.objectNode()
                         .put("periodId", periodId)
-                        .put("periodCode", "AI-" + scenarioCode + "-" + date + "-"
-                                + DigestUtil.sha256Hex(prefix).substring(0, 8))
+                        .put("periodCode", "AI-" + scenarioCode + "-" + date)
                         .put("periodStart", date.toString())
                         .put("periodEnd", date.toString())
                         .put("currencyCode", "CNY")
