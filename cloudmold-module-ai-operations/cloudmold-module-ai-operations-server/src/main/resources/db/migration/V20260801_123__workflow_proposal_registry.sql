@@ -1,0 +1,45 @@
+CREATE TABLE cloudmold_ai_ops_workflow_registry_version (
+    registry_version_id VARCHAR(64) NOT NULL,
+    tenant_id BIGINT NOT NULL,
+    skill_id VARCHAR(191) NOT NULL,
+    skill_semantic_version VARCHAR(64) NOT NULL,
+    parent_registry_version_id VARCHAR(64) NULL,
+    proposal_id VARCHAR(64) NOT NULL,
+    base_definition_sha256 CHAR(64) NULL,
+    definition_sha256 CHAR(64) NOT NULL,
+    canonical_definition_json MEDIUMTEXT NOT NULL,
+    proposal_sha256 CHAR(64) NOT NULL,
+    proposal_json MEDIUMTEXT NOT NULL,
+    validation_json MEDIUMTEXT NULL,
+    risk_level VARCHAR(8) NOT NULL,
+    registry_status VARCHAR(24) NOT NULL,
+    proposed_by VARCHAR(64) NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (registry_version_id),
+    UNIQUE KEY uk_ai_ops_wfrv_tenant_proposal (tenant_id, proposal_id),
+    KEY idx_ai_ops_wfrv_tenant_skill (tenant_id, skill_id, created_at),
+    CONSTRAINT ck_ai_ops_wfrv_risk CHECK (risk_level IN ('E0', 'E1', 'E2', 'E3')),
+    CONSTRAINT ck_ai_ops_wfrv_status CHECK (registry_status IN ('ACTIVE', 'SUBMITTED', 'VALIDATING', 'READY_FOR_REVIEW', 'REJECTED', 'SUPERSEDED', 'RETIRED'))
+);
+CREATE TABLE cloudmold_ai_ops_workflow_registry_pointer (
+    pointer_id VARCHAR(64) NOT NULL,
+    tenant_id BIGINT NOT NULL,
+    skill_id VARCHAR(191) NOT NULL,
+    stable_version_id VARCHAR(64) NOT NULL,
+    candidate_version_id VARCHAR(64) NULL,
+    pointer_version BIGINT NOT NULL,
+    created_by VARCHAR(64) NOT NULL,
+    updated_by VARCHAR(64) NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (pointer_id),
+    UNIQUE KEY uk_ai_ops_wfrp_tenant_skill (tenant_id, skill_id),
+    KEY idx_ai_ops_wfrp_stable (stable_version_id),
+    KEY idx_ai_ops_wfrp_candidate (candidate_version_id),
+    CONSTRAINT fk_ai_ops_wfrp_stable FOREIGN KEY (stable_version_id)
+        REFERENCES cloudmold_ai_ops_workflow_registry_version (registry_version_id),
+    CONSTRAINT fk_ai_ops_wfrp_candidate FOREIGN KEY (candidate_version_id)
+        REFERENCES cloudmold_ai_ops_workflow_registry_version (registry_version_id),
+    CONSTRAINT ck_ai_ops_wfrp_version CHECK (pointer_version >= 0),
+    CONSTRAINT ck_ai_ops_wfrp_distinct CHECK (candidate_version_id IS NULL OR candidate_version_id <> stable_version_id)
+);
