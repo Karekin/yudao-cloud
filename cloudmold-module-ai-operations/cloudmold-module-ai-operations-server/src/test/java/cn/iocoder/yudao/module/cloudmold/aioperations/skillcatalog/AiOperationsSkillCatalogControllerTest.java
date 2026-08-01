@@ -1,7 +1,9 @@
 package cn.iocoder.yudao.module.cloudmold.aioperations.skillcatalog;
 
+import cn.iocoder.yudao.module.cloudmold.aioperations.controller.admin.skillcatalog.AiOperationsSkillCatalogController;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.util.AntPathMatcher;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -13,6 +15,13 @@ class AiOperationsSkillCatalogControllerTest {
     private final DeerFlowSkillCatalogClient client = mock(DeerFlowSkillCatalogClient.class);
     private final AiOperationsSkillCatalogController controller = new AiOperationsSkillCatalogController(client);
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void shouldBelongToAdminControllerPackageSoFrameworkAddsAdminApiPrefix() {
+        assertThat(new AntPathMatcher(".").match(
+                "**.controller.admin.**",
+                AiOperationsSkillCatalogController.class.getPackageName())).isTrue();
+    }
 
     @Test
     void shouldExposeReadOnlyCatalogAndSkillContent() throws Exception {

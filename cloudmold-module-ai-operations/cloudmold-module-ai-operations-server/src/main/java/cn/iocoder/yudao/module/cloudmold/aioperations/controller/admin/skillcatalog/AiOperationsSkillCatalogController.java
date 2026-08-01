@@ -1,6 +1,7 @@
-package cn.iocoder.yudao.module.cloudmold.aioperations.skillcatalog;
+package cn.iocoder.yudao.module.cloudmold.aioperations.controller.admin.skillcatalog;
 
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
+import cn.iocoder.yudao.module.cloudmold.aioperations.skillcatalog.DeerFlowSkillCatalogClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
