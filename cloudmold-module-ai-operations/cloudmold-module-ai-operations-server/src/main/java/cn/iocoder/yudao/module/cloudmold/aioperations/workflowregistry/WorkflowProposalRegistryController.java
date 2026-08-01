@@ -33,7 +33,7 @@ public class WorkflowProposalRegistryController {
         return success(service.submit(request));
     }
 
-    @GetMapping("/workflows/{skillId}")
+    @GetMapping({"/status/{skillId}", "/workflows/{skillId}"})
     @Operation(summary = "查询工作流 stable/candidate 指针")
     @PreAuthorize("@ss.hasPermission('cloudmold:ai-operations:query')")
     public CommonResult<WorkflowProposalRegistryStatusView> getStatus(@PathVariable String skillId) {

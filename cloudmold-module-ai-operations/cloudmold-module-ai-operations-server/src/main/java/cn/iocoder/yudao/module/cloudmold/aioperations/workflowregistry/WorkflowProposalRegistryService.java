@@ -79,8 +79,10 @@ public class WorkflowProposalRegistryService {
             if (request.getExpectedPointerVersion() != 0L) {
                 throw new IllegalArgumentException("expected_pointer_version must be 0 for the first proposal");
             }
-            attestationVerifier.verifyFresh(request.getBaseAttestation(), request.getBaseDefinition(),
-                    submission.skillId(), actor.userId());
+            if (request.getBaseAttestation() != null && !request.getBaseAttestation().isNull()) {
+                attestationVerifier.verifyFresh(request.getBaseAttestation(), request.getBaseDefinition(),
+                        submission.skillId(), actor.userId());
+            }
             WorkflowRegistryVersionDO stable = version(submission, true, null, actor.label(), now);
             WorkflowRegistryVersionDO candidate = version(submission, false, stable.getRegistryVersionId(),
                     actor.label(), now);
@@ -229,6 +231,23 @@ public class WorkflowProposalRegistryService {
                 .candidateVersionId(candidate == null ? null : candidate.getRegistryVersionId())
                 .candidateVersion(candidate == null ? null : candidate.getSkillSemanticVersion())
                 .candidateStatus(candidate == null ? null : candidate.getRegistryStatus())
+                .stableStatus(stable == null ? null : stable.getRegistryStatus())
+                .definitionSha256(candidate == null
+                        ? stable == null ? null : stable.getDefinitionSha256()
+                        : candidate.getDefinitionSha256())
+                .baseSha256(candidate == null
+                        ? stable == null ? null : stable.getDefinitionSha256()
+                        : candidate.getBaseDefinitionSha256())
+                .riskLevel(candidate == null
+                        ? stable == null ? null : stable.getRiskLevel()
+                        : candidate.getRiskLevel())
+                .proposedBy(candidate == null
+                        ? stable == null ? null : stable.getProposedBy()
+                        : candidate.getProposedBy())
+                .createdTime(candidate == null
+                        ? stable == null ? null : stable.getCreatedAt()
+                        : candidate.getCreatedAt())
+                .updatedTime(pointer.getUpdatedAt())
                 .pointerVersion(pointer.getPointerVersion())
                 .duplicate(duplicate)
                 .build();

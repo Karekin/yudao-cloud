@@ -277,7 +277,7 @@ class SkillTaskDefinitionRegistryTest {
                     assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("SUCCEEDED");
                 });
         SkillTaskDefinition mysteryBuyerQuality = workspaceRegistry.require(
-                "skill.cloudmold.quality.mystery-buyer-sample-verification.v1", "1.0.0");
+                "skill.cloudmold.quality.mystery-buyer-sample-verification.v1", "1.0.1");
         assertThat(mysteryBuyerQuality.getWorkflowLevel()).isEqualTo("INTERNAL_SUBFLOW");
         assertThat(mysteryBuyerQuality.getOwnerRole()).isEqualTo("quality-operations");
         assertThat(mysteryBuyerQuality.getRiskLevel()).isEqualTo("R3");
