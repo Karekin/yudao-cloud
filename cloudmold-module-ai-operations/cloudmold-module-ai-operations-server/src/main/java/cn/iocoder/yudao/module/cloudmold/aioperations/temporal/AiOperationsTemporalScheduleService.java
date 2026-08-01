@@ -235,6 +235,10 @@ public class AiOperationsTemporalScheduleService {
         scheduleHandle(scheduleId).trigger(ScheduleOverlapPolicy.SCHEDULE_OVERLAP_POLICY_SKIP);
     }
 
+    void triggerRecovery(String scheduleId) {
+        scheduleHandle(scheduleId).trigger(ScheduleOverlapPolicy.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL);
+    }
+
     public void pause(String scheduleId) {
         Long tenantId = TenantContextHolder.getRequiredTenantId();
         scheduleHandle(scheduleId).pause("Paused from CloudMold AI Operations");

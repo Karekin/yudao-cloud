@@ -107,6 +107,7 @@ public class SkillTaskWorker {
                 Task executionTask = task;
                 JsonNode result = checkpoints.executeWithMissionFence(
                         executionTask, () -> executeStep(executionTask, step, request));
+                requireSuccessfulWriteOutcome(step, result);
                 String resultJson = json.canonical(result);
                 if ("WAIT_CAPABILITY".equals(step.getStepKind())
                         && waitForCapability(task, step, result, resultJson)) {
@@ -290,6 +291,21 @@ public class SkillTaskWorker {
         }
         verifyApprovalScope(task);
         return true;
+    }
+
+    private static void requireSuccessfulWriteOutcome(Step step, JsonNode result) {
+        if (!"CAPABILITY".equals(step.getStepKind())
+                || !"WRITE".equals(step.getOperationType())
+                || result == null || !result.isObject()
+                || !result.has("success") || result.path("success").asBoolean(true)) {
+            return;
+        }
+        String failureCode = result.path("failureCode").asText("BUSINESS_WRITE_FAILED");
+        String failureMessage = result.path("failureMessage").asText(failureCode);
+        if ("INVALID_ARGUMENT".equals(failureCode)) {
+            throw new IllegalArgumentException(failureMessage);
+        }
+        throw new IllegalStateException(failureCode + ": " + failureMessage);
     }
 
     private void verifyApprovalScope(Task task) {

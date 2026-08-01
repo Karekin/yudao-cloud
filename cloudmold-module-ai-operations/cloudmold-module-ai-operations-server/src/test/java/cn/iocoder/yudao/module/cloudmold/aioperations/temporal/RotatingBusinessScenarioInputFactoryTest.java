@@ -1,6 +1,9 @@
 package cn.iocoder.yudao.module.cloudmold.aioperations.temporal;
 
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
+import cn.iocoder.yudao.module.cloudmold.identity.api.IdentityQueryApi;
+import cn.iocoder.yudao.module.cloudmold.identity.api.SourceIdentityReference;
+import cn.iocoder.yudao.module.cloudmold.identity.api.SourceIdentityView;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -14,9 +17,10 @@ import static org.mockito.Mockito.when;
 class RotatingBusinessScenarioInputFactoryTest {
 
     private final AiOperationsTemporalMapper mapper = mock(AiOperationsTemporalMapper.class);
+    private final IdentityQueryApi identityQueries = mock(IdentityQueryApi.class);
     private final AiOperationsTemporalSeedProperties properties = new AiOperationsTemporalSeedProperties();
     private final RotatingBusinessScenarioInputFactory factory =
-            new RotatingBusinessScenarioInputFactory(mapper, properties);
+            new RotatingBusinessScenarioInputFactory(mapper, properties, identityQueries);
 
     @Test
     void shouldCreateDailyUniqueProductToListingInputFromSuccessfulFullChainTemplate() {
@@ -530,6 +534,14 @@ class RotatingBusinessScenarioInputFactoryTest {
         when(mapper.selectApprovalPolicy(162L)).thenReturn(new TemporalApprovalPolicyRecord()
                 .setTenantId(162L).setGovernanceUserId(227L).setStatus("ACTIVE"));
         when(mapper.selectFirstEffectiveAgentRoleActor(162L, "finance")).thenReturn(228L);
+        when(identityQueries.resolveActiveSource(
+                new SourceIdentityReference("SYSTEM", "SYSTEM_ADMIN_USER", "227")))
+                .thenReturn(SourceIdentityView.builder()
+                        .principalId("1d9634aa-f54c-4c81-96dc-d3b61d5486d7").build());
+        when(identityQueries.resolveActiveSource(
+                new SourceIdentityReference("SYSTEM", "SYSTEM_ADMIN_USER", "228")))
+                .thenReturn(SourceIdentityView.builder()
+                        .principalId("38fb8735-2be3-429e-877f-17d19715fedb").build());
         when(mapper.selectLatestSuccessfulSkillTaskInput(
                 162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
                 {
@@ -561,9 +573,9 @@ class RotatingBusinessScenarioInputFactoryTest {
 
         assertThat(first.path("operatorPrincipalId").asText()).isEqualTo("principal-1");
         assertThat(first.path("independentReviewerPrincipalId").asText())
-                .isEqualTo("governance-user:227");
+                .isEqualTo("1d9634aa-f54c-4c81-96dc-d3b61d5486d7");
         assertThat(first.path("financePrincipalId").asText())
-                .isEqualTo("finance-user:228");
+                .isEqualTo("38fb8735-2be3-429e-877f-17d19715fedb");
         assertThat(first.path("product").isObject()).isTrue();
         assertThat(first.path("campaign").isObject()).isTrue();
         assertThat(first.path("consumer").path("identityReference")
@@ -623,6 +635,8 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .startsWith("AI 模拟商家 H260729162-");
         assertThat(first.path("draftCommand").path("registrationHashToken").asText())
                 .startsWith("sha256:");
+        assertThat(first.path("draftCommand").path("businessLicenseToken").asText())
+                .matches("sha256:[0-9a-f]{64}");
         assertThat(first.path("draftCommand").path("externalShopId").asText())
                 .isNotEqualTo(second.path("draftCommand").path("externalShopId").asText());
     }
@@ -674,7 +688,15 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(campaign.path("clickedReceiptCommand").path("receiptId").asText())
                 .isNotBlank();
         assertThat(growth.path("experiment").path("variants")).hasSize(2);
-        assertThat(growth.path("controlMetric").path("sampleCount").asInt()).isEqualTo(1);
+        assertThat(growth.path("experiment").path("startsAt").asText())
+                .isEqualTo(growth.path("runningAt").asText());
+        assertThat(growth.path("controlMetric").path("sampleCount").asInt()).isEqualTo(30);
+        assertThat(growth.path("controlMetric").path("measuredFrom").asText())
+                .isEqualTo(growth.path("runningAt").asText());
+        assertThat(growth.path("controlExposure30").path("variantCode").asText())
+                .isEqualTo("CONTROL");
+        assertThat(growth.path("treatmentExposure30").path("variantCode").asText())
+                .isEqualTo("TREATMENT");
         assertThat(growth.path("conclusion").path("decision").asText()).isEqualTo("TREATMENT");
         assertThat(sourcing.path("sourcingCase").path("canonicalSkuId").asText())
                 .isEqualTo("canonical-sku-1");
@@ -690,7 +712,15 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .isEqualTo("warehouse-1");
         assertThat(warehouse.path("authority").path("operator").path("principalId").asText())
                 .isEqualTo("principal-owner");
+        assertThat(warehouse.path("canonicalWarehouseId").asText()).isEqualTo("warehouse-1");
+        assertThat(warehouse.path("correlationId").asText())
+                .matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
         assertThat(warehouse.path("item").path("skus")).hasSize(1);
+        assertThat(warehouse.path("item").path("unit").asText()).isEqualTo("PCS");
+        assertThat(warehouse.path("item").path("skus").get(0).path("code").asText())
+                .isEqualTo("YS-BASE-BLACK-S");
+        assertThat(warehouse.path("item").path("skus").get(0).path("barCode").asText())
+                .isEqualTo("CM-BASE-BLACK-S");
         assertThat(warehouse.path("receipt").path("no").asText()).startsWith("AIRK");
         assertThat(warehouse.path("shipment").path("bizOrderNo").asText()).startsWith("AISO");
         assertThat(replenishment.path("scenarioType").asText())
@@ -746,6 +776,8 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(finance.path("commands")).hasSize(9);
         assertThat(finance.path("commands").get(0).path("operation").asText())
                 .isEqualTo("OPEN_ACCOUNTING_PERIOD");
+        assertThat(finance.path("commands").get(0).path("period").path("periodCode").asText())
+                .matches("AI-DAILY_CLOSE-\\d{4}-\\d{2}-\\d{2}-[0-9a-f]{8}");
         assertThat(finance.path("commands").get(2).path("operation").asText())
                 .isEqualTo("RECONCILE_CHANNEL_STATEMENT");
         assertThat(finance.path("commands").get(3).path("differenceResolution")
@@ -1469,6 +1501,12 @@ class RotatingBusinessScenarioInputFactoryTest {
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(
                 162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL, "define_1"))
                 .thenReturn("{\"canonicalSpuId\":\"spu-1\",\"canonicalSkuId\":\"sku-1\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL))
+                .thenReturn("""
+                        {"definitions":[{"skuCode":"YS-BASE-BLACK-S",
+                        "barcode":"CM-BASE-BLACK-S","baseUomCode":"PCS"}]}
+                        """);
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(
                 162L, RotatingBusinessScenarioInputFactory.PRODUCT_TO_LISTING_SKILL, "listing_create"))
                 .thenReturn("""

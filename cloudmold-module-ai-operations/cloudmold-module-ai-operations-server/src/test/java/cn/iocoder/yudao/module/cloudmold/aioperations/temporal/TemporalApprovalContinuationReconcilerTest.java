@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.cloudmold.aioperations.temporal;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentControlQueryApi;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentControlResult;
+import io.temporal.client.WorkflowNotFoundException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +13,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 class TemporalApprovalContinuationReconcilerTest {
 
@@ -19,8 +21,11 @@ class TemporalApprovalContinuationReconcilerTest {
     private final AgentControlQueryApi agentQueries = mock(AgentControlQueryApi.class);
     private final TemporalApprovalContinuationAdapter continuation =
             mock(TemporalApprovalContinuationAdapter.class);
+    private final TemporalApprovedTimeoutRecoveryService timeoutRecovery =
+            mock(TemporalApprovedTimeoutRecoveryService.class);
     private final TemporalApprovalContinuationReconciler reconciler =
-            new TemporalApprovalContinuationReconciler(mapper, agentQueries, continuation);
+            new TemporalApprovalContinuationReconciler(
+                    mapper, agentQueries, continuation, timeoutRecovery);
 
     @AfterEach
     void tearDown() {
@@ -50,6 +55,20 @@ class TemporalApprovalContinuationReconcilerTest {
 
         verify(continuation, never()).onApprovalDecision(
                 162L, "work-order-1", "approval-1", "APPROVE");
+    }
+
+    @Test
+    void shouldDispatchFreshRecoveryWhenApprovedWorkflowHistoryExpired() {
+        TemporalRunBindingRecord binding = binding();
+        when(mapper.selectWaitingApprovalBindings(100)).thenReturn(List.of(binding));
+        when(agentQueries.getApproval("approval-1")).thenReturn(
+                AgentControlResult.builder().status("APPROVED").build());
+        doThrow(mock(WorkflowNotFoundException.class)).when(continuation)
+                .onApprovalDecision(162L, "work-order-1", "approval-1", "APPROVE");
+
+        reconciler.reconcile();
+
+        verify(timeoutRecovery).recover(binding);
     }
 
     private static TemporalRunBindingRecord binding() {

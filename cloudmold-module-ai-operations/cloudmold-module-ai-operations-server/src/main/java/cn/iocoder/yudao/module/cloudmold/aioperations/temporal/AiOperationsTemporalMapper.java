@@ -165,9 +165,18 @@ public interface AiOperationsTemporalMapper {
     @Select("""
             SELECT * FROM cloudmold_ai_ops_temporal_run_binding
             WHERE tenant_id=#{tenantId} AND work_order_id=#{workOrderId}
+            ORDER BY created_at DESC
+            LIMIT 1
             """)
     TemporalRunBindingRecord selectRunBindingByWorkOrder(@Param("tenantId") Long tenantId,
                                                          @Param("workOrderId") String workOrderId);
+
+    @Select("""
+            SELECT * FROM cloudmold_ai_ops_temporal_run_binding
+            WHERE tenant_id=#{tenantId} AND approval_id=#{approvalId}
+            """)
+    TemporalRunBindingRecord selectRunBindingByApproval(@Param("tenantId") Long tenantId,
+                                                        @Param("approvalId") String approvalId);
 
     @TenantIgnore
     @Select("""
@@ -187,6 +196,37 @@ public interface AiOperationsTemporalMapper {
     int markApprovalSignaled(@Param("tenantId") Long tenantId,
                              @Param("temporalRunId") String temporalRunId,
                              @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE cloudmold_ai_ops_temporal_run_binding
+            SET status='RECOVERY_STARTING',error_code='APPROVED_AFTER_TIMEOUT',updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND temporal_run_id=#{temporalRunId}
+              AND status='WAITING_APPROVAL'
+            """)
+    int claimApprovedTimeoutRecovery(@Param("tenantId") Long tenantId,
+                                     @Param("temporalRunId") String temporalRunId,
+                                     @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE cloudmold_ai_ops_temporal_run_binding
+            SET status='RECOVERY_DISPATCHED',error_code='APPROVED_AFTER_TIMEOUT',updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND temporal_run_id=#{temporalRunId}
+              AND status='RECOVERY_STARTING'
+            """)
+    int markApprovedTimeoutRecoveryDispatched(@Param("tenantId") Long tenantId,
+                                              @Param("temporalRunId") String temporalRunId,
+                                              @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE cloudmold_ai_ops_temporal_run_binding
+            SET status='WAITING_APPROVAL',error_code=#{errorCode},updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND temporal_run_id=#{temporalRunId}
+              AND status='RECOVERY_STARTING'
+            """)
+    int releaseApprovedTimeoutRecovery(@Param("tenantId") Long tenantId,
+                                       @Param("temporalRunId") String temporalRunId,
+                                       @Param("errorCode") String errorCode,
+                                       @Param("now") LocalDateTime now);
 
     @Update("""
             UPDATE cloudmold_ai_ops_temporal_run_binding

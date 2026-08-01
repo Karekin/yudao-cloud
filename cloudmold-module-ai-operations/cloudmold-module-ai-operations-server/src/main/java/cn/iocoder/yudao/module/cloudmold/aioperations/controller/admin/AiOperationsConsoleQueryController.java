@@ -11,10 +11,13 @@ import cn.iocoder.yudao.module.cloudmold.aioperations.service.query.AiObservatio
 import cn.iocoder.yudao.module.cloudmold.aioperations.service.query.AiOperationsConsoleQueryService;
 import cn.iocoder.yudao.module.cloudmold.aioperations.service.query.AiWorkflowPageItem;
 import cn.iocoder.yudao.module.cloudmold.aioperations.service.query.AiWorkflowRunDetailView;
+import cn.iocoder.yudao.module.cloudmold.aioperations.temporal.TemporalApprovalBlockQueryService;
+import cn.iocoder.yudao.module.cloudmold.aioperations.temporal.TemporalApprovalBlockView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskDetailView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskRunPageRequest;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskRunView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowView;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowDetailView;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
@@ -40,12 +43,28 @@ public class AiOperationsConsoleQueryController {
     private AiOperationsConsoleQueryService consoleQueryService;
     @Resource
     private AiOperationsManagedRunQueryService managedRunQueryService;
+    @Resource
+    private TemporalApprovalBlockQueryService temporalApprovalBlockQueryService;
 
     @GetMapping("/managed-workflows")
     @Operation(summary = "查询受管 SkillTask 工作流定义")
     @PreAuthorize("@ss.hasPermission('cloudmold:ai-operations:query')")
     public CommonResult<List<ManagedSkillTaskWorkflowView>> listManagedWorkflows() {
         return success(managedRunQueryService.listManagedWorkflows());
+    }
+
+    @GetMapping("/managed-workflows/{skillId}")
+    @Operation(summary = "查询受管 SkillTask 工作流的可审计编排定义")
+    @PreAuthorize("@ss.hasPermission('cloudmold:ai-operations:query')")
+    public CommonResult<ManagedSkillTaskWorkflowDetailView> getManagedWorkflow(@PathVariable String skillId) {
+        return success(managedRunQueryService.getManagedWorkflow(skillId));
+    }
+
+    @GetMapping("/temporal-runs/approval/{approvalId}")
+    @Operation(summary = "查询被审批门阻塞的 Temporal 运行")
+    @PreAuthorize("@ss.hasPermission('cloudmold:ai-operations:query')")
+    public CommonResult<TemporalApprovalBlockView> getApprovalBlock(@PathVariable String approvalId) {
+        return success(temporalApprovalBlockQueryService.getByApprovalId(approvalId));
     }
 
     @GetMapping("/managed-runs/page")

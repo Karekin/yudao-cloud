@@ -68,6 +68,8 @@ class TemporalManagedRunWorkflowTest {
 
         assertThat(result.getStatus()).isEqualTo("REJECTED");
         assertThat(activities.submitCount.get()).isZero();
+        assertThat(activities.rejectCount.get()).isEqualTo(1);
+        assertThat(activities.timeoutCount.get()).isZero();
     }
 
     @Test
@@ -81,6 +83,8 @@ class TemporalManagedRunWorkflowTest {
 
         assertThat(result.getStatus()).isEqualTo("TIMED_OUT");
         assertThat(activities.submitCount.get()).isZero();
+        assertThat(activities.rejectCount.get()).isZero();
+        assertThat(activities.timeoutCount.get()).isEqualTo(1);
     }
 
     @Test
