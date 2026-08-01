@@ -79,10 +79,8 @@ public class WorkflowProposalRegistryService {
             if (request.getExpectedPointerVersion() != 0L) {
                 throw new IllegalArgumentException("expected_pointer_version must be 0 for the first proposal");
             }
-            if (request.getBaseAttestation() != null && !request.getBaseAttestation().isNull()) {
-                attestationVerifier.verifyFresh(request.getBaseAttestation(), request.getBaseDefinition(),
-                        submission.skillId(), actor.userId());
-            }
+            attestationVerifier.verifyFresh(request.getBaseAttestation(), request.getBaseDefinition(),
+                    submission.skillId(), actor.userId());
             WorkflowRegistryVersionDO stable = version(submission, true, null, actor.label(), now);
             WorkflowRegistryVersionDO candidate = version(submission, false, stable.getRegistryVersionId(),
                     actor.label(), now);

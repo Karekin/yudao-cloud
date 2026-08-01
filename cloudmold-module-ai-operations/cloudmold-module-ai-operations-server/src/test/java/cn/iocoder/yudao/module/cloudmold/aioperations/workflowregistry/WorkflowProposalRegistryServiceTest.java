@@ -64,22 +64,11 @@ class WorkflowProposalRegistryServiceTest {
                 .containsExactly("ACTIVE", "SUBMITTED");
         assertThat(versions.getAllValues().get(1).getValidationJson()).contains("\"passed\":true");
         verify(pointerMapper).insert(any(WorkflowRegistryPointerDO.class));
+        verify(attestationVerifier).verifyFresh(request.getBaseAttestation(), request.getBaseDefinition(),
+                skillId(), "101");
         assertThat(result.workflowId()).isEqualTo(skillId());
         assertThat(result.pointerVersion()).isEqualTo(1L);
         assertThat(result.candidateStatus()).isEqualTo("SUBMITTED");
-    }
-
-    @Test
-    void allowsBaseAttestationToBeOmittedForWireCompatibility() {
-        WorkflowProposalRegistryRequest request = request(0L);
-        request.setBaseAttestation(null);
-        when(versionMapper.selectByProposalId(162L, proposalId(request))).thenReturn(null);
-        when(pointerMapper.selectForUpdate(162L, skillId())).thenReturn(null);
-
-        var result = service.submit(request);
-
-        assertThat(result.pointerVersion()).isEqualTo(1L);
-        verify(attestationVerifier, never()).verifyFresh(any(), any(), any(), any());
     }
 
     @Test
