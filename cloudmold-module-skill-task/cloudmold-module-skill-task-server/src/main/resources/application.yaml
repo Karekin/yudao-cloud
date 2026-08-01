@@ -50,6 +50,9 @@ cloudmold:
     batch-size: ${CLOUDMOLD_SKILL_BATCH_SIZE:20}
     default-max-attempts: ${CLOUDMOLD_SKILL_DEFAULT_MAX_ATTEMPTS:5}
     max-payload-bytes: ${CLOUDMOLD_SKILL_MAX_PAYLOAD_BYTES:1048576}
+    dynamic:
+      enabled: ${CLOUDMOLD_SKILL_DYNAMIC_REGISTRY_ENABLED:true}
+      active-alias: ${CLOUDMOLD_SKILL_DYNAMIC_REGISTRY_ACTIVE_ALIAS:ACTIVE}
     approval:
       hmac-secret: ${CLOUDMOLD_SKILL_TASK_APPROVAL_HMAC_SECRET:}
       legacy-hmac-enabled: ${CLOUDMOLD_SKILL_TASK_APPROVAL_LEGACY_HMAC_ENABLED:true}

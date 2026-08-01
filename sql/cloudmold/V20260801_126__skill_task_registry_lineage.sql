@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS cloudmold_skill_task_registry_lineage (
+    lineage_id VARCHAR(64) NOT NULL,
+    tenant_id BIGINT NOT NULL,
+    skill_id VARCHAR(191) NOT NULL,
+    skill_version VARCHAR(64) NOT NULL,
+    registry_version_id VARCHAR(64) NOT NULL,
+    pointer_version BIGINT NULL,
+    source_kind VARCHAR(24) NOT NULL,
+    canonical_definition_json MEDIUMTEXT NOT NULL,
+    registry_payload_sha256 CHAR(64) NOT NULL,
+    definition_sha256 CHAR(64) NOT NULL,
+    definition_closure_sha256 CHAR(64) NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (lineage_id),
+    UNIQUE KEY uk_skill_task_registry_lineage_tenant_skill_version (tenant_id, skill_id, skill_version),
+    KEY idx_skill_task_registry_lineage_registry_version (tenant_id, registry_version_id),
+    CONSTRAINT ck_skill_task_registry_lineage_source_kind CHECK (source_kind IN ('ACTIVE_POINTER', 'LINEAGE')),
+    CONSTRAINT ck_skill_task_registry_lineage_pointer_version CHECK (pointer_version IS NULL OR pointer_version >= 0)
+);

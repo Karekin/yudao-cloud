@@ -34,7 +34,7 @@ public class WorkflowRegistryQueryService {
         WorkflowRegistryAttestationView attestation = attestationService.attest(
                 skillId,
                 subject.ownerUserId(),
-                skillVersion,
+                definition.getSkillVersion(),
                 definitionView);
         return new WorkflowRegistryDefinitionView(definitionView, attestation);
     }

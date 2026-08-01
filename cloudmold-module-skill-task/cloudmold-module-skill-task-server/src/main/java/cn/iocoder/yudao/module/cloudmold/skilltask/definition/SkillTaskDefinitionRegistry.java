@@ -3,6 +3,7 @@ package cn.iocoder.yudao.module.cloudmold.skilltask.definition;
 import cn.iocoder.yudao.module.cloudmold.executor.CapabilityDescriptor;
 import cn.iocoder.yudao.module.cloudmold.executor.CloudMoldCapabilityCatalog;
 import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
+import cn.iocoder.yudao.module.cloudmold.skilltask.definition.dynamic.DynamicSkillTaskDefinitionSource;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -21,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.HexFormat;
 
@@ -34,13 +36,21 @@ public class SkillTaskDefinitionRegistry {
     private final ObjectMapper objectMapper;
     private final SkillTaskProperties properties;
     private final CloudMoldCapabilityCatalog capabilityCatalog;
+    private final DynamicSkillTaskDefinitionSource dynamicDefinitionSource;
     private volatile Map<String, SkillTaskDefinition> definitions = Map.of();
 
     public SkillTaskDefinitionRegistry(ObjectMapper objectMapper, SkillTaskProperties properties,
                                        CloudMoldCapabilityCatalog capabilityCatalog) {
+        this(objectMapper, properties, capabilityCatalog, Optional.empty());
+    }
+
+    public SkillTaskDefinitionRegistry(ObjectMapper objectMapper, SkillTaskProperties properties,
+                                       CloudMoldCapabilityCatalog capabilityCatalog,
+                                       Optional<DynamicSkillTaskDefinitionSource> dynamicDefinitionSource) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.capabilityCatalog = capabilityCatalog;
+        this.dynamicDefinitionSource = dynamicDefinitionSource.orElse(null);
     }
 
     @PostConstruct
@@ -75,15 +85,114 @@ public class SkillTaskDefinitionRegistry {
     }
 
     public SkillTaskDefinition require(String skillId, String skillVersion) {
-        SkillTaskDefinition definition = definitions.get(key(skillId, skillVersion));
+        String normalizedSkillId = requireText(skillId, "skill_id", 191);
+        String normalizedSkillVersion = requireText(skillVersion, "skill_version", 64);
+        if (dynamicDefinitionSource != null && properties.getDynamic().isEnabled()) {
+            return requireDynamic(normalizedSkillId, normalizedSkillVersion);
+        }
+        SkillTaskDefinition definition = definitions.get(key(normalizedSkillId, normalizedSkillVersion));
         if (definition == null) {
-            throw new IllegalArgumentException("Skill Task definition is not registered: " + skillId + "@" + skillVersion);
+            return requireDynamic(normalizedSkillId, normalizedSkillVersion);
         }
         return definition;
     }
 
     public List<SkillTaskDefinition> all() {
         return definitions.values().stream().sorted(Comparator.comparing(SkillTaskDefinition::getSkillId)).toList();
+    }
+
+    private SkillTaskDefinition requireDynamic(String skillId, String skillVersion) {
+        if (dynamicDefinitionSource == null) {
+            throw new IllegalArgumentException("Skill Task definition is not registered: " + skillId + "@"
+                    + skillVersion);
+        }
+        Map<String, SkillTaskDefinition> bundle = new LinkedHashMap<>();
+        Map<String, DynamicSkillTaskDefinitionSource.ResolvedDefinition> dynamicSnapshots = new LinkedHashMap<>();
+        String resolvedKey = loadDefinitionRecursive(skillId, skillVersion, bundle, dynamicSnapshots, new HashSet<>(), true);
+        Map<String, SkillTaskDefinition> validated = validateAndIndex(new ArrayList<>(bundle.values()));
+        dynamicSnapshots.forEach((definitionKey, snapshot) -> {
+            SkillTaskDefinition validatedDefinition = validated.get(definitionKey);
+            if (validatedDefinition != null) {
+                dynamicDefinitionSource.recordLineage(snapshot, validatedDefinition);
+            }
+        });
+        SkillTaskDefinition resolved = validated.get(resolvedKey);
+        if (resolved == null) {
+            throw new IllegalArgumentException("Skill Task definition is not registered: " + skillId + "@"
+                    + skillVersion);
+        }
+        return resolved;
+    }
+
+    private String loadDefinitionRecursive(String skillId,
+                                           String skillVersion,
+                                           Map<String, SkillTaskDefinition> bundle,
+                                           Map<String, DynamicSkillTaskDefinitionSource.ResolvedDefinition> dynamicSnapshots,
+                                           Set<String> loading,
+                                           boolean preferDynamic) {
+        String directKey = key(skillId, skillVersion);
+        if (bundle.containsKey(directKey)) {
+            return directKey;
+        }
+        if (!preferDynamic) {
+            SkillTaskDefinition fileDefinition = definitions.get(directKey);
+            if (fileDefinition != null) {
+                bundle.put(directKey, cloneDefinition(fileDefinition));
+                loadChildren(bundle.get(directKey), bundle, dynamicSnapshots, loading);
+                return directKey;
+            }
+        }
+        DynamicSkillTaskDefinitionSource.ResolvedDefinition resolved = dynamicDefinitionSource.resolve(skillId, skillVersion);
+        if (resolved != null) {
+            String actualKey = key(resolved.skillId(), resolved.skillVersion());
+            if (!bundle.containsKey(actualKey)) {
+                bundle.put(actualKey, parseDynamicDefinition(resolved));
+                dynamicSnapshots.put(actualKey, resolved);
+                loadChildren(bundle.get(actualKey), bundle, dynamicSnapshots, loading);
+            }
+            return actualKey;
+        }
+        SkillTaskDefinition fileDefinition = definitions.get(directKey);
+        if (fileDefinition != null) {
+            bundle.put(directKey, cloneDefinition(fileDefinition));
+            loadChildren(bundle.get(directKey), bundle, dynamicSnapshots, loading);
+            return directKey;
+        }
+        throw new IllegalArgumentException("Skill Task definition is not registered: " + skillId + "@"
+                + skillVersion);
+    }
+
+    private void loadChildren(SkillTaskDefinition definition,
+                              Map<String, SkillTaskDefinition> bundle,
+                              Map<String, DynamicSkillTaskDefinitionSource.ResolvedDefinition> dynamicSnapshots,
+                              Set<String> loading) {
+        String currentKey = key(definition.getSkillId(), definition.getSkillVersion());
+        if (!loading.add(currentKey)) {
+            return;
+        }
+        try {
+            for (SkillTaskDefinition.Step step : definition.getSteps()) {
+                if ("SUBMIT_CHILD".equals(step.getStepKind())) {
+                    loadDefinitionRecursive(step.getChildSkillId(), step.getChildSkillVersion(),
+                            bundle, dynamicSnapshots, loading, true);
+                }
+            }
+        } finally {
+            loading.remove(currentKey);
+        }
+    }
+
+    private SkillTaskDefinition cloneDefinition(SkillTaskDefinition definition) {
+        return objectMapper.convertValue(definition, SkillTaskDefinition.class);
+    }
+
+    private SkillTaskDefinition parseDynamicDefinition(DynamicSkillTaskDefinitionSource.ResolvedDefinition resolved) {
+        try {
+            return objectMapper.readValue(resolved.canonicalDefinitionJson(), SkillTaskDefinition.class);
+        } catch (IOException exception) {
+            throw new IllegalStateException("Cannot read dynamic Skill Task definition: "
+                    + resolved.skillId() + "@" + resolved.skillVersion(), exception);
+        }
     }
 
     Map<String, SkillTaskDefinition> validateAndIndex(List<SkillTaskDefinition> candidates) {

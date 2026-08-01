@@ -1,5 +1,8 @@
 cloudmold:
   skill-task:
+    dynamic:
+      enabled: ${CLOUDMOLD_SKILL_DYNAMIC_REGISTRY_ENABLED:true}
+      active-alias: ${CLOUDMOLD_SKILL_DYNAMIC_REGISTRY_ACTIVE_ALIAS:ACTIVE}
     approval:
       authority-mode: REMOTE_RSA
       legacy-hmac-enabled: false

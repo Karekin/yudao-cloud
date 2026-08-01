@@ -50,6 +50,19 @@ class WorkflowRegistryQueryServiceTest {
     }
 
     @Test
+    void attestsResolvedSemanticVersionWhenCallerRequestsActiveAlias() {
+        TenantContextHolder.setTenantId(162L);
+        authenticate(162L, 162L, 227L);
+        SkillTaskDefinition active = definition();
+        active.setSkillVersion("2.0.0");
+        when(definitionRegistry.require("skill.test", "ACTIVE")).thenReturn(active);
+
+        WorkflowRegistryDefinitionView result = queryService.getDefinition("skill.test", "ACTIVE");
+
+        assertThat(result.attestation().versionId()).isEqualTo("2.0.0");
+    }
+
+    @Test
     void exposesBearerAuthenticatedSubjectForBridgeVerification() {
         TenantContextHolder.setTenantId(162L);
         authenticate(162L, 162L, 227L);

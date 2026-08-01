@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -28,6 +29,7 @@ public class WorkflowRegistryAttestationService {
     private final String attestationSecret;
     private final Clock clock;
 
+    @Autowired
     public WorkflowRegistryAttestationService(
             ObjectMapper objectMapper,
             @Value("${cloudmold.workflow-registry.attestation-secret:${CLOUDMOLD_WORKFLOW_ATTESTATION_SECRET:}}")

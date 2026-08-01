@@ -23,7 +23,19 @@ public class SkillTaskProperties {
     private int maxPayloadBytes = 1_048_576;
     private int maxErrorMessageLength = 2_000;
     private boolean workerEnabled = true;
+    private DynamicRegistry dynamic = new DynamicRegistry();
     private Approval approval = new Approval();
+
+    @Data
+    public static class DynamicRegistry {
+
+        /**
+         * Tenant-scoped bridge from E2 workflow registry pointers to executable SkillTask definitions.
+         * Explicit semantic versions continue to work even when the bridge is disabled.
+         */
+        private boolean enabled = true;
+        private String activeAlias = "ACTIVE";
+    }
 
     @Data
     public static class Approval {

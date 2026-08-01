@@ -5,6 +5,7 @@ import cn.iocoder.yudao.module.cloudmold.executor.CapabilityOperationType;
 import cn.iocoder.yudao.module.cloudmold.executor.CloudMoldCapabilityCatalog;
 import cn.iocoder.yudao.module.cloudmold.rpc.CloudMoldRpcProperties;
 import cn.iocoder.yudao.module.cloudmold.skilltask.SkillTaskProperties;
+import cn.iocoder.yudao.module.cloudmold.skilltask.definition.dynamic.DynamicSkillTaskDefinitionSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -12,10 +13,14 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class SkillTaskDefinitionRegistryTest {
@@ -142,6 +147,41 @@ class SkillTaskDefinitionRegistryTest {
 
         assertThatThrownBy(() -> registry.validateAndIndex(List.of(definition)))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("READ capability");
+    }
+
+    @Test
+    void resolvesDynamicActiveDefinitionsAndValidatesTheirClosure() throws Exception {
+        when(catalog.require("cap.read")).thenReturn(descriptor("cap.read", CapabilityOperationType.READ, 0));
+        DynamicSkillTaskDefinitionSource dynamicSource = mock(DynamicSkillTaskDefinitionSource.class);
+        SkillTaskDefinitionRegistry dynamicRegistry = new SkillTaskDefinitionRegistry(
+                objectMapper, properties, catalog, Optional.of(dynamicSource));
+        when(dynamicSource.resolve("skill.parent", "ACTIVE")).thenReturn(new DynamicSkillTaskDefinitionSource.ResolvedDefinition(
+                "skill.parent", "2.0.0", "wrv-parent", 11L, """
+                {"schema_version":"cloudmold.skill-task-definition/v1","skill_id":"skill.parent",
+                 "skill_version":"2.0.0","risk_level":"R3",
+                 "steps":[
+                   {"step_kind":"SUBMIT_CHILD","step_code":"submit-child","step_order":1,
+                    "child_skill_id":"skill.child","child_skill_version":"1.5.0","arguments":{}},
+                   {"step_kind":"WAIT_CHILD","step_code":"wait-child","step_order":2,
+                    "arguments":["$task.children.submit-child.taskId"]}
+                 ]}
+                """, "hash-parent", DynamicSkillTaskDefinitionSource.SOURCE_ACTIVE_POINTER));
+        when(dynamicSource.resolve("skill.child", "1.5.0")).thenReturn(new DynamicSkillTaskDefinitionSource.ResolvedDefinition(
+                "skill.child", "1.5.0", "wrv-child", 7L, """
+                {"schema_version":"cloudmold.skill-task-definition/v1","skill_id":"skill.child",
+                 "skill_version":"1.5.0","risk_level":"R1",
+                 "steps":[
+                   {"step_kind":"CAPABILITY","step_code":"read","step_order":1,
+                    "capability_id":"cap.read","operation_type":"READ","arguments":[]}
+                 ]}
+                """, "hash-child", DynamicSkillTaskDefinitionSource.SOURCE_LINEAGE));
+
+        SkillTaskDefinition resolved = dynamicRegistry.require("skill.parent", "ACTIVE");
+
+        assertThat(resolved.getSkillVersion()).isEqualTo("2.0.0");
+        assertThat(resolved.getDefinitionSha256()).isNotBlank();
+        assertThat(resolved.getDefinitionClosureSha256()).isNotBlank();
+        verify(dynamicSource, times(2)).recordLineage(any(), any(SkillTaskDefinition.class));
     }
 
     @Test
