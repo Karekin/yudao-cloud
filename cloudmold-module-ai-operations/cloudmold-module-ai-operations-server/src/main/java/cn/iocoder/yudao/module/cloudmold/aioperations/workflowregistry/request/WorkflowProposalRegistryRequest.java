@@ -22,6 +22,10 @@ public class WorkflowProposalRegistryRequest {
     private JsonNode baseDefinition;
 
     @NotNull
+    @JsonProperty("base_attestation")
+    private JsonNode baseAttestation;
+
+    @NotNull
     @JsonProperty("candidate_definition")
     private JsonNode candidateDefinition;
 

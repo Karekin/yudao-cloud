@@ -39,19 +39,22 @@ public class WorkflowProposalRegistryService {
     private final WorkflowRegistryPointerMapper pointerMapper;
     private final WorkflowRegistryVersionMapper versionMapper;
     private final ObjectMapper objectMapper;
+    private final WorkflowBaseAttestationVerifier attestationVerifier;
 
     public WorkflowProposalRegistryService(WorkflowRegistryPointerMapper pointerMapper,
                                            WorkflowRegistryVersionMapper versionMapper,
-                                           ObjectMapper objectMapper) {
+                                           ObjectMapper objectMapper,
+                                           WorkflowBaseAttestationVerifier attestationVerifier) {
         this.pointerMapper = pointerMapper;
         this.versionMapper = versionMapper;
         this.objectMapper = objectMapper;
+        this.attestationVerifier = attestationVerifier;
     }
 
     @Transactional
     public WorkflowProposalRegistryStatusView submit(WorkflowProposalRegistryRequest request) {
         Long tenantId = TenantContextHolder.getRequiredTenantId();
-        String actor = requireActor(tenantId);
+        Actor actor = requireActor(tenantId);
         Submission submission = validate(request);
 
         WorkflowRegistryVersionDO existing = versionMapper.selectByProposalId(tenantId, submission.proposalId());
@@ -76,8 +79,11 @@ public class WorkflowProposalRegistryService {
             if (request.getExpectedPointerVersion() != 0L) {
                 throw new IllegalArgumentException("expected_pointer_version must be 0 for the first proposal");
             }
-            WorkflowRegistryVersionDO stable = version(submission, true, null, actor, now);
-            WorkflowRegistryVersionDO candidate = version(submission, false, stable.getRegistryVersionId(), actor, now);
+            attestationVerifier.verifyFresh(request.getBaseAttestation(), request.getBaseDefinition(),
+                    submission.skillId(), actor.userId());
+            WorkflowRegistryVersionDO stable = version(submission, true, null, actor.label(), now);
+            WorkflowRegistryVersionDO candidate = version(submission, false, stable.getRegistryVersionId(),
+                    actor.label(), now);
             versionMapper.insert(stable);
             versionMapper.insert(candidate);
             pointer = new WorkflowRegistryPointerDO()
@@ -87,8 +93,8 @@ public class WorkflowProposalRegistryService {
                     .setStableVersionId(stable.getRegistryVersionId())
                     .setCandidateVersionId(candidate.getRegistryVersionId())
                     .setPointerVersion(1L)
-                    .setCreatedBy(actor)
-                    .setUpdatedBy(actor)
+                    .setCreatedBy(actor.label())
+                    .setUpdatedBy(actor.label())
                     .setCreatedAt(now)
                     .setUpdatedAt(now);
             pointerMapper.insert(pointer);
@@ -105,16 +111,17 @@ public class WorkflowProposalRegistryService {
         if (stable == null || !Objects.equals(stable.getDefinitionSha256(), submission.baseSha256())) {
             throw new IllegalArgumentException("proposal base_definition does not match the stable pointer");
         }
-        WorkflowRegistryVersionDO candidate = version(submission, false, stable.getRegistryVersionId(), actor, now);
+        WorkflowRegistryVersionDO candidate = version(submission, false, stable.getRegistryVersionId(),
+                actor.label(), now);
         versionMapper.insert(candidate);
         int updated = pointerMapper.setCandidateCas(tenantId, submission.skillId(), candidate.getRegistryVersionId(),
-                request.getExpectedPointerVersion(), actor, now);
+                request.getExpectedPointerVersion(), actor.label(), now);
         if (updated != 1) {
             throw new IllegalStateException("workflow candidate pointer changed concurrently");
         }
         pointer.setCandidateVersionId(candidate.getRegistryVersionId())
                 .setPointerVersion(pointer.getPointerVersion() + 1)
-                .setUpdatedBy(actor)
+                .setUpdatedBy(actor.label())
                 .setUpdatedAt(now);
         return view(pointer, stable, candidate, false);
     }
@@ -227,7 +234,7 @@ public class WorkflowProposalRegistryService {
                 .build();
     }
 
-    private String requireActor(Long tenantId) {
+    private Actor requireActor(Long tenantId) {
         LoginUser user = Objects.requireNonNull(SecurityFrameworkUtils.getLoginUser(),
                 "Workflow proposal registry requires an authenticated login subject");
         Long userId = Objects.requireNonNull(user.getId(), "Workflow proposal registry requires a login user id");
@@ -235,7 +242,7 @@ public class WorkflowProposalRegistryService {
         if (subjectTenant != null && !Objects.equals(subjectTenant, tenantId)) {
             throw new IllegalStateException("Workflow proposal subject is not bound to the current tenant");
         }
-        return String.valueOf(user.getUserType()) + ":" + userId;
+        return new Actor(String.valueOf(user.getUserType()) + ":" + userId, String.valueOf(userId));
     }
 
     public String canonicalizeDefinition(JsonNode node) {
@@ -305,5 +312,8 @@ public class WorkflowProposalRegistryService {
                               String baseSha256, String candidateSha256,
                               String baseCanonical, String candidateCanonical,
                               String proposalJson, String validationJson, String bundleSha256) {
+    }
+
+    private record Actor(String label, String userId) {
     }
 }

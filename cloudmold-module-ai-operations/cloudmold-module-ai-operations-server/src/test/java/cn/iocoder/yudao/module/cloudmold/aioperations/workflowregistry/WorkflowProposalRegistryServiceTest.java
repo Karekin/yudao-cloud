@@ -32,8 +32,9 @@ class WorkflowProposalRegistryServiceTest {
     private final WorkflowRegistryPointerMapper pointerMapper = mock(WorkflowRegistryPointerMapper.class);
     private final WorkflowRegistryVersionMapper versionMapper = mock(WorkflowRegistryVersionMapper.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final WorkflowBaseAttestationVerifier attestationVerifier = mock(WorkflowBaseAttestationVerifier.class);
     private final WorkflowProposalRegistryService service =
-            new WorkflowProposalRegistryService(pointerMapper, versionMapper, objectMapper);
+            new WorkflowProposalRegistryService(pointerMapper, versionMapper, objectMapper, attestationVerifier);
     private MockedStatic<SecurityFrameworkUtils> security;
 
     @BeforeEach
@@ -63,6 +64,8 @@ class WorkflowProposalRegistryServiceTest {
                 .containsExactly("ACTIVE", "SUBMITTED");
         assertThat(versions.getAllValues().get(1).getValidationJson()).contains("\"passed\":true");
         verify(pointerMapper).insert(any(WorkflowRegistryPointerDO.class));
+        verify(attestationVerifier).verifyFresh(request.getBaseAttestation(), request.getBaseDefinition(),
+                skillId(), "101");
         assertThat(result.workflowId()).isEqualTo(skillId());
         assertThat(result.pointerVersion()).isEqualTo(1L);
         assertThat(result.candidateStatus()).isEqualTo("SUBMITTED");
@@ -176,6 +179,7 @@ class WorkflowProposalRegistryServiceTest {
         request.setExpectedPointerVersion(expectedPointerVersion);
         request.setProposal(proposal);
         request.setBaseDefinition(base);
+        request.setBaseAttestation(objectMapper.createObjectNode().put("proof", "server-issued"));
         request.setCandidateDefinition(candidate);
         request.setValidation(validation);
         return request;
