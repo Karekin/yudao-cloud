@@ -6,4 +6,6 @@ package cn.iocoder.yudao.module.cloudmold.merchant.api.workflow;
 public interface MerchantManagedAdmissionWorkflowQueryPort {
 
     MerchantManagedAdmissionWorkflowResult inspect(String applicationId);
+
+    MerchantManagedAdmissionWorkflowResult inspectByMerchantId(String merchantId);
 }

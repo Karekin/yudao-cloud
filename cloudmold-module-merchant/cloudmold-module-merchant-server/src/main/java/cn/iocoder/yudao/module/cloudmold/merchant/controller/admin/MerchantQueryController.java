@@ -57,4 +57,12 @@ public class MerchantQueryController {
     public CommonResult<MerchantManagedAdmissionWorkflowResult> inspectManagedAdmissionWorkflow(String applicationId) {
         return success(merchantManagedAdmissionWorkflowQueryApi.inspect(applicationId));
     }
+
+    @GetMapping("/managed-admission/workflow-by-merchant")
+    @Operation(summary = "按规范商家读取托管准入、验厂与成长只读回传")
+    @PreAuthorize("@ss.hasPermission('cloudmold:merchant:query')")
+    public CommonResult<MerchantManagedAdmissionWorkflowResult> inspectManagedAdmissionWorkflowByMerchant(
+            String merchantId) {
+        return success(merchantManagedAdmissionWorkflowQueryApi.inspectByMerchantId(merchantId));
+    }
 }

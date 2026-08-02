@@ -16,4 +16,9 @@ public class MerchantManagedAdmissionWorkflowQueryApiAdapter implements Merchant
     public MerchantManagedAdmissionWorkflowResult inspect(String applicationId) {
         return delegate.inspect(applicationId);
     }
+
+    @Override
+    public MerchantManagedAdmissionWorkflowResult inspectByMerchantId(String merchantId) {
+        return delegate.inspectByMerchantId(merchantId);
+    }
 }

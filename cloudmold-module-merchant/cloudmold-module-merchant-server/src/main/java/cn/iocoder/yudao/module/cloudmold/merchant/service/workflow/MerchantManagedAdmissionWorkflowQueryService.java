@@ -186,6 +186,21 @@ public class MerchantManagedAdmissionWorkflowQueryService implements MerchantMan
         };
     }
 
+    @Override
+    public MerchantManagedAdmissionWorkflowResult inspectByMerchantId(String merchantId) {
+        requireId(merchantId);
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        String key = merchantId.trim();
+        MerchantManagedAdmissionDO admission = merchantMapper.selectLatestManagedAdmissionByMerchant(tenantId, key);
+        if (admission == null) {
+            return result(key, Status.PREPARE, "托管准入建档", false,
+                    "该商家尚未创建托管准入档案", 0L,
+                    List.of("未找到托管准入档案"),
+                    List.of("确认规范入驻通过后，执行 OPEN_MANAGED_ADMISSION 建档"), List.of());
+        }
+        return inspect(admission.getApplicationId());
+    }
+
     private static List<String> blockersForFailure(MerchantManagedAdmissionDO admission, MerchantAiDiagnosticDO diagnostic,
                                                    MerchantFactoryInspectionTaskDO inspectionTask,
                                                    MerchantManagedFinalReviewDO finalReview) {

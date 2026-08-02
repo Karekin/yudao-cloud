@@ -653,6 +653,19 @@ public interface MerchantStoreMapper {
                                                                    @Param("applicationId") String applicationId);
 
     @Select("""
+            SELECT admission_id,tenant_id,application_id,merchant_id,shop_id,status,attribution_channel_code,
+                   attribution_source_system,attribution_source_type,attribution_source_id,attribution_reference,
+                   attribution_evidence_ref,diagnostic_id,inspection_task_id,final_review_id,version,
+                   created_at,updated_at
+            FROM cloudmold_merchant_managed_admission
+            WHERE tenant_id=#{tenantId} AND merchant_id=#{merchantId}
+            ORDER BY updated_at DESC, admission_id DESC
+            LIMIT 1
+            """)
+    MerchantManagedAdmissionDO selectLatestManagedAdmissionByMerchant(@Param("tenantId") Long tenantId,
+                                                                       @Param("merchantId") String merchantId);
+
+    @Select("""
             SELECT evidence_package_id,tenant_id,admission_id,package_ref,items_json,status,version,created_at,updated_at
             FROM cloudmold_merchant_managed_evidence_package
             WHERE tenant_id=#{tenantId} AND admission_id=#{admissionId}

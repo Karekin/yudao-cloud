@@ -97,4 +97,20 @@ class MerchantManagedAdmissionWorkflowQueryServiceTest {
                             "PROBATION_ASSESSMENT", "MONTHLY_SCORECARD", "EXIT_DECISION");
         });
     }
+
+    @Test
+    void readsManagedGrowthFromMerchantIdForMerchantCenter() {
+        when(merchantMapper.selectLatestManagedAdmissionByMerchant(7L, "merchant-1"))
+                .thenReturn(new MerchantManagedAdmissionDO().setApplicationId("app-1"));
+        when(merchantMapper.selectApplication(7L, "app-1")).thenReturn(new MerchantOnboardingApplicationDO()
+                .setApplicationId("app-1").setStatus("APPROVED").setVersion(4L));
+        when(merchantMapper.selectManagedAdmissionByApplication(7L, "app-1"))
+                .thenReturn(new MerchantManagedAdmissionDO().setAdmissionId("admission-1")
+                        .setApplicationId("app-1").setMerchantId("merchant-1")
+                        .setStatus("FINAL_APPROVED").setVersion(8L));
+
+        assertThat(service.inspectByMerchantId("merchant-1"))
+                .extracting("businessKey", "status", "phase")
+                .containsExactly("app-1", Status.SUCCEEDED, "托管准入通过");
+    }
 }
