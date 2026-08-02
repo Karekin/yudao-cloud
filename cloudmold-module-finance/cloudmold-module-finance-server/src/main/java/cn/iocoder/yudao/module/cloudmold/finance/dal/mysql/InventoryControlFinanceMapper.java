@@ -357,6 +357,7 @@ public interface InventoryControlFinanceMapper {
                                                                      @Param("postingId") String postingId);
 
     @Select("""
+            <script>
             SELECT COUNT(*) FROM cloudmold_finance_inventory_control_posting
              WHERE tenant_id=#{tenantId}
                <if test='sourceType!=null'>AND source_type=#{sourceType}</if>
@@ -367,11 +368,13 @@ public interface InventoryControlFinanceMapper {
                   OR source_reference_id LIKE CONCAT('%',#{keyword},'%')
                   OR journal_code LIKE CONCAT('%',#{keyword},'%'))
                </if>
+            </script>
             """)
     long countInventoryPostingPage(@Param("tenantId") Long tenantId, @Param("sourceType") String sourceType,
                                    @Param("status") String status, @Param("keyword") String keyword);
 
     @Select("""
+            <script>
             SELECT p.inventory_control_posting_id AS inventoryControlPostingId,
                    p.source_type AS sourceType,
                    p.source_document_id AS sourceDocumentId,
@@ -407,6 +410,7 @@ public interface InventoryControlFinanceMapper {
                </if>
              ORDER BY p.updated_at DESC,p.inventory_control_posting_id DESC
              LIMIT #{offset},#{size}
+            </script>
             """)
     List<cn.iocoder.yudao.module.cloudmold.finance.controller.admin.vo.InventoryControlFinanceAdminVOs.PostingPageItem>
     selectPostingPage(@Param("tenantId") Long tenantId, @Param("sourceType") String sourceType,
@@ -414,6 +418,7 @@ public interface InventoryControlFinanceMapper {
                       @Param("offset") long offset, @Param("size") int size);
 
     @Select("""
+            <script>
             SELECT COUNT(*) FROM cloudmold_finance_supplier_debit_adjustment
              WHERE tenant_id=#{tenantId}
                <if test='status!=null'>AND status=#{status}</if>
@@ -422,11 +427,13 @@ public interface InventoryControlFinanceMapper {
                   OR adjustment_code LIKE CONCAT('%',#{keyword},'%')
                   OR journal_entry_id LIKE CONCAT('%',#{keyword},'%'))
                </if>
+            </script>
             """)
     long countSupplierReturnPage(@Param("tenantId") Long tenantId, @Param("status") String status,
                                  @Param("keyword") String keyword);
 
     @Select("""
+            <script>
             SELECT a.supplier_debit_adjustment_id AS inventoryControlPostingId,
                    'SUPPLIER_RETURN' AS sourceType,
                    a.supplier_return_id AS sourceDocumentId,
@@ -460,6 +467,7 @@ public interface InventoryControlFinanceMapper {
                </if>
              ORDER BY a.updated_at DESC,a.supplier_debit_adjustment_id DESC
              LIMIT #{offset},#{size}
+            </script>
             """)
     List<cn.iocoder.yudao.module.cloudmold.finance.controller.admin.vo.InventoryControlFinanceAdminVOs.PostingPageItem>
     selectSupplierReturnPage(@Param("tenantId") Long tenantId, @Param("status") String status,
