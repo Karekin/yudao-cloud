@@ -957,6 +957,8 @@ public class ProcureToPayServiceImpl implements P2pEvidenceIngestionApi, Supplie
                     command.getOriginalJournalEntryId()), "journal entry not found");
             requireExpectedVersion(command.getExpectedVersion(), original.getVersion());
             require("POSTED".equals(original.getStatus()), "only posted journal entry can be reversed");
+            require(!Set.of("STOCK_COUNT_ADJUSTMENT", "INVENTORY_SCRAP").contains(original.getSourceType()),
+                    "inventory control journals must be reversed through the inventory-control finance authority");
             require(!context.actor().equals(original.getPostedByPrincipalId()),
                     "journal reverser must be independent from original poster");
             require(mapper.countJournalReversal(context.tenantId(), original.getJournalEntryId()) == 0,

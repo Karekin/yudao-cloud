@@ -52,7 +52,7 @@ public class SupplierReturnCommandService implements SupplierReturnCommandApi {
         Long tenantId = TenantContextHolder.getRequiredTenantId();
         LocalDateTime now = LocalDateTime.ofInstant(command.getOccurredAt(), ZoneOffset.UTC);
         String requestHash = fingerprint(tenantId, command);
-        String attemptToken = UUID.randomUUID().toString();
+        String attemptToken = nextAttemptToken();
         mapper.insertOrResolveOperation(tenantId, command.getIdempotencyKey(), text(command.getSourceEventId()),
                 command.getOperation().name(), requestHash, attemptToken, now);
         Long operationId = mapper.selectLastInsertId();
@@ -559,6 +559,10 @@ public class SupplierReturnCommandService implements SupplierReturnCommandApi {
     private static String eventId(String sourceEventId, String returnLineId) {
         String source = StringUtils.hasText(sourceEventId) ? sourceEventId.trim() : "supplier-return";
         return "supplier-return:" + DigestUtil.sha256Hex(source + "\u001f" + returnLineId);
+    }
+
+    String nextAttemptToken() {
+        return UUID.randomUUID().toString();
     }
 
     private static long multiplyMinor(BigDecimal quantity, Long unitCostAmountMinor) {

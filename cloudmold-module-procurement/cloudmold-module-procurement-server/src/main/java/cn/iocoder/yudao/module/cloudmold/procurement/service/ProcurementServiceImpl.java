@@ -53,8 +53,8 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
     private static final int EVENT_SCHEMA_VERSION = 2;
     private static final int RELEASE_EVENT_SCHEMA_VERSION = 4;
     private static final String SOURCE_SYSTEM = "cloudmold-procurement";
-    private static final String DEFAULT_TAX_POLICY = "STANDARD_V1";
-    private static final String DEFAULT_ROUNDING_POLICY = "HALF_UP";
+    private static final String SUPPORTED_TAX_POLICY = "STANDARD_V1";
+    private static final String SUPPORTED_ROUNDING_POLICY = "HALF_UP";
     private static final Pattern SAFE_REF = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}");
     private static final Pattern SAFE_CODE = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
     private static final BigDecimal BPS_DENOMINATOR = BigDecimal.valueOf(10_000);
@@ -527,10 +527,10 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
         String supplierId = input.getSupplierId();
         requireCurrency(input.getCurrencyCode());
         require(input.getLeadTimeDays() != null && input.getLeadTimeDays() >= 0, "leadTimeDays must not be negative");
-        String taxPolicy = normalizeOrDefaultCode(input.getTaxCalculationPolicyCode(), DEFAULT_TAX_POLICY);
-        String roundingPolicy = normalizeOrDefaultCode(input.getRoundingPolicyCode(), DEFAULT_ROUNDING_POLICY);
-        require(DEFAULT_TAX_POLICY.equals(taxPolicy), "unsupported taxCalculationPolicyCode");
-        require(DEFAULT_ROUNDING_POLICY.equals(roundingPolicy), "unsupported roundingPolicyCode");
+        String taxPolicy = requirePolicyCode(input.getTaxCalculationPolicyCode(), "taxCalculationPolicyCode");
+        String roundingPolicy = requirePolicyCode(input.getRoundingPolicyCode(), "roundingPolicyCode");
+        require(SUPPORTED_TAX_POLICY.equals(taxPolicy), "unsupported taxCalculationPolicyCode");
+        require(SUPPORTED_ROUNDING_POLICY.equals(roundingPolicy), "unsupported roundingPolicyCode");
         List<NormalizedLine> lines = normalizeLines(input);
         validateReferences(supplierId, lines);
         long headerNet = total(lines, line -> line.lineNetAmountMinor());
@@ -657,9 +657,10 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
         return value == null ? null : upper(value);
     }
 
-    private static String normalizeOrDefaultCode(String value, String defaultValue) {
-        String normalized = value == null ? defaultValue : upper(value);
-        requireCode(normalized, "code");
+    private static String requirePolicyCode(String value, String field) {
+        require(value != null && !value.isBlank(), field + " is required");
+        String normalized = upper(value);
+        requireCode(normalized, field);
         return normalized;
     }
 
