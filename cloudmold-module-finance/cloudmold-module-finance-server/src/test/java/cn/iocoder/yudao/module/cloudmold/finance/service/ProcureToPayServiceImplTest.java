@@ -115,6 +115,32 @@ class ProcureToPayServiceImplTest {
     }
 
     @Test
+    void createsSupplierReturnPostingRuleWithTheExactReversalRoles() {
+        when(mapper.insertPostingRule(anyString(), eq(TENANT_ID), eq("SUPPLIER_RETURN_V1"),
+                eq("ledger-1"), eq("SUPPLIER_RETURN"), eq(1L), any())).thenReturn(1);
+        when(mapper.insertPostingRuleLine(anyString(), eq(TENANT_ID), anyString(), eq(1L),
+                eq("ledger-1"), anyString(), anyString())).thenReturn(1);
+
+        ProcureToPayResult result = service.createPostingRule(P2pFinanceSetupCommands.PostingRule.builder()
+                .envelope(envelope("supplier-return-posting-rule"))
+                .postingRuleId("supplier-return-posting-rule")
+                .ruleCode("SUPPLIER_RETURN_V1")
+                .ledgerId("ledger-1")
+                .sourceType("SUPPLIER_RETURN")
+                .ruleVersion(1L)
+                .lines(List.of(
+                        postingRuleLine("INVENTORY", "account-inventory"),
+                        postingRuleLine("INPUT_TAX", "account-input-tax"),
+                        postingRuleLine("PURCHASE_PRICE_VARIANCE", "account-ppv"),
+                        postingRuleLine("AP", "account-ap")))
+                .build(), CREATOR);
+
+        assertThat(result.getStatus()).isEqualTo("ACTIVE");
+        verify(mapper, times(4)).insertPostingRuleLine(anyString(), eq(TENANT_ID),
+                eq("supplier-return-posting-rule"), eq(1L), eq("ledger-1"), anyString(), anyString());
+    }
+
+    @Test
     void priceBeyondToleranceCreatesBlockingExceptionAndNeverCreatesAp() {
         when(mapper.selectInvoiceForUpdate(TENANT_ID, "invoice-1"))
                 .thenReturn(invoice("SUBMITTED", "NOT_STARTED", 2L));
@@ -504,6 +530,12 @@ class ProcureToPayServiceImplTest {
     private static PostingAccount posting(String role, String accountId, String accountCode) {
         return new PostingAccount().setAccountRole(role).setLedgerId("ledger-1")
                 .setAccountId(accountId).setAccountCode(accountCode);
+    }
+
+    private static P2pFinanceSetupCommands.PostingRuleLine postingRuleLine(String role, String accountId) {
+        return P2pFinanceSetupCommands.PostingRuleLine.builder()
+                .postingRuleLineId("posting-line-" + role.toLowerCase(java.util.Locale.ROOT))
+                .accountRole(role).accountId(accountId).build();
     }
 
     private static List<PostingAccount> invoicePostingAccounts() {

@@ -227,6 +227,32 @@ class ManagedSkillTaskQueryServiceTest {
     }
 
     @Test
+    void shouldDescribeStockTransferAndSupplierAdmissionAsGovernedBusinessWorkflows() {
+        SkillTaskDefinition stockTransfer = definition(
+                "skill.cloudmold.inventory.stock-transfer-lifecycle.v1", "1.0.0", "R2");
+        stockTransfer.setWorkflowLevel("BUSINESS_ROLE");
+        stockTransfer.setOwnerRole("inventory-control");
+        SkillTaskDefinition supplierAdmission = definition(
+                "skill.cloudmold.supplier.admission-lifecycle.v1", "1.0.0", "R3");
+        supplierAdmission.setWorkflowLevel("BUSINESS_ROLE");
+        supplierAdmission.setOwnerRole("supplier-governance");
+        when(registry.all()).thenReturn(List.of(stockTransfer, supplierAdmission));
+
+        List<ManagedSkillTaskWorkflowView> workflows = service.listManagedWorkflows();
+
+        assertThat(workflows).extracting(
+                        ManagedSkillTaskWorkflowView::getDisplayName,
+                        ManagedSkillTaskWorkflowView::getDescription)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                "库存调拨执行闭环",
+                                "基于同一权威调拨单完成源仓发出、在途责任转移、目标仓收货和双边库存台账登记。"),
+                        org.assertj.core.groups.Tuple.tuple(
+                                "供应商准入治理闭环",
+                                "完成供应商注册、资质与风险证据提交，并由独立风险法务责任人批准正式准入。"));
+    }
+
+    @Test
     void shouldDescribeManagedGrowthAsHumanGovernedEvidenceWorkflow() {
         SkillTaskDefinition definition = SkillTaskDefinition.builder()
                 .skillId("skill.cloudmold.merchant.managed-growth-lifecycle.v1")

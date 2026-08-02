@@ -272,6 +272,16 @@ public interface ProcurementMapper {
                                                          @Param("sourceBusinessRef") String sourceBusinessRef);
 
     @Select("""
+            SELECT aggregate_version
+            FROM cloudmold_procurement_order_status_history
+            WHERE tenant_id=#{tenantId} AND order_id=#{orderId} AND status='RELEASED'
+            ORDER BY aggregate_version DESC
+            LIMIT 1
+            """)
+    Long selectReleasedVersion(@Param("tenantId") Long tenantId,
+                               @Param("orderId") String orderId);
+
+    @Select("""
             SELECT COUNT(*)
             FROM cloudmold_procurement_order_award_source
             WHERE tenant_id=#{tenantId} AND award_id=#{awardId} AND award_version=#{awardVersion}

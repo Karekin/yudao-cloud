@@ -187,6 +187,12 @@ class AgentApprovalResponsibilityResolverTest {
                 .containsExactly("buyer", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("warehouse.physical-cycle"))
                 .containsExactly("inventory-control", "operations-control");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("inventory.stock-count"))
+                .containsExactly("risk", "finance");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("supplier.admission"))
+                .containsExactly("risk", "legal");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("inventory.scrap"))
+                .containsExactly("quality", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("finance.period-close"))
                 .containsExactly("risk", "operations-control");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("risk.dispute-resolve"))

@@ -85,6 +85,27 @@ public interface AiOperationsTemporalMapper {
     Long selectFirstEffectiveAgentRoleActor(@Param("tenantId") Long tenantId,
                                             @Param("roleCode") String roleCode);
 
+    @Select("""
+            SELECT a.approval_id,a.requester_user_id,a.scope_hash,
+                   w.role_code,w.action_code,w.risk_level,w.skill_id,w.skill_version
+            FROM cloudmold_agent_approval a
+            JOIN cloudmold_agent_work_order w
+              ON w.tenant_id=a.tenant_id AND w.work_order_id=a.work_order_id
+            JOIN cloudmold_agent_approval_workflow_binding b
+              ON b.tenant_id=a.tenant_id AND b.approval_id=a.approval_id
+            LEFT JOIN cloudmold_agent_approval_authority_grant g
+              ON g.tenant_id=a.tenant_id AND g.approval_id=a.approval_id
+             AND g.status='ACTIVE' AND g.valid_from <= UTC_TIMESTAMP(6)
+             AND g.valid_until > UTC_TIMESTAMP(6)
+            WHERE a.tenant_id=#{tenantId} AND a.status='PENDING'
+              AND b.status='START_REQUESTED' AND b.approver_user_id IS NULL
+              AND g.grant_id IS NULL
+            ORDER BY a.requested_at ASC
+            LIMIT #{limit}
+            """)
+    List<PendingApprovalAssignmentRecord> selectPendingApprovalAssignments(
+            @Param("tenantId") Long tenantId, @Param("limit") int limit);
+
     @Insert("""
             INSERT INTO cloudmold_ai_ops_temporal_schedule
             (tenant_id,schedule_id,display_name,description,skill_id,skill_version,input_json,input_strategy,

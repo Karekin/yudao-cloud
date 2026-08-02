@@ -94,6 +94,7 @@ public class ProcurementQueryService implements ProcurementQueryApi {
                 .roundingPolicyCode(header.getRoundingPolicyCode())
                 .status(header.getStatus())
                 .version(header.getVersion())
+                .releasedVersion(mapper.selectReleasedVersion(tenantId, header.getOrderId()))
                 .createdByPrincipalId(header.getCreatedByPrincipalId())
                 .dispatchedByPrincipalId(header.getDispatchedByPrincipalId())
                 .supplierConfirmedByPrincipalId(header.getSupplierConfirmedByPrincipalId())

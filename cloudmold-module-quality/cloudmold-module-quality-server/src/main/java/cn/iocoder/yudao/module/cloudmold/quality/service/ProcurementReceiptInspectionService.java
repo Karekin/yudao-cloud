@@ -110,7 +110,7 @@ public class ProcurementReceiptInspectionService implements ProcurementReceiptIn
         requireRef(input.getReceiptId(), "receiptId", 128);
         requireRef(input.getPurchaseOrderId(), "purchaseOrderId", 128);
         String receiptId = requireRequiredUuid(input.getReceiptId(), "receiptId");
-        String purchaseOrderId = requireRequiredUuid(input.getPurchaseOrderId(), "purchaseOrderId");
+        String purchaseOrderId = requireRef(input.getPurchaseOrderId(), "purchaseOrderId", 128);
         String supplierId = requireRequiredUuid(input.getSupplierId(), "supplierId");
         String ownerType = upper(input.getOwnerType());
         require(OWNER_TYPES.contains(ownerType), "ownerType is invalid");
@@ -703,14 +703,12 @@ public class ProcurementReceiptInspectionService implements ProcurementReceiptIn
         requireRef(input.getScheduleId(), "scheduleId", 128);
         requireRef(input.getCanonicalSkuId(), "canonicalSkuId", 128);
         String receiptLineId = requireRequiredUuid(input.getReceiptLineId(), "receiptLineId");
-        String itemId = requireRequiredUuid(input.getItemId(), "itemId");
-        String scheduleId = requireRequiredUuid(input.getScheduleId(), "scheduleId");
+        String itemId = requireRef(input.getItemId(), "itemId", 128);
+        String scheduleId = requireRef(input.getScheduleId(), "scheduleId", 128);
         String canonicalSkuId = requireRequiredUuid(input.getCanonicalSkuId(), "canonicalSkuId");
         requireCode(input.getUomCode(), "uomCode");
-        String valuationPolicy = upper(input.getValuationPolicy());
-        requireCode(valuationPolicy, "valuationPolicy");
-        String valuationPolicyVersion = upper(input.getValuationPolicyVersion());
-        requireCode(valuationPolicyVersion, "valuationPolicyVersion");
+        String valuationPolicy = requireRef(input.getValuationPolicy(), "valuationPolicy", 64);
+        String valuationPolicyVersion = requireRef(input.getValuationPolicyVersion(), "valuationPolicyVersion", 64);
         requireSha256(input.getValuationPolicyHash(), "valuationPolicyHash");
         require(input.getUnitCostAmountMinor() != null && input.getUnitCostAmountMinor() >= 0,
                 "unitCostAmountMinor is required and cannot be negative");

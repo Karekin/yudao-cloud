@@ -561,12 +561,13 @@ public class SkillTaskDefinitionRegistry {
         }
         JsonNode argumentTemplate = step.getArguments().get(argumentIndex);
         JsonNode boundTemplate = pointer.isEmpty() ? argumentTemplate : argumentTemplate.at(pointer);
-        if ((boundTemplate.isMissingNode() || boundTemplate.isNull()) && "/idempotencyKey".equals(pointer)
+        if ((boundTemplate.isMissingNode() || boundTemplate.isNull()) && !pointer.isEmpty()
                 && argumentTemplate.isObject() && argumentTemplate.has("$object")
                 && argumentTemplate.path("$overrides").isObject()) {
-            boundTemplate = argumentTemplate.path("$overrides").path("idempotencyKey");
+            JsonNode overrides = argumentTemplate.path("$overrides");
+            boundTemplate = overrides.path(pointer);
             if (boundTemplate.isMissingNode()) {
-                boundTemplate = argumentTemplate.path("$overrides").path("/idempotencyKey");
+                boundTemplate = overrides.path(pointer.substring(1));
             }
         }
         if (!boundTemplate.isTextual() || !"$task.stepIdempotencyKey".equals(boundTemplate.asText())) {

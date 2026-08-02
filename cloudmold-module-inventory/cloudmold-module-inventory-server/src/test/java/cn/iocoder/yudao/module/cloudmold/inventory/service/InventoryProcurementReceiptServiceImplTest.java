@@ -23,9 +23,9 @@ import static org.mockito.Mockito.*;
 class InventoryProcurementReceiptServiceImplTest {
     private static final String RECEIPT="10000000-0000-4000-8000-000000000001";
     private static final String LINE="10000000-0000-4000-8000-000000000002";
-    private static final String PO="10000000-0000-4000-8000-000000000003";
-    private static final String ITEM="10000000-0000-4000-8000-000000000004";
-    private static final String SCHEDULE="10000000-0000-4000-8000-000000000005";
+    private static final String PO="po:award-release:canonical-test";
+    private static final String ITEM="poi:canonical-test";
+    private static final String SCHEDULE="pos:canonical-test";
     private static final String SUPPLIER="10000000-0000-4000-8000-000000000006";
     private static final String OWNER="10000000-0000-4000-8000-000000000007";
     private static final String SKU="10000000-0000-4000-8000-000000000008";
@@ -72,14 +72,14 @@ class InventoryProcurementReceiptServiceImplTest {
         assertThat(r.getUnitCostAmountMinor()).isEqualTo(100L);
         assertThat(r.getMovementCostAmountMinor()).isEqualTo(1_000L);
         assertThat(r.getCurrencyCode()).isEqualTo("CNY");
-        assertThat(r.getValuationPolicyId()).isEqualTo("MOVING_AVERAGE_V1");
+        assertThat(r.getValuationPolicyId()).isEqualTo("b9645ea2-11b6-4ba0-87a2-f1416042f60a");
         assertThat(r.getValuationPolicyVersion()).isEqualTo("V1.0.0");
         assertThat(r.getValuationPolicyHash()).isEqualTo("a".repeat(64));
         verify(balanceMapper).updateBalanceCas(eq(1L),eq(PENDING),eq(0L),eq(new BigDecimal("10.000000")),
                 eq(BigDecimal.ZERO.setScale(6)),eq(BigDecimal.ZERO.setScale(6)),any());
         verify(outbox).append(argThat(e->e.getSchemaVersion()==7
                 && e.getPayload().get("movement_type").equals("RECEIVE_PENDING_QUALITY")
-                && e.getPayload().get("valuation_policy").equals("MOVING_AVERAGE_V1")));
+                && e.getPayload().get("valuation_policy").equals("b9645ea2-11b6-4ba0-87a2-f1416042f60a")));
     }
 
     @Test void acceptedQualityReclassifiesWithoutChangingTotalOnHand(){
@@ -106,7 +106,10 @@ class InventoryProcurementReceiptServiceImplTest {
     }
 
     @Test void supplierReturnDebitsChosenDispositionAndWritesReverseEntry(){
-        newOperation(); receipt("10","0","4","3","3","0",4);
+        newOperation();
+        when(receiptMapper.selectForUpdate(1L,LINE)).thenReturn(
+                receiptAggregate("MERCHANT","10","0","4","3","3","0",4)
+                        .setValuationPolicy("B9645EA2-11B6-4BA0-87A2-F1416042F60A"));
         InventoryV3BalanceDO accepted=balance(ACCEPTED,"SELLABLE","QUALIFIED","4",2);
         when(balanceMapper.selectDimension(1L,"MERCHANT",OWNER,SKU,WAREHOUSE,LOCATION,null,"SELLABLE","QUALIFIED"))
                 .thenReturn(accepted);
@@ -194,7 +197,7 @@ class InventoryProcurementReceiptServiceImplTest {
                 .setTenantId(1L).setReceiptId(RECEIPT).setReceiptLineId(LINE).setPurchaseOrderId(PO)
                 .setPurchaseOrderItemId(ITEM).setPurchaseOrderScheduleId(SCHEDULE).setSupplierId(SUPPLIER)
                 .setOwnerType(ownerType).setOwnerId(OWNER).setCanonicalSkuId(SKU).setWarehouseId(WAREHOUSE)
-                .setLocationId(LOCATION).setBaseUomCode("PIECE").setValuationPolicy("MOVING_AVERAGE_V1")
+                .setLocationId(LOCATION).setBaseUomCode("PIECE").setValuationPolicy("b9645ea2-11b6-4ba0-87a2-f1416042f60a")
                 .setValuationPolicyVersion("V1.0.0").setValuationPolicyHash("a".repeat(64))
                 .setUnitCostAmountMinor(100L).setCurrencyCode("CNY").setReceivedQuantity(q(received))
                 .setPendingQuantity(q(pending)).setAcceptedQuantity(q(accepted)).setRejectedQuantity(q(rejected))
@@ -224,7 +227,7 @@ class InventoryProcurementReceiptServiceImplTest {
             .ownerType("MERCHANT").ownerId(OWNER).canonicalSkuId(SKU).warehouseId(WAREHOUSE).locationId(LOCATION)
             .baseUomCode("PIECE").quantity(q(quantity)).qualityDecisionId(version==0?null:DECISION)
             .decisionVersion(version==0?null:version).qualityEvidenceRef(version==0?null:"inspection-report:v"+version)
-            .valuationPolicy("MOVING_AVERAGE_V1").unitCostAmountMinor(100L)
+            .valuationPolicy("b9645ea2-11b6-4ba0-87a2-f1416042f60a").unitCostAmountMinor(100L)
             .valuationPolicyVersion("V1.0.0").valuationPolicyHash("a".repeat(64))
             .movementCostAmountMinor(q(quantity).multiply(BigDecimal.valueOf(100)).longValueExact()).currencyCode("CNY")
             .businessNo("RCV-001").correlationId(CORRELATION).occurredAt(Instant.parse("2026-08-02T01:00:00Z")).build();}

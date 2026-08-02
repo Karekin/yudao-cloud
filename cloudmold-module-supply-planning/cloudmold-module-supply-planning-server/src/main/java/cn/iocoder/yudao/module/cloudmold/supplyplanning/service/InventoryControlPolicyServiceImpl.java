@@ -102,6 +102,7 @@ public class InventoryControlPolicyServiceImpl
                 .aggregateId(outcome.aggregateId())
                 .aggregateVersion(outcome.aggregateVersion())
                 .status(outcome.status())
+                .policyVersionId((String) outcome.payload().get("policy_version_id"))
                 .build();
         require(mapper.markOperationSucceeded(operationId, tenantId, outcome.aggregateType(), outcome.aggregateId(),
                         JsonUtils.toJsonString(result), now) == 1,
@@ -376,6 +377,7 @@ public class InventoryControlPolicyServiceImpl
                 .causationId(causationId)
                 .idempotencyKey(idempotencyKey + ":" + outcome.eventType())
                 .payload(outcome.payload())
+                .destination("lakehouse")
                 .build());
     }
 

@@ -51,6 +51,16 @@ class SkillTaskDefinitionRegistryTest {
     }
 
     @Test
+    void acceptsNestedIdempotencyBindingDeclaredByObjectOverride() throws Exception {
+        when(catalog.require("cap.write")).thenReturn(descriptor("cap.write", CapabilityOperationType.WRITE, 1));
+        SkillTaskDefinition definition = definition("R2", """
+                [{"$object":"$input.command","$overrides":{"/envelope/idempotencyKey":"$task.stepIdempotencyKey"}}]
+                """, true, binding(0, "/envelope/idempotencyKey"));
+
+        assertThat(registry.validateAndIndex(List.of(definition))).containsKey("skill.test@1.0.0");
+    }
+
+    @Test
     void rejectsWriteWithoutIdempotencyBinding() throws Exception {
         when(catalog.require("cap.write")).thenReturn(descriptor("cap.write", CapabilityOperationType.WRITE, 1));
         SkillTaskDefinition definition = definition("R2", "[\"$input.merchantId\"]", true, null);

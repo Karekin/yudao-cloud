@@ -119,7 +119,7 @@ public class InventoryStockCountAdjustmentServiceImpl implements InventoryStockC
 
         InventoryV3LedgerTransactionDO transaction = new InventoryV3LedgerTransactionDO()
                 .setTenantId(tenantId)
-                .setOperationId(operationId)
+                .setStockCountAdjustmentOperationId(operationId)
                 .setMovementGroupId(UUID.randomUUID().toString())
                 .setCommandType("STOCK_COUNT_ADJUST")
                 .setBusinessType(command.businessType())

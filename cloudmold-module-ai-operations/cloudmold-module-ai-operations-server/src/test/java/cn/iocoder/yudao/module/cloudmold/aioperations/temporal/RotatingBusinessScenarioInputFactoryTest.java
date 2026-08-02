@@ -924,6 +924,21 @@ class RotatingBusinessScenarioInputFactoryTest {
     }
 
     @Test
+    void shouldReturnNoActionWhenProcurementSourcingHasNoAuthoritativeSeed() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL))
+                .thenReturn(null);
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL))
+                .thenReturn(null);
+
+        assertThat(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL,
+                "2026-08-03", "temporal-no-procurement-seed")).isEmpty();
+    }
+
+    @Test
     void shouldBuildFreshFinanceCloseWithIndependentMakerAndChecker() {
         mockReadyMaster();
         when(mapper.selectLatestSuccessfulSkillTaskInput(

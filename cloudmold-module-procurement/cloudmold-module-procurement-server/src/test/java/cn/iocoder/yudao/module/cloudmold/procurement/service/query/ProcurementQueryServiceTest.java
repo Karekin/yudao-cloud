@@ -92,10 +92,12 @@ class ProcurementQueryServiceTest {
                         .setRequiredDeliveryDate(LocalDate.of(2026, 8, 5))
                         .setCanonicalWarehouseId("warehouse-02")
                         .setScheduledQuantity(new BigDecimal("8"))));
+        when(mapper.selectReleasedVersion(31L, "order-01")).thenReturn(4L);
 
         ProcurementOrderView result = service.requireCurrent("order-01");
 
         assertThat(result.getSupplierId()).isEqualTo("supplier-01");
+        assertThat(result.getReleasedVersion()).isEqualTo(4L);
         assertThat(result.getItems()).hasSize(2);
         assertThat(result.getItems().get(0).getSchedules()).hasSize(1);
         assertThat(result.getItems().get(0).getValuationPolicyId()).isEqualTo("valuation-policy-01");

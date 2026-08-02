@@ -83,8 +83,10 @@ class InventoryScrapDispositionServiceImplTest {
         when(balanceMapper.updateBalanceCas(eq(1L), eq("balance-01"), eq(4L), eq(new BigDecimal("6.500000")),
                 eq(new BigDecimal("1.000000")), eq(new BigDecimal("0.000000")), any())).thenReturn(1);
         doAnswer(invocation -> {
-            invocation.<InventoryV3LedgerTransactionDO>getArgument(0)
-                    .setLedgerTransactionId(701L);
+            InventoryV3LedgerTransactionDO transaction = invocation.getArgument(0);
+            assertThat(transaction.getOperationId()).isNull();
+            assertThat(transaction.getScrapDispositionOperationId()).isEqualTo(31L);
+            transaction.setLedgerTransactionId(701L);
             return 1;
         }).when(ledgerTransactionMapper).insert(any(InventoryV3LedgerTransactionDO.class));
         when(ledgerEntryMapper.insert(any(InventoryV3LedgerEntryDO.class))).thenReturn(1);

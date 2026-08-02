@@ -38,6 +38,22 @@ LEFT JOIN information_schema.table_constraints actual
       AND actual.constraint_type = 'FOREIGN KEY'
 WHERE actual.constraint_name IS NULL;
 
+SELECT 'stock_count_ledger_command_constraint' AS check_name,
+       CASE WHEN COUNT(*) = 1
+                  AND MAX(check_clause) LIKE '%STOCK_COUNT_ADJUST%'
+            THEN 0 ELSE 1 END AS violations
+FROM information_schema.check_constraints
+WHERE constraint_schema = DATABASE()
+  AND constraint_name = 'ck_cm_inv_v3_tx_command';
+
+SELECT 'missing_stock_count_ledger_operation_owner' AS check_name,
+       CASE WHEN COUNT(*) = 1 THEN 0 ELSE 1 END AS violations
+FROM information_schema.table_constraints
+WHERE constraint_schema = DATABASE()
+  AND table_name = 'cloudmold_inventory_ledger_transaction_v3'
+  AND constraint_name = 'fk_cm_inv_v3_tx_count_adjustment_op'
+  AND constraint_type = 'FOREIGN KEY';
+
 SELECT 'missing_stock_count_unique_keys' AS check_name,
        COUNT(*) AS violations
 FROM (

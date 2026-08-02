@@ -16,4 +16,6 @@ public class SafetyStockPolicyResult {
     private String aggregateId;
     private Long aggregateVersion;
     private String status;
+    /** Present when publishing creates the immutable policy-version authority. */
+    private String policyVersionId;
 }

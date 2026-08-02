@@ -82,6 +82,49 @@ class ManagedWorkflowAgentGovernanceSeederTest {
     }
 
     @Test
+    void shouldAssignConfiguredOperatingPrincipalToRegisteredPendingApproval() {
+        AgentControlCommandApi commands = mock(AgentControlCommandApi.class);
+        AgentAuthorityGovernanceApi authority = mock(AgentAuthorityGovernanceApi.class);
+        AiOperationsTemporalMapper mapper = mock(AiOperationsTemporalMapper.class);
+        when(mapper.selectApprovalPolicy(162L)).thenReturn(new TemporalApprovalPolicyRecord()
+                .setTenantId(162L).setRequesterUserId(226L)
+                .setApproverUserId(225L).setGovernanceUserId(227L).setStatus("ACTIVE"));
+        when(mapper.countActiveAgentRole(162L, "product-operations")).thenReturn(1);
+        when(mapper.countMatchingEnabledAgentActionPolicy(
+                162L, "product-operations", "product.management", "R3",
+                "skill.cloudmold.commerce.product-management-lifecycle.v1", "1.0.0",
+                "a".repeat(64))).thenReturn(1);
+        when(mapper.countEffectiveAgentRoleGrant(162L, 226L, "product-operations")).thenReturn(1);
+        when(mapper.countActiveAgentRole(162L, "quality")).thenReturn(1);
+        when(mapper.countEffectiveAgentRoleGrant(162L, 227L, "quality")).thenReturn(1);
+        when(mapper.countActiveAgentRole(162L, "operations-lead")).thenReturn(1);
+        when(mapper.selectFirstEffectiveAgentRoleActor(162L, "finance")).thenReturn(228L);
+        when(mapper.countEffectiveAgentRoleGrant(162L, 228L, "operations-lead")).thenReturn(1);
+        PendingApprovalAssignmentRecord pending = new PendingApprovalAssignmentRecord()
+                .setApprovalId("approval-01").setRequesterUserId(226L)
+                .setScopeHash("b".repeat(64)).setRoleCode("product-operations")
+                .setActionCode("product.management").setRiskLevel("R3")
+                .setSkillId("skill.cloudmold.commerce.product-management-lifecycle.v1")
+                .setSkillVersion("1.0.0");
+        when(mapper.selectPendingApprovalAssignments(162L, 100)).thenReturn(List.of(pending));
+        ManagedSkillTaskWorkflowView workflow = ManagedSkillTaskWorkflowView.builder()
+                .skillId("skill.cloudmold.commerce.product-management-lifecycle.v1")
+                .skillVersion("1.0.0").riskLevel("R3").approvalRequired(true)
+                .definitionClosureSha256("a".repeat(64)).build();
+
+        new ManagedWorkflowAgentGovernanceSeeder(commands, authority, mapper)
+                .reconcile(162L, List.of(workflow));
+
+        ArgumentCaptor<cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentAuthorityCommand> grant =
+                ArgumentCaptor.forClass(
+                        cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentAuthorityCommand.class);
+        verify(authority).executeAuthorityGovernance(grant.capture(), eq(227L));
+        assertThat(grant.getValue().getOperation().name()).isEqualTo("GRANT_APPROVER");
+        assertThat(grant.getValue().getApprovalGrant().getApproverUserId()).isEqualTo(225L);
+        assertThat(grant.getValue().getApprovalGrant().getApprovalId()).isEqualTo("approval-01");
+    }
+
+    @Test
     void shouldSeedIndependentQualityAndOperationsLeadResponsibility() {
         AgentControlCommandApi commands = mock(AgentControlCommandApi.class);
         AgentAuthorityGovernanceApi authority = mock(AgentAuthorityGovernanceApi.class);

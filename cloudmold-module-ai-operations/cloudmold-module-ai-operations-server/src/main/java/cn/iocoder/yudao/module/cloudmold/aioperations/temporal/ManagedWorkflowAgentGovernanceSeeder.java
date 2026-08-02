@@ -90,12 +90,16 @@ class ManagedWorkflowAgentGovernanceSeeder {
             Map.entry("merchant-experience.rectification",
                     List.of("customer-service", "operations-lead")),
             Map.entry("supplier.award", List.of("buyer", "finance")),
+            Map.entry("procurement.sourcing-award", List.of("buyer", "finance")),
             Map.entry("purchase-order.dispatch", List.of("buyer", "finance")),
+            Map.entry("procurement.receipt-accounting", List.of("buyer", "finance")),
             Map.entry("warehouse.physical-cycle", List.of("inventory-control", "operations-control")),
             Map.entry("replenishment.end-to-end", List.of("buyer", "finance")),
             Map.entry("warehouse.admission", List.of("quality", "operations-lead")),
             Map.entry("supply-planning.sop-release", List.of("buyer", "finance")),
             Map.entry("finance.period-close", List.of("risk", "operations-control")),
+            Map.entry("finance.supplier-invoice-finalization", List.of("risk", "operations-control")),
+            Map.entry("finance.supplier-return-finalization", List.of("risk", "operations-control")),
             Map.entry("finance.logistics-settlement", List.of("risk", "operations-control")),
             Map.entry("finance.merchant-service-fee-settlement",
                     List.of("risk", "operations-control")),
@@ -117,7 +121,11 @@ class ManagedWorkflowAgentGovernanceSeeder {
             Map.entry("production.execute",
                     List.of("quality", "operations-lead")),
             Map.entry("assortment.plan-release",
-                    List.of("buyer", "finance"))
+                    List.of("buyer", "finance")),
+            Map.entry("supplier.return", List.of("buyer", "finance")),
+            Map.entry("inventory.stock-count", List.of("risk", "finance")),
+            Map.entry("inventory.scrap", List.of("quality", "finance")),
+            Map.entry("supplier.admission", List.of("risk", "legal"))
     );
 
     private final AgentControlCommandApi agentCommands;
@@ -184,7 +192,51 @@ class ManagedWorkflowAgentGovernanceSeeder {
             }
             reconciledRoles.add(route.roleCode());
         }
+        // Missing-approver recovery is an operational grant, not deterministic seed data.
+        // Anchor its validity to the reconciliation time so a long-lived policy cannot
+        // create an already-expired exact grant.
+        reconcilePendingApproverAssignments(tenantId, workflows, approvalPolicy, Instant.now());
         return new ReconcileResult(reconciledRoles.size(), createdRoles, createdPolicies, createdGrants);
+    }
+
+    private void reconcilePendingApproverAssignments(
+            Long tenantId,
+            List<ManagedSkillTaskWorkflowView> workflows,
+            TemporalApprovalPolicyRecord approvalPolicy,
+            Instant occurredAt) {
+        Set<String> registeredSkills = workflows.stream()
+                .filter(workflow -> Boolean.TRUE.equals(workflow.getApprovalRequired()))
+                .map(workflow -> workflow.getSkillId() + "@" + workflow.getSkillVersion())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        for (PendingApprovalAssignmentRecord pending : mapper.selectPendingApprovalAssignments(tenantId, 100)) {
+            if (!registeredSkills.contains(pending.getSkillId() + "@" + pending.getSkillVersion())) {
+                continue;
+            }
+            ManagedWorkflowDailyAutomationCatalog.ApprovalRoute route =
+                    ManagedWorkflowDailyAutomationCatalog.approvalRoute(pending.getSkillId());
+            if (route == null
+                    || !route.roleCode().equals(pending.getRoleCode())
+                    || !route.actionCode().equals(pending.getActionCode())) {
+                continue;
+            }
+            Instant validFrom = occurredAt.minus(1, ChronoUnit.MINUTES);
+            authorityGovernance.executeAuthorityGovernance(AgentAuthorityCommand.builder()
+                    .operation(AgentAuthorityOperation.GRANT_APPROVER)
+                    .idempotencyKey("aiops:managed-approver-grant:v1:" + pending.getApprovalId())
+                    .occurredAt(occurredAt)
+                    .approvalGrant(AgentAuthorityCommand.ApprovalGrantDefinition.builder()
+                            .grantId("managed-approval-" + pending.getApprovalId())
+                            .approverUserId(approvalPolicy.getApproverUserId())
+                            .approvalId(pending.getApprovalId())
+                            .roleCode(pending.getRoleCode())
+                            .actionCode(pending.getActionCode())
+                            .riskLevel(pending.getRiskLevel())
+                            .scopeHash(pending.getScopeHash())
+                            .validFrom(validFrom)
+                            .validUntil(validFrom.plus(7, ChronoUnit.DAYS))
+                            .build())
+                    .build(), approvalPolicy.getGovernanceUserId());
+        }
     }
 
     private void defineRole(String roleCode, Long governanceUserId, Instant occurredAt) {

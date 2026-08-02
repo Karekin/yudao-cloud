@@ -16,6 +16,8 @@ public class InventoryV3LedgerTransactionDO {
     private Long operationId;
     private Long stockTransferOperationId;
     private Long procurementReceiptOperationId;
+    private Long stockCountAdjustmentOperationId;
+    private Long scrapDispositionOperationId;
     private String movementGroupId;
     private String commandType;
     private String businessType;

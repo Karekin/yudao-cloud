@@ -130,7 +130,8 @@ public class ProcureToPayServiceImpl implements P2pEvidenceIngestionApi, Supplie
             Map<String, Set<String>> requiredRoles = Map.of(
                     "QUALIFIED_RECEIPT", Set.of("INVENTORY", "GRIR"),
                     "SUPPLIER_INVOICE", Set.of("GRIR", "INPUT_TAX", "PURCHASE_PRICE_VARIANCE", "AP"),
-                    "SUPPLIER_PAYMENT", Set.of("AP", "BANK_CLEARING"));
+                    "SUPPLIER_PAYMENT", Set.of("AP", "BANK_CLEARING"),
+                    "SUPPLIER_RETURN", Set.of("INVENTORY", "INPUT_TAX", "PURCHASE_PRICE_VARIANCE", "AP"));
             require(requiredRoles.containsKey(sourceType),"sourceType is invalid");
             require(command.getRuleVersion()!=null&&command.getRuleVersion()>0,"ruleVersion must be positive");
             require(command.getLines()!=null&&!command.getLines().isEmpty(),"posting rule lines are required"); String id=valueOrUuid(command.getPostingRuleId());

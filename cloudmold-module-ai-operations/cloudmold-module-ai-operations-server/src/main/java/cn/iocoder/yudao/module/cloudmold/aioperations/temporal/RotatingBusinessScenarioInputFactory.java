@@ -1268,9 +1268,10 @@ class RotatingBusinessScenarioInputFactory {
 
     private CatalogProcurementLine catalogProcurementLine(Long tenantId, String stepCode, int definitionIndex) {
         JsonNode result = result(tenantId, CATALOG_MATRIX_SKILL, stepCode);
-        JsonNode catalogInput = JsonUtils.parseTree(
-                mapper.selectLatestSuccessfulSkillTaskInput(tenantId, CATALOG_MATRIX_SKILL));
-        JsonNode definition = catalogInput == null
+        String catalogInputJson = mapper.selectLatestSuccessfulSkillTaskInput(tenantId, CATALOG_MATRIX_SKILL);
+        JsonNode catalogInput = catalogInputJson == null || catalogInputJson.isBlank()
+                ? JsonNodeFactory.instance.missingNode() : JsonUtils.parseTree(catalogInputJson);
+        JsonNode definition = catalogInput.isMissingNode()
                 ? JsonNodeFactory.instance.missingNode()
                 : catalogInput.path("definitions").path(definitionIndex);
         return new CatalogProcurementLine(
@@ -1278,9 +1279,11 @@ class RotatingBusinessScenarioInputFactory {
     }
 
     private Optional<ProcurementSourcingSeed> procurementSourcingSeed(Long tenantId) {
-        JsonNode input = JsonUtils.parseTree(mapper.selectLatestSuccessfulSkillTaskInput(
-                tenantId, PROCUREMENT_SOURCING_SKILL));
-        if (input == null || !input.isObject()
+        String inputJson = mapper.selectLatestSuccessfulSkillTaskInput(
+                tenantId, PROCUREMENT_SOURCING_SKILL);
+        JsonNode input = inputJson == null || inputJson.isBlank()
+                ? JsonNodeFactory.instance.missingNode() : JsonUtils.parseTree(inputJson);
+        if (!input.isObject()
                 || !PROCUREMENT_SOURCING_INPUT_SCHEMA.equals(input.path("schemaVersion").asText())
                 || !input.path("supplierCandidates").isArray()
                 || input.path("supplierCandidates").size() != 2

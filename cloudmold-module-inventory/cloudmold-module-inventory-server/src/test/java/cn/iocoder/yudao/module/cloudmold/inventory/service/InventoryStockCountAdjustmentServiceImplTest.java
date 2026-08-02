@@ -116,6 +116,8 @@ class InventoryStockCountAdjustmentServiceImplTest {
                 eq(new BigDecimal("0.000000")), any())).thenReturn(1);
         doAnswer(invocation -> {
             var tx = invocation.getArgument(0, cn.iocoder.yudao.module.cloudmold.inventory.dal.dataobject.InventoryV3LedgerTransactionDO.class);
+            assertThat(tx.getOperationId()).isNull();
+            assertThat(tx.getStockCountAdjustmentOperationId()).isEqualTo(11L);
             tx.setLedgerTransactionId(701L);
             return 1;
         }).when(ledgerTransactionMapper).insert(any(cn.iocoder.yudao.module.cloudmold.inventory.dal.dataobject.InventoryV3LedgerTransactionDO.class));

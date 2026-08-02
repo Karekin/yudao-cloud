@@ -115,6 +115,7 @@ public class SupplierReturnReversalService implements SupplierReturnReversalComm
 
         List<SupplierDebitAdjustmentLine> adjustmentLines = new ArrayList<>();
         List<SupplierReturnApReversal> apReversals = new ArrayList<>();
+        List<ValuationEffect> valuationEffects = new ArrayList<>();
         List<JournalLine> journalLines = new ArrayList<>();
         long totalGross = 0L;
         long totalTax = 0L;
@@ -161,7 +162,8 @@ public class SupplierReturnReversalService implements SupplierReturnReversalComm
                     "valuation layer not found for supplier return line");
             require(Objects.equals(layer.getCurrencyCode(), line.getCurrencyCode()),
                     "valuation layer currency does not match supplier return line");
-            require(Objects.equals(layer.getValuationPolicyId(), line.getValuationPolicyId())
+            require(Objects.equals(canonicalPolicyId(layer.getValuationPolicyId()),
+                            canonicalPolicyId(line.getValuationPolicyId()))
                             && Objects.equals(layer.getValuationPolicyVersion(), line.getValuationPolicyVersion()),
                     "valuation layer snapshot does not match supplier return line");
             require(scale(layer.getRemainingQuantity()).compareTo(scale(line.getDispatchedQuantity())) >= 0,
@@ -218,11 +220,6 @@ public class SupplierReturnReversalService implements SupplierReturnReversalComm
                         .setGrossReversalAmountMinor(grossShare)
                         .setJournalEntryVersion(1L)
                         .setCreatedAt(context.now());
-                require(mapper.insertSupplierReturnApReversal(reversal) == 1,
-                        "failed to persist supplier return ap reversal");
-                require(mapper.insertSupplierReturnApApplication(UUID.randomUUID().toString(), context.tenantId(),
-                                candidate.getApOpenItemId(), adjustmentId, grossShare, journalId, context.now()) == 1,
-                        "failed to persist supplier return ap application");
                 apReversals.add(reversal);
                 lineGross = Math.addExact(lineGross, grossShare);
                 lineTax = Math.addExact(lineTax, taxShare);
@@ -241,10 +238,8 @@ public class SupplierReturnReversalService implements SupplierReturnReversalComm
             require(mapper.applyValuationReturn(context.tenantId(), layer.getValuationLayerId(), layer.getVersion(),
                             reversalQuantity, valuationAmount, context.now()) == 1,
                     "valuation layer reversal conflict");
-            require(mapper.insertSupplierReturnValuationEffect(UUID.randomUUID().toString(), context.tenantId(),
-                            layer.getValuationLayerId(), layer.getInventoryMovementId(), layer.getInventoryMovementVersion(),
-                            reversalQuantity, valuationAmount, line.getCurrencyCode(), journalId, context.now()) == 1,
-                    "failed to persist supplier return valuation effect");
+            valuationEffects.add(new ValuationEffect(layer.getValuationLayerId(), layer.getInventoryMovementId(),
+                    layer.getInventoryMovementVersion(), reversalQuantity, valuationAmount, line.getCurrencyCode()));
             totalValuation = Math.addExact(totalValuation, valuationAmount);
 
             journalLines.add(journalLine(context, journalId, nextJournalLine++, accounts.get("INVENTORY"),
@@ -316,6 +311,12 @@ public class SupplierReturnReversalService implements SupplierReturnReversalComm
             require(mapper.insertJournalLine(line) == 1, "failed to persist posted journal line");
             insertDimensions(context, line.getJournalLineId(), command.getJournalDimensions());
         }
+        for (ValuationEffect effect : valuationEffects) {
+            require(mapper.insertSupplierReturnValuationEffect(UUID.randomUUID().toString(), context.tenantId(),
+                            effect.valuationLayerId(), effect.inventoryMovementId(), effect.inventoryMovementVersion(),
+                            effect.quantity(), effect.amountMinor(), effect.currencyCode(), journalId, context.now()) == 1,
+                    "failed to persist supplier return valuation effect");
+        }
         require(mapper.insertJournalSourceEffect(UUID.randomUUID().toString(), context.tenantId(),
                         "SUPPLIER_RETURN", adjustmentId, "SUPPLIER_RETURN", journalId, context.now()) == 1,
                 "failed to persist supplier return journal source effect");
@@ -355,7 +356,23 @@ public class SupplierReturnReversalService implements SupplierReturnReversalComm
             require(mapper.insertSupplierDebitAdjustmentLine(line) == 1,
                     "failed to persist supplier debit adjustment line");
         }
+        for (SupplierReturnApReversal reversal : apReversals) {
+            require(mapper.insertSupplierReturnApReversal(reversal) == 1,
+                    "failed to persist supplier return ap reversal");
+            require(mapper.insertSupplierReturnApApplication(UUID.randomUUID().toString(), context.tenantId(),
+                            reversal.getApOpenItemId(), adjustmentId, reversal.getGrossReversalAmountMinor(),
+                            journalId, context.now()) == 1,
+                    "failed to persist supplier return ap application");
+        }
         return new PostedResult(adjustmentId, journalId);
+    }
+
+    private static String canonicalPolicyId(String value) {
+        try {
+            return UUID.fromString(value).toString();
+        } catch (IllegalArgumentException ex) {
+            return value;
+        }
     }
 
     private void applyInstallments(Context context, String apOpenItemId, long amountMinor) {
@@ -523,5 +540,10 @@ public class SupplierReturnReversalService implements SupplierReturnReversalComm
     }
 
     private record PostedResult(String adjustmentId, String journalEntryId) {
+    }
+
+    private record ValuationEffect(String valuationLayerId, String inventoryMovementId,
+                                   Long inventoryMovementVersion, BigDecimal quantity,
+                                   Long amountMinor, String currencyCode) {
     }
 }

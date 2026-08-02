@@ -29,6 +29,7 @@ public class ProcurementOrderView {
     private String roundingPolicyCode;
     private String status;
     private Long version;
+    private Long releasedVersion;
     private String createdByPrincipalId;
     private String dispatchedByPrincipalId;
     private String supplierConfirmedByPrincipalId;

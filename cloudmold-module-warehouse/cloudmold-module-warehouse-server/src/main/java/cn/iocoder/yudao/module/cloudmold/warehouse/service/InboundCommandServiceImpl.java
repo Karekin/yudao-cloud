@@ -56,6 +56,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -142,16 +143,18 @@ public class InboundCommandServiceImpl implements InboundCommandApi {
         require(input.getSupplierId().equals(order.getSupplierId()), "ASN supplierId does not match procurement order");
         require("HALF_UP".equals(upper(order.getRoundingPolicyCode())),
                 "released procurement order rounding policy must be HALF_UP");
-        require(order.getVersion().equals(input.getLines().get(0).getPoReleaseVersion()),
-                "poReleaseVersion must match current procurement order version");
+        require(order.getReleasedVersion() != null
+                        && order.getReleasedVersion().equals(input.getLines().get(0).getPoReleaseVersion()),
+                "poReleaseVersion must match the authoritative procurement release version");
         List<ProcurementOrderLineRef> validatedRefs = new ArrayList<>(input.getLines().size());
+        List<ScheduleFulfillmentDO> validatedFulfillments = new ArrayList<>(input.getLines().size());
         for (AsnLineDefinition line : input.getLines()) {
             ProcurementOrderLineRef ref = requireOrderLine(order, line);
             require(input.getSupplierId().equals(line.getSupplierId()), "ASN line supplierId does not match header");
             require(input.getWarehouseId().equals(line.getWarehouseId()), "ASN line warehouseId does not match header");
             validatedRefs.add(ref);
             warehouseValidationApi.requireActiveLocation(line.getWarehouseId(), line.getReceiptLocationId());
-            ensureScheduleFulfillment(tenantId, order, line, ref, now);
+            validatedFulfillments.add(ensureScheduleFulfillment(tenantId, order, line, ref, now));
         }
 
         String asnId = valueOrUuid(input.getAsnId());
@@ -179,7 +182,8 @@ public class InboundCommandServiceImpl implements InboundCommandApi {
                     .setBaseUomCode(line.getBaseUomCode()).setScheduledQuantity(ref.schedule().getScheduledQuantity())
                     .setAllowedOverReceiptQuantity(nonNegative(line.getAllowedOverReceiptQuantity(),
                             "allowedOverReceiptQuantity"))
-                    .setReceivedQuantity(ZERO).setPendingQualityQuantity(ZERO).setFulfillmentVersion(1L)
+                    .setReceivedQuantity(ZERO).setPendingQualityQuantity(ZERO)
+                    .setFulfillmentVersion(validatedFulfillments.get(index).getVersion())
                     .setValuationPolicyId(ref.item().getValuationPolicyId())
                     .setValuationPolicyVersion(ref.item().getValuationPolicyVersion())
                     .setValuationPolicyHash(ref.item().getValuationPolicyHash())
@@ -396,6 +400,7 @@ public class InboundCommandServiceImpl implements InboundCommandApi {
                             .receiptId(receiptId).receiptLineId(receiptLineId)
                             .purchaseOrderId(receiptLine.getProcurementOrderId())
                             .purchaseOrderItemId(receiptLine.getProcurementOrderItemId())
+                            .purchaseOrderLineVersion(receiptLine.getPoReleaseVersion())
                             .deliveryScheduleId(receiptLine.getDeliveryScheduleId())
                             .receivedQuantity(receiptLine.getReceivedQuantity())
                             .unitOfMeasure(receiptLine.getBaseUomCode())
@@ -591,8 +596,8 @@ public class InboundCommandServiceImpl implements InboundCommandApi {
     }
 
     private ProcurementOrderLineRef requireOrderLine(ProcurementOrderView order, AsnLineDefinition line) {
-        require(order.getVersion().equals(line.getPoReleaseVersion()),
-                "poReleaseVersion does not match current procurement order version");
+        require(order.getReleasedVersion() != null && order.getReleasedVersion().equals(line.getPoReleaseVersion()),
+                "poReleaseVersion does not match the authoritative procurement release version");
         require(order.getSupplierId().equals(line.getSupplierId()), "supplierId does not match procurement order");
         ProcurementOrderView.PurchaseOrderItemView item = order.getItems().stream()
                 .filter(candidate -> candidate.getItemId().equals(line.getProcurementOrderItemId()))
@@ -614,8 +619,9 @@ public class InboundCommandServiceImpl implements InboundCommandApi {
         return new ProcurementOrderLineRef(item, schedule);
     }
 
-    private void ensureScheduleFulfillment(Long tenantId, ProcurementOrderView order, AsnLineDefinition line,
-                                           ProcurementOrderLineRef ref, LocalDateTime now) {
+    private ScheduleFulfillmentDO ensureScheduleFulfillment(Long tenantId, ProcurementOrderView order,
+                                                            AsnLineDefinition line,
+                                                            ProcurementOrderLineRef ref, LocalDateTime now) {
         scheduleFulfillmentMapper.insertIgnore(new ScheduleFulfillmentDO()
                 .setScheduleFulfillmentId(UUID.randomUUID().toString()).setTenantId(tenantId)
                 .setProcurementOrderId(order.getOrderId()).setProcurementOrderItemId(line.getProcurementOrderItemId())
@@ -638,6 +644,7 @@ public class InboundCommandServiceImpl implements InboundCommandApi {
         require(current.getTolerancePolicyVersion().equals(line.getTolerancePolicyVersion())
                         && current.getTolerancePolicyHash().equals(line.getTolerancePolicyHash()),
                 "schedule fulfillment policy mismatch");
+        return current;
     }
 
     private ScheduleFulfillmentDO requireScheduleFulfillment(Long tenantId, String procurementOrderItemId,
@@ -871,7 +878,8 @@ public class InboundCommandServiceImpl implements InboundCommandApi {
     private static String eventId(String sourceEventId, String phase, String receiptLineId) {
         String source = sourceEventId == null || sourceEventId.isBlank()
                 ? "warehouse-procurement-inbound" : sourceEventId;
-        return "warehouse:" + DigestUtil.sha256Hex(source + "\u001f" + phase + "\u001f" + receiptLineId);
+        return UUID.nameUUIDFromBytes((source + "\u001f" + phase + "\u001f" + receiptLineId)
+                .getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private static void requireVersion(Long currentVersion, Long expectedVersion) {

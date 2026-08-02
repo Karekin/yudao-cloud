@@ -25,12 +25,12 @@ import static org.mockito.Mockito.*;
 
 class ProcurementReceiptInspectionServiceTest {
     private static final String RECEIPT = "40000000-0000-0000-0000-000000000001";
-    private static final String PO = "50000000-0000-0000-0000-000000000001";
+    private static final String PO = "po:award-release:quality-test";
     private static final String SUPPLIER = "60000000-0000-0000-0000-000000000001";
     private static final String OWNER = "70000000-0000-0000-0000-000000000001";
     private static final String RECEIPT_LINE = "80000000-0000-0000-0000-000000000001";
-    private static final String ITEM = "90000000-0000-0000-0000-000000000001";
-    private static final String SCHEDULE = "a0000000-0000-0000-0000-000000000001";
+    private static final String ITEM = "poi:quality-test";
+    private static final String SCHEDULE = "pos:quality-test";
     private static final String SKU = "b0000000-0000-0000-0000-000000000001";
     private static final String WAREHOUSE = "c0000000-0000-0000-0000-000000000001";
     private static final String LOCATION_1 = "d0000000-0000-0000-0000-000000000001";
@@ -146,7 +146,12 @@ class ProcurementReceiptInspectionServiceTest {
                         .setStandardVersionId("standard-version-3").setContentSha256("a".repeat(64))
                         .setEffectiveAt(java.time.LocalDateTime.of(2026, 8, 1, 0, 0)));
 
-        ProcurementReceiptInspectionResult result = execute(createCommand());
+        ProcurementReceiptInspectionCommand command = createCommand();
+        command.getCreate().getLines().get(0)
+                .setValuationPolicy("b9645ea2-11b6-4ba0-87a2-f1416042f60a")
+                .setValuationPolicyVersion("2026.08");
+
+        ProcurementReceiptInspectionResult result = execute(command);
 
         assertThat(result.getStatus()).isEqualTo("OPEN");
         assertThat(result.getReceivedQuantity()).isEqualByComparingTo("12");
@@ -159,7 +164,8 @@ class ProcurementReceiptInspectionServiceTest {
         verify(mapper).insertLine(argThat(value -> value.getReceiptLineId().equals(RECEIPT_LINE)
                 && value.getItemId().equals(ITEM) && value.getScheduleId().equals(SCHEDULE)
                 && value.getCanonicalSkuId().equals(SKU) && value.getUomCode().equals("EA")
-                && value.getValuationPolicy().equals("MOVING_AVERAGE")
+                && value.getValuationPolicy().equals("b9645ea2-11b6-4ba0-87a2-f1416042f60a")
+                && value.getValuationPolicyVersion().equals("2026.08")
                 && value.getUnitCostAmountMinor().equals(100L)));
         verify(mapper, times(2)).insertSplit(any());
         verify(outbox).append(argThat(event ->

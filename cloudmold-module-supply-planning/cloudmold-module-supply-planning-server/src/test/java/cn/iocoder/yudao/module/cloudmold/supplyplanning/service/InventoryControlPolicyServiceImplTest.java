@@ -89,7 +89,8 @@ class InventoryControlPolicyServiceImplTest {
         verify(outbox).append(argThat(event ->
                 event.getEventType().equals("supply_planning.safety_stock_policy.saved")
                         && event.getAggregateType().equals("safety_stock_policy")
-                        && event.getTenantId().equals(17L)));
+                        && event.getTenantId().equals(17L)
+                        && event.getDestination().equals("lakehouse")));
     }
 
     @Test
@@ -127,6 +128,7 @@ class InventoryControlPolicyServiceImplTest {
 
         assertThat(result.getStatus()).isEqualTo("PUBLISHED");
         assertThat(result.getAggregateVersion()).isEqualTo(3L);
+        assertThat(result.getPolicyVersionId()).isNotBlank();
         verify(mapper).publishPolicy(eq(17L), eq("policy-01"), eq(2L), eq(3L), anyString(), eq(ACTOR), any());
         verify(outbox).append(argThat(event ->
                 event.getEventType().equals("supply_planning.safety_stock_policy.published")

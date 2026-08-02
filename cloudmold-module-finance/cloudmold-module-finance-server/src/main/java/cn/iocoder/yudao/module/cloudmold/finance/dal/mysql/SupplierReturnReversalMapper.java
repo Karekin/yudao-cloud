@@ -122,7 +122,7 @@ public interface SupplierReturnReversalMapper {
                                                           @Param("purchaseOrderItemId") String purchaseOrderItemId);
 
     @Select("""
-            SELECT a.supplier_invoice_id,al.invoice_line_id,ap.ap_open_item_id,i.legal_entity_id,i.supplier_id,
+            SELECT r.supplier_invoice_id,al.invoice_line_id,ap.ap_open_item_id,i.legal_entity_id,i.supplier_id,
                    i.currency_code,al.quantity invoice_line_quantity,al.net_amount_minor invoice_line_net_amount_minor,
                    al.tax_amount_minor invoice_line_tax_amount_minor,al.gross_amount_minor invoice_line_gross_amount_minor,
                    a.allocated_quantity,a.unit_of_measure,ap.open_amount_minor available_open_amount_minor

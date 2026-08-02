@@ -194,6 +194,14 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                 .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
                         "profit-loss-operator",
                         "finance.profit-loss-improvement"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.inventory.stock-transfer-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "inventory-transfer-operator", "inventory.stock-transfer"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.finance.supplier-return-finalization-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "supplier-return-accountant", "finance.supplier-return-finalization"));
     }
 
     @Test

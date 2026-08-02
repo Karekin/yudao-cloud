@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -154,7 +155,7 @@ public class SupplierReturnCommandService implements SupplierReturnCommandApi {
                     .setDispatchedQuantity(ZERO)
                     .setOutstandingQuantity(quantity)
                     .setUomCode(qualityRef.getUomCode())
-                    .setValuationPolicyId(qualityRef.getValuationPolicyId())
+                    .setValuationPolicyId(canonicalPolicyId(qualityRef.getValuationPolicyId()))
                     .setValuationPolicyVersion(qualityRef.getValuationPolicyVersion())
                     .setValuationPolicyHash(qualityRef.getValuationPolicyHash())
                     .setUnitCostAmountMinor(qualityRef.getUnitCostAmountMinor())
@@ -455,7 +456,8 @@ public class SupplierReturnCommandService implements SupplierReturnCommandApi {
         require(receiptRef.getOwnerType().equals(qualityRef.getOwnerType())
                         && receiptRef.getOwnerId().equals(qualityRef.getOwnerId()),
                 "quality decision owner mismatch");
-        require(receiptRef.getValuationPolicyId().equals(qualityRef.getValuationPolicyId())
+        require(canonicalPolicyId(receiptRef.getValuationPolicyId())
+                        .equals(canonicalPolicyId(qualityRef.getValuationPolicyId()))
                         && receiptRef.getValuationPolicyVersion().equals(qualityRef.getValuationPolicyVersion())
                         && receiptRef.getValuationPolicyHash().equals(qualityRef.getValuationPolicyHash()),
                 "quality decision valuation snapshot mismatch");
@@ -472,6 +474,14 @@ public class SupplierReturnCommandService implements SupplierReturnCommandApi {
         require(snapshot.warehouseId().equals(receiptRef.getWarehouseId())
                         && snapshot.warehouseId().equals(qualityRef.getWarehouseId()),
                 "supplier return warehouse mismatch");
+    }
+
+    private static String canonicalPolicyId(String value) {
+        try {
+            return UUID.fromString(value).toString();
+        } catch (IllegalArgumentException ex) {
+            return value;
+        }
     }
 
     private void verifyInventory(SupplierReturnLineDO line, SupplierReturnDocumentDO document,
@@ -558,7 +568,8 @@ public class SupplierReturnCommandService implements SupplierReturnCommandApi {
 
     private static String eventId(String sourceEventId, String returnLineId) {
         String source = StringUtils.hasText(sourceEventId) ? sourceEventId.trim() : "supplier-return";
-        return "supplier-return:" + DigestUtil.sha256Hex(source + "\u001f" + returnLineId);
+        return UUID.nameUUIDFromBytes((source + "\u001f" + returnLineId)
+                .getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     String nextAttemptToken() {

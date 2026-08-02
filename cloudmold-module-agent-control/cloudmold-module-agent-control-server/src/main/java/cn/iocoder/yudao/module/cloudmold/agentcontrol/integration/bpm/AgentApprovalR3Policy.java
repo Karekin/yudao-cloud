@@ -32,12 +32,21 @@ final class AgentApprovalR3Policy {
         if (action.equals("merchant-experience.rectification")) {
             return List.of("customer-service", "operations-lead");
         }
+        if (action.equals("supplier.admission")) {
+            return List.of("risk", "legal");
+        }
         if (startsWithAny(action, "buyer.", "purchase.", "purchase-order.", "procurement.",
                 "replenishment.", "supply-planning.", "supplier.")) {
             return List.of("buyer", "finance");
         }
         if (startsWithAny(action, "warehouse.", "wms.")) {
             return List.of("inventory-control", "operations-control");
+        }
+        if (action.equals("inventory.stock-count")) {
+            return List.of("risk", "finance");
+        }
+        if (action.equals("inventory.scrap")) {
+            return List.of("quality", "finance");
         }
         if (action.startsWith("finance.")) {
             return List.of("risk", "operations-control");

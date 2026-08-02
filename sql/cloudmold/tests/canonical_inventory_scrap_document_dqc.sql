@@ -67,3 +67,22 @@ WHERE NOT EXISTS (
     AND permission = 'cloudmold:warehouse:inventory-scrap:command'
     AND deleted = b'0'
 );
+
+SELECT 'missing_scrap_disposition_ledger_command' AS violation
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM information_schema.check_constraints
+  WHERE constraint_schema = DATABASE()
+    AND constraint_name = 'ck_cm_inv_v3_tx_command'
+    AND check_clause LIKE '%SCRAP_DISPOSITION%'
+);
+
+SELECT 'missing_scrap_disposition_ledger_operation_owner' AS violation
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM information_schema.table_constraints
+  WHERE constraint_schema = DATABASE()
+    AND table_name = 'cloudmold_inventory_ledger_transaction_v3'
+    AND constraint_name = 'fk_cm_inv_v3_tx_scrap_disposition_op'
+    AND constraint_type = 'FOREIGN KEY'
+);

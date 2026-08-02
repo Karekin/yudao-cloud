@@ -126,6 +126,8 @@ final class ManagedWorkflowDailyAutomationCatalog {
                     new ApprovalRoute("procurement", "procurement.sourcing-award")),
             Map.entry("skill.cloudmold.procurement.order-lifecycle.v1",
                     new ApprovalRoute("procurement", "purchase-order.dispatch")),
+            Map.entry("skill.cloudmold.procurement.receipt-accounting-lifecycle.v1",
+                    new ApprovalRoute("procure-to-pay-operator", "procurement.receipt-accounting")),
             Map.entry("skill.cloudmold.wms.operations.v1",
                     new ApprovalRoute("warehouse-operations", "warehouse.physical-cycle")),
             Map.entry("skill.cloudmold.supply.replenishment-lifecycle.v1",
@@ -138,6 +140,10 @@ final class ManagedWorkflowDailyAutomationCatalog {
                     new ApprovalRoute("customer-service", "ticket.resolve")),
             Map.entry("skill.cloudmold.finance.close-lifecycle.v1",
                     new ApprovalRoute("finance-operations", "finance.period-close")),
+            Map.entry("skill.cloudmold.finance.supplier-invoice-finalization-lifecycle.v1",
+                    new ApprovalRoute("accounts-payable-approver", "finance.supplier-invoice-finalization")),
+            Map.entry("skill.cloudmold.finance.supplier-return-finalization-lifecycle.v1",
+                    new ApprovalRoute("supplier-return-accountant", "finance.supplier-return-finalization")),
             Map.entry("skill.cloudmold.finance.logistics-service-settlement-lifecycle.v1",
                     new ApprovalRoute("logistics-settlement-operator",
                             "finance.logistics-settlement")),
@@ -182,7 +188,19 @@ final class ManagedWorkflowDailyAutomationCatalog {
                     new ApprovalRoute("order-exception-operator",
                             "customer-service.compensate")),
             Map.entry("skill.cloudmold.supply-planning.prepare.v1",
-                    new ApprovalRoute("supply-planning", "replenishment.convert"))
+                    new ApprovalRoute("supply-planning", "replenishment.convert")),
+            Map.entry("skill.cloudmold.supply.supplier-return-lifecycle.v1",
+                    new ApprovalRoute("supplier-return-operator", "supplier.return")),
+            Map.entry("skill.cloudmold.inventory.stock-count-lifecycle.v1",
+                    new ApprovalRoute("inventory-count-controller", "inventory.stock-count")),
+            Map.entry("skill.cloudmold.inventory.scrap-lifecycle.v1",
+                    new ApprovalRoute("inventory-scrap-operator", "inventory.scrap")),
+            Map.entry("skill.cloudmold.inventory.control-evidence-lifecycle.v1",
+                    new ApprovalRoute("inventory-control-manager", "inventory.policy-health-capture")),
+            Map.entry("skill.cloudmold.inventory.stock-transfer-lifecycle.v1",
+                    new ApprovalRoute("inventory-transfer-operator", "inventory.stock-transfer")),
+            Map.entry("skill.cloudmold.supplier.admission-lifecycle.v1",
+                    new ApprovalRoute("supplier-governance", "supplier.admission"))
     );
 
     private ManagedWorkflowDailyAutomationCatalog() {

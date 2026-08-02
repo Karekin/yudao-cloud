@@ -58,6 +58,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -130,7 +131,7 @@ class InboundCommandServiceImplTest {
         when(asnLineMapper.insert(any(AsnLineDO.class))).thenReturn(1);
         when(scheduleFulfillmentMapper.insertIgnore(any())).thenReturn(1);
         when(scheduleFulfillmentMapper.selectForUpdate(1L, ITEM_ID, SCHEDULE_ID))
-                .thenReturn(scheduleFulfillment("0.000000", "0.000000", 1L, "1.000000"));
+                .thenReturn(scheduleFulfillment("3.000000", "3.000000", 2L, "1.000000"));
 
         InboundCommandResult result = execute(InboundCommand.builder()
                 .operation(InboundOperation.CREATE_ASN)
@@ -164,6 +165,7 @@ class InboundCommandServiceImplTest {
         assertThat(frozenLine.getValue().getUnitCostAmountMinor()).isEqualTo(1200L);
         assertThat(frozenLine.getValue().getCurrencyCode()).isEqualTo("CNY");
         assertThat(frozenLine.getValue().getRoundingPolicyCode()).isEqualTo("HALF_UP");
+        assertThat(frozenLine.getValue().getFulfillmentVersion()).isEqualTo(2L);
         verify(outboxAppender).append(argThat(event ->
                 "inbound.procurement_asn.created".equals(event.getEventType())
                         && ORDER_ID.equals(event.getPayload().get("procurement_order_id"))
@@ -201,6 +203,8 @@ class InboundCommandServiceImplTest {
         verify(inventoryReceiptApi).execute(inventory.capture());
         assertThat(inventory.getValue().getOperation()).isEqualTo(InventoryProcurementReceiptOperation.RECEIVE_PENDING_QUALITY);
         assertThat(inventory.getValue().getDisposition()).isEqualTo(InventoryProcurementReceiptDisposition.PENDING);
+        assertThatCode(() -> java.util.UUID.fromString(inventory.getValue().getSourceEventId()))
+                .doesNotThrowAnyException();
         assertThat(inventory.getValue().getValuationPolicy()).isEqualTo("STANDARD_V1");
         assertThat(inventory.getValue().getValuationPolicyVersion()).isEqualTo("valuation-v1");
         assertThat(inventory.getValue().getValuationPolicyHash()).isEqualTo("b".repeat(64));
@@ -218,6 +222,7 @@ class InboundCommandServiceImplTest {
         assertThat(financeEvidence.getValue().getReceiptLineId()).isEqualTo("receipt-line-3.000000");
         assertThat(financeEvidence.getValue().getPurchaseOrderId()).isEqualTo(ORDER_ID);
         assertThat(financeEvidence.getValue().getPurchaseOrderItemId()).isEqualTo(ITEM_ID);
+        assertThat(financeEvidence.getValue().getPurchaseOrderLineVersion()).isEqualTo(4L);
         assertThat(financeEvidence.getValue().getDeliveryScheduleId()).isEqualTo(SCHEDULE_ID);
         assertThat(financeEvidence.getValue().getReceivedQuantity()).isEqualByComparingTo("3.000000");
         assertThat(financeEvidence.getValue().getUnitOfMeasure()).isEqualTo("PIECE");
@@ -302,7 +307,7 @@ class InboundCommandServiceImplTest {
         when(asnMapper.selectByAsnNo(1L, "ASN-20260802-002")).thenReturn(null);
         when(procurementQueryApi.requireCurrent(ORDER_ID)).thenReturn(ProcurementOrderView.builder()
                 .orderId(ORDER_ID).supplierId(SUPPLIER_ID).currencyCode("CNY")
-                .roundingPolicyCode("HALF_UP").status("RELEASED").version(4L)
+                .roundingPolicyCode("HALF_UP").status("RELEASED").version(6L).releasedVersion(4L)
                 .items(List.of(ProcurementOrderView.PurchaseOrderItemView.builder()
                         .itemId(ITEM_ID).canonicalSkuId(SKU).orderedQuantity(new BigDecimal("10.000000"))
                         .uomCode("PIECE").unitNetPriceMinor(new BigDecimal("1200.000000"))
@@ -539,7 +544,7 @@ class InboundCommandServiceImplTest {
     private ProcurementOrderView procurementOrderView() {
         return ProcurementOrderView.builder()
                 .orderId(ORDER_ID).orderCode("PO-01").supplierId(SUPPLIER_ID)
-                .currencyCode("CNY").roundingPolicyCode("HALF_UP").status("RELEASED").version(4L)
+                .currencyCode("CNY").roundingPolicyCode("HALF_UP").status("SUPPLIER_CONFIRMED").version(6L).releasedVersion(4L)
                 .items(List.of(ProcurementOrderView.PurchaseOrderItemView.builder()
                         .itemId(ITEM_ID).lineNumber(10).canonicalSkuId(SKU)
                         .orderedQuantity(new BigDecimal("10.000000")).uomCode("PIECE")

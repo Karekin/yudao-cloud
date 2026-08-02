@@ -109,7 +109,7 @@ public class InventoryScrapDispositionServiceImpl implements InventoryScrapDispo
 
         InventoryV3LedgerTransactionDO transaction = new InventoryV3LedgerTransactionDO()
                 .setTenantId(tenantId)
-                .setOperationId(operationId)
+                .setScrapDispositionOperationId(operationId)
                 .setMovementGroupId(command.dispositionLineId())
                 .setCommandType("SCRAP_DISPOSITION")
                 .setBusinessType("INVENTORY_SCRAP")

@@ -110,7 +110,7 @@ class ProcurementSourcingServiceTest {
         when(sourcing.insertAwardSnapshot(any())).thenReturn(1); when(sourcing.insertAwardSnapshotLines(anyList())).thenReturn(1); when(sourcing.transitionEvent(eq(31L),eq("rfq-1"),eq("AWARD_SUBMITTED"),eq("AWARDED"),eq(12L),eq("checker-1"),isNull(),any())).thenReturn(1);
         SourcingResult result=service.execute(base(SourcingOperation.APPROVE_AWARD).awardTransition(SourcingCommand.AwardTransitionDefinition.builder().awardId("award-1").expectedAwardVersion(2L).expectedEventVersion(12L).reasonCode("APPROVED").build()).build(),"checker-1");
         assertThat(result.getStatus()).isEqualTo("APPROVED"); verify(sourcing).insertAwardSnapshot(argThat(s->s.getAwardVersion()==3L&&s.getEventVersion()==13L));
-        verify(sourcing).insertAwardSnapshotLines(argThat(v->v.size()==1&&v.get(0).getQuotationRevisionScheduleId().equals("qrs-1")&&v.get(0).getEvaluationSummarySha256().length()==64&&v.get(0).getValuationPolicyId().equals("valuation-policy-01")));
+        verify(sourcing).insertAwardSnapshotLines(argThat(v->v.size()==1&&v.get(0).getAwardId().equals("award-1")&&v.get(0).getQuotationRevisionScheduleId().equals("qrs-1")&&v.get(0).getEvaluationSummarySha256().length()==64&&v.get(0).getValuationPolicyId().equals("valuation-policy-01")));
     }
 
     private static SourcingEvent event(String status,long version){return new SourcingEvent().setEventId("rfq-1").setEventCode("RFQ_1").setRequisitionId("pr-1").setRequisitionVersion(1L).setStatus(status).setVersion(version).setQuotationDeadline(LocalDateTime.of(2026,8,10,0,0));}

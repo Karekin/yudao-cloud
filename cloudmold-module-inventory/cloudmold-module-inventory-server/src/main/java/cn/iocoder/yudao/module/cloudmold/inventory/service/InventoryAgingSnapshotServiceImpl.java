@@ -261,6 +261,7 @@ public class InventoryAgingSnapshotServiceImpl
                 .eventType("inventory.aging_snapshot.captured")
                 .schemaVersion(1)
                 .sourceSystem(SOURCE_SYSTEM)
+                .destination("lakehouse")
                 .tenantId(tenantId)
                 .aggregateType("inventory_aging_snapshot")
                 .aggregateId(snapshot.getSnapshotId())

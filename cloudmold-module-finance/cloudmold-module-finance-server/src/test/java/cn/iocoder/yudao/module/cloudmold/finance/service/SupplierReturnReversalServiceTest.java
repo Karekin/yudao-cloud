@@ -16,6 +16,7 @@ import cn.iocoder.yudao.module.cloudmold.finance.service.actor.FinanceActorPrinc
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -64,7 +65,7 @@ class SupplierReturnReversalServiceTest {
                 .setQualityDecisionId("decision-01").setDecisionVersion(4L).setSourceDisposition("ACCEPTED")
                 .setCanonicalSkuId("sku-01").setWarehouseId("warehouse-01").setLocationId("location-01")
                 .setLotId("lot-01").setDispatchedQuantity(new BigDecimal("2.00000000"))
-                .setUomCode("PIECE").setValuationPolicyId("valuation-policy-01")
+                .setUomCode("PIECE").setValuationPolicyId("b9645ea2-11b6-4ba0-87a2-f1416042f60a")
                 .setValuationPolicyVersion("v1").setValuationPolicyHash("a".repeat(64))
                 .setUnitCostAmountMinor(100L).setCurrencyCode("CNY")));
         when(mapper.selectPeriodForUpdate(1L, "period-01")).thenReturn(new AccountingPeriod()
@@ -96,7 +97,7 @@ class SupplierReturnReversalServiceTest {
                         .setValuationLayerId("layer-01").setLedgerId("ledger-01")
                         .setInventoryMovementId("movement-01").setInventoryMovementVersion(7L)
                         .setReceiptLineId("receipt-line-01").setQualityDispositionId("decision-01")
-                        .setPurchaseOrderItemId("item-01").setValuationPolicyId("valuation-policy-01")
+                        .setPurchaseOrderItemId("item-01").setValuationPolicyId("B9645EA2-11B6-4BA0-87A2-F1416042F60A")
                         .setValuationPolicyVersion("v1").setQuantity(new BigDecimal("10.00000000"))
                         .setUnitOfMeasure("PIECE").setUnitCostAmountMinor(100L).setTotalCostAmountMinor(1000L)
                         .setCurrencyCode("CNY").setRemainingQuantity(new BigDecimal("10.00000000"))
@@ -127,6 +128,15 @@ class SupplierReturnReversalServiceTest {
         verify(mapper).insertSupplierReturnValuationEffect(anyString(), eq(1L), eq("layer-01"), eq("movement-01"),
                 eq(7L), eq(new BigDecimal("2.00000000")), eq(200L), eq("CNY"), anyString(), any());
         verify(mapper).insertSupplierReturnApApplication(anyString(), eq(1L), eq("ap-01"), anyString(), eq(226L), anyString(), any());
+        InOrder persistenceOrder = inOrder(mapper);
+        persistenceOrder.verify(mapper).insertJournalEntry(any(JournalEntry.class));
+        persistenceOrder.verify(mapper).insertSupplierReturnValuationEffect(anyString(), eq(1L), eq("layer-01"),
+                eq("movement-01"), eq(7L), eq(new BigDecimal("2.00000000")), eq(200L), eq("CNY"),
+                anyString(), any());
+        persistenceOrder.verify(mapper).insertSupplierDebitAdjustment(any(SupplierDebitAdjustment.class));
+        persistenceOrder.verify(mapper).insertSupplierReturnApReversal(any(SupplierReturnApReversal.class));
+        persistenceOrder.verify(mapper).insertSupplierReturnApApplication(anyString(), eq(1L), eq("ap-01"),
+                anyString(), eq(226L), anyString(), any());
     }
 
     private void stubWrites() {

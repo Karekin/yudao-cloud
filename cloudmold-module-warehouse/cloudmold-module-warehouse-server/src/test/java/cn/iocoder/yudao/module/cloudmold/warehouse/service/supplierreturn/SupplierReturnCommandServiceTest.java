@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -61,9 +62,9 @@ class SupplierReturnCommandServiceTest {
                 ProcurementOrderView.builder().orderId("po-01").supplierId("supplier-01").build());
         when(storeMapper.selectDocument(1L, "return-01")).thenReturn(null);
         when(referenceMapper.selectQualityDecisionReference(1L, "decision-01", 2L))
-                .thenReturn(qualityReference());
+                .thenReturn(qualityReference().setValuationPolicyId("B9645EA2-11B6-4BA0-87A2-F1416042F60A"));
         when(referenceMapper.selectReceiptLineReference(1L, "receipt-line-01"))
-                .thenReturn(receiptReference());
+                .thenReturn(receiptReference().setValuationPolicyId("b9645ea2-11b6-4ba0-87a2-f1416042f60a"));
         when(storeMapper.sumActiveReturnQuantityByQualityKeyExcludingReturn(
                 1L, "decision-01", 2L, "split-01", "ACCEPTED", null))
                 .thenReturn(new BigDecimal("1.000000"));
@@ -77,6 +78,8 @@ class SupplierReturnCommandServiceTest {
 
         assertThat(result.getStatus()).isEqualTo("DRAFT");
         assertThat(result.getReturnId()).isEqualTo("return-01");
+        verify(storeMapper).insertLine(argThat(line ->
+                line.getValuationPolicyId().equals("b9645ea2-11b6-4ba0-87a2-f1416042f60a")));
         verify(warehouseReferenceValidationApi).requireActiveWarehouse("warehouse-01");
         verifyNoInteractions(inventoryProcurementReceiptApi);
     }
@@ -127,7 +130,8 @@ class SupplierReturnCommandServiceTest {
         verify(inventoryProcurementReceiptApi).execute(argThat(input ->
                 input.getOperation() == InventoryProcurementReceiptOperation.RETURN_TO_SUPPLIER
                         && input.getDisposition() == InventoryProcurementReceiptDisposition.ACCEPTED
-                        && new BigDecimal("3.000000").compareTo(input.getQuantity()) == 0));
+                        && new BigDecimal("3.000000").compareTo(input.getQuantity()) == 0
+                        && UUID.fromString(input.getSourceEventId()) != null));
     }
 
     private void prepareOperation(SupplierReturnCommand command, Long operationId) {

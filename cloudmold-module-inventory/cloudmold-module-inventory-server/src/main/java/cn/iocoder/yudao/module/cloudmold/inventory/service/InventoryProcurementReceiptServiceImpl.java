@@ -336,7 +336,8 @@ public class InventoryProcurementReceiptServiceImpl implements InventoryProcurem
                 && Objects.equals(r.getSupplierId(),c.supplierId()) && Objects.equals(r.getOwnerId(),c.ownerId())
                 && Objects.equals(r.getCanonicalSkuId(),c.skuId()) && Objects.equals(r.getWarehouseId(),c.warehouseId())
                 && Objects.equals(r.getLocationId(),c.locationId()) && Objects.equals(r.getLotId(),c.lotId())
-                && Objects.equals(r.getBaseUomCode(),c.uom()) && Objects.equals(r.getValuationPolicy(),c.valuationPolicy())
+                && Objects.equals(r.getBaseUomCode(),c.uom())
+                && Objects.equals(policyId(r.getValuationPolicy()),c.valuationPolicy())
                 && Objects.equals(r.getValuationPolicyVersion(),c.valuationPolicyVersion())
                 && Objects.equals(r.getValuationPolicyHash(),c.valuationPolicyHash())
                 && Objects.equals(r.getUnitCostAmountMinor(),c.unitCost()) && Objects.equals(r.getCurrencyCode(),c.currency()),
@@ -387,8 +388,8 @@ public class InventoryProcurementReceiptServiceImpl implements InventoryProcurem
         require(x.getOccurredAt()!=null,"occurredAt is required");
         return new Command(x.getOperation(),x.getDisposition(),x.getIdempotencyKey().trim(),sourceEvent,
                 uuid(x.getReceiptId(),"receiptId"),uuid(x.getReceiptLineId(),"receiptLineId"),
-                uuid(x.getPurchaseOrderId(),"purchaseOrderId"),uuid(x.getPurchaseOrderItemId(),"purchaseOrderItemId"),
-                uuid(x.getPurchaseOrderScheduleId(),"purchaseOrderScheduleId"),uuid(x.getSupplierId(),"supplierId"),
+                ref(x.getPurchaseOrderId(),"purchaseOrderId"),ref(x.getPurchaseOrderItemId(),"purchaseOrderItemId"),
+                ref(x.getPurchaseOrderScheduleId(),"purchaseOrderScheduleId"),uuid(x.getSupplierId(),"supplierId"),
                 ownerType,uuid(x.getOwnerId(),"ownerId"),uuid(x.getCanonicalSkuId(),"canonicalSkuId"),
                 uuid(x.getWarehouseId(),"warehouseId"),uuid(x.getLocationId(),"locationId"),
                 x.getLotId()==null?null:uuid(x.getLotId(),"lotId"),upperRequired(x.getBaseUomCode(),"baseUomCode",32),quantity,decisionId,decision,
@@ -399,9 +400,18 @@ public class InventoryProcurementReceiptServiceImpl implements InventoryProcurem
     }
 
     private static String uuid(String v,String f){ text(v,f,36); try{return UUID.fromString(v).toString();}catch(Exception e){throw new IllegalArgumentException(f+" must be UUID",e);} }
+    private static String ref(String v,String f){String p=trim(v,f,128);require(p.matches("[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}"),f+" is invalid");return p;}
     private static String upper(String v){return v==null?null:v.trim().toUpperCase(Locale.ROOT);}
     private static String upperRequired(String v,String f,int n){return upper(trim(v,f,n));}
-    private static String policyId(String v){String p=upperRequired(v,"valuationPolicy",64);require(p.matches("[A-Z][A-Z0-9_]{1,63}"),"valuationPolicy must be a canonical policy id");return p;}
+    private static String policyId(String v){
+        String p=trim(v,"valuationPolicy",64);
+        try{return UUID.fromString(p).toString();}
+        catch(IllegalArgumentException ignored){
+            p=upper(p);
+            require(p.matches("[A-Z0-9][A-Z0-9_.-]{1,63}"),"valuationPolicy must be a canonical policy id");
+            return p;
+        }
+    }
     private static String policyVersion(String v){String p=upperRequired(v,"valuationPolicyVersion",64);require(p.matches("[A-Z0-9][A-Z0-9._-]{0,63}"),"valuationPolicyVersion is invalid");return p;}
     private static String policyHash(String v){String p=trim(v,"valuationPolicyHash",64).toLowerCase(Locale.ROOT);require(p.matches("[0-9a-f]{64}"),"valuationPolicyHash must be SHA-256");return p;}
     private static String trim(String v,String f,int n){text(v,f,n);return v.trim();}

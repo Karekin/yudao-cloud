@@ -108,6 +108,7 @@ class InventoryAgingSnapshotServiceImplTest {
         verify(outboxAppender).append(argThat(event ->
                 "inventory.aging_snapshot.captured".equals(event.getEventType())
                         && "inventory_aging_snapshot".equals(event.getAggregateType())
+                        && "lakehouse".equals(event.getDestination())
                         && event.getTenantId().equals(17L)));
     }
 
