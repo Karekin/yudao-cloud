@@ -176,7 +176,8 @@ public class AiOperationsTemporalScheduleService {
                 .setSkillId(workflow.getSkillId()).setSkillVersion(workflow.getSkillVersion())
                 .setInputJson(ManagedWorkflowDailyAutomationCatalog.DAILY_DISCOVERY_INPUT)
                 .setInputStrategy(dispatchRequest.getInputStrategy())
-                .setIntervalSeconds(86_400L).setCronExpression(cronExpression)
+                .setIntervalSeconds(ManagedWorkflowDailyAutomationCatalog
+                        .intervalSeconds(workflow.getSkillId())).setCronExpression(cronExpression)
                 .setTimeZone(seedProperties.getTimeZone()).setOverlapPolicy("SKIP")
                 .setOperatorUserId(seedProperties.getOperatorUserId())
                 .setOperatorUserType(seedProperties.getOperatorUserType())

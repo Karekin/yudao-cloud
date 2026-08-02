@@ -29,6 +29,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -657,10 +658,14 @@ public class StockTransferCommandServiceImpl implements StockTransferCommandApi 
     }
 
     private static String eventId(String sourceEventId, String phase, String executionLineId) {
-        if (sourceEventId != null && !sourceEventId.isBlank()) {
-            return sourceEventId + ":" + phase + ":" + executionLineId;
-        }
-        return "stock-transfer:" + phase + ":" + executionLineId;
+        String source = sourceEventId == null || sourceEventId.isBlank()
+                ? "stock-transfer" : sourceEventId.trim();
+        // Inventory transfer accepts an immutable UUID event identity.  A
+        // deterministic UUID retains source-event traceability and keeps
+        // retries on the same ledger event instead of constructing an
+        // overlong concatenated identifier.
+        return UUID.nameUUIDFromBytes((source + '\u001f' + phase + '\u001f' + executionLineId)
+                .getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private static BigDecimal normalizeQuantity(BigDecimal value) {

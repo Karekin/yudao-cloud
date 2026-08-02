@@ -30,16 +30,25 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                             162L, request.getScheduleId(), workflow, properties);
             String[] cronFields =
                     ManagedWorkflowDailyAutomationCatalog.cronExpression(skillId).split(" ");
-            int minute = Integer.parseInt(cronFields[0]);
-            int hour = Integer.parseInt(cronFields[1]);
+            boolean highFrequencySupplyChain =
+                    ManagedWorkflowDailyAutomationCatalog.isTenMinuteSupplyChainWorkflow(skillId);
 
             assertThat(scheduleIds.add(request.getScheduleId())).isTrue();
-            assertThat(request.getIntervalSeconds()).isEqualTo(86_400L);
+            assertThat(request.getIntervalSeconds()).isEqualTo(
+                    highFrequencySupplyChain ? 600L : 86_400L);
             assertThat(ZoneId.of(request.getTimeZone())).isEqualTo(expectedZone);
-            assertThat(cronFields).containsExactly(
-                    Integer.toString(minute), Integer.toString(hour), "*", "*", "*");
-            assertThat(minute).isBetween(0, 59);
-            assertThat(hour).isBetween(2, 4);
+            if (highFrequencySupplyChain) {
+                assertThat(cronFields).containsExactly("*/10", "*", "*", "*", "*");
+                assertThat(dispatch.getApprovalTimeoutSeconds()).isEqualTo(600L);
+            } else {
+                int minute = Integer.parseInt(cronFields[0]);
+                int hour = Integer.parseInt(cronFields[1]);
+                assertThat(cronFields).containsExactly(
+                        Integer.toString(minute), Integer.toString(hour), "*", "*", "*");
+                assertThat(minute).isBetween(0, 59);
+                assertThat(hour).isBetween(2, 4);
+                assertThat(dispatch.getApprovalTimeoutSeconds()).isEqualTo(86_400L);
+            }
             assertThat(ManagedWorkflowDailyAutomationCatalog.inputStrategy(skillId))
                     .isIn("TENANT_AGGREGATE", "ROTATING_BUSINESS_SCENARIO",
                             "DOMAIN_BACKLOG", "EVENT_BACKLOG");
@@ -105,6 +114,10 @@ class ManagedWorkflowDailyAutomationCatalogTest {
         assertThat(ManagedWorkflowDailyAutomationCatalog.inputStrategy(
                 "skill.cloudmold.supply-planning.prepare.v1"))
                 .isEqualTo("DOMAIN_BACKLOG");
+        assertThat(ManagedWorkflowDailyAutomationCatalog.isTenMinuteSupplyChainWorkflow(
+                "skill.cloudmold.supply.supplier-return-lifecycle.v1")).isTrue();
+        assertThat(ManagedWorkflowDailyAutomationCatalog.isTenMinuteSupplyChainWorkflow(
+                "skill.cloudmold.commerce.full-chain-hsf.v1")).isFalse();
         assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
                 "skill.cloudmold.supply-planning.sop-lifecycle.v1"))
                 .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
@@ -198,6 +211,10 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                 "skill.cloudmold.inventory.stock-transfer-lifecycle.v1"))
                 .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
                         "inventory-transfer-operator", "inventory.stock-transfer"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.warehouse.stock-transfer-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "inventory-transfer-operator", "warehouse.stock-transfer"));
         assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
                 "skill.cloudmold.finance.supplier-return-finalization-lifecycle.v1"))
                 .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(

@@ -22,6 +22,9 @@ final class ManagedWorkflowDailyAutomationCatalog {
             """.trim();
 
     private static final long DAILY_INTERVAL_SECONDS = 86_400L;
+    private static final long SUPPLY_CHAIN_INTERVAL_SECONDS = 600L;
+    private static final long DAILY_APPROVAL_TIMEOUT_SECONDS = 86_400L;
+    private static final long SUPPLY_CHAIN_APPROVAL_TIMEOUT_SECONDS = 600L;
     private static final int DEFAULT_MAX_FAN_OUT = 100;
 
     private static final Set<String> INPUT_FREE_WORKFLOWS = Set.of(
@@ -77,6 +80,32 @@ final class ManagedWorkflowDailyAutomationCatalog {
 
     private static final Set<String> DOMAIN_BACKLOG_WORKFLOWS = Set.of(
             "skill.cloudmold.supply-planning.prepare.v1"
+    );
+
+    /**
+     * Supply-chain execution is intentionally reconciled on a short cadence.
+     * Rotating workflows create a new, idempotent business scenario for each
+     * Temporal occurrence; event-backlog workflows only dispatch a candidate
+     * that has already passed the domain materialization rules.
+     */
+    private static final Set<String> TEN_MINUTE_SUPPLY_CHAIN_WORKFLOWS = Set.of(
+            "skill.cloudmold.procurement.sourcing-lifecycle.v1",
+            "skill.cloudmold.procurement.order-lifecycle.v1",
+            "skill.cloudmold.procurement.receipt-accounting-lifecycle.v1",
+            "skill.cloudmold.wms.operations.v1",
+            "skill.cloudmold.supply.replenishment-lifecycle.v1",
+            "skill.cloudmold.supply.warehouse-admission-lifecycle.v1",
+            "skill.cloudmold.supply-planning.sop-lifecycle.v1",
+            "skill.cloudmold.supply-planning.prepare.v1",
+            "skill.cloudmold.supply.supplier-return-lifecycle.v1",
+            "skill.cloudmold.finance.supplier-return-finalization-lifecycle.v1",
+            "skill.cloudmold.finance.supplier-invoice-finalization-lifecycle.v1",
+            "skill.cloudmold.inventory.stock-count-lifecycle.v1",
+            "skill.cloudmold.inventory.scrap-lifecycle.v1",
+            "skill.cloudmold.inventory.control-evidence-lifecycle.v1",
+            "skill.cloudmold.inventory.stock-transfer-lifecycle.v1",
+            "skill.cloudmold.warehouse.stock-transfer-lifecycle.v1",
+            "skill.cloudmold.supplier.admission-lifecycle.v1"
     );
 
     private static final Map<String, ApprovalRoute> APPROVAL_ROUTES = Map.ofEntries(
@@ -199,6 +228,8 @@ final class ManagedWorkflowDailyAutomationCatalog {
                     new ApprovalRoute("inventory-control-manager", "inventory.policy-health-capture")),
             Map.entry("skill.cloudmold.inventory.stock-transfer-lifecycle.v1",
                     new ApprovalRoute("inventory-transfer-operator", "inventory.stock-transfer")),
+            Map.entry("skill.cloudmold.warehouse.stock-transfer-lifecycle.v1",
+                    new ApprovalRoute("inventory-transfer-operator", "warehouse.stock-transfer")),
             Map.entry("skill.cloudmold.supplier.admission-lifecycle.v1",
                     new ApprovalRoute("supplier-governance", "supplier.admission"))
     );
@@ -210,13 +241,18 @@ final class ManagedWorkflowDailyAutomationCatalog {
                                                     AiOperationsTemporalSeedProperties properties) {
         TemporalScheduleCreateReqVO request = new TemporalScheduleCreateReqVO();
         request.setScheduleId(scheduleCode(workflow.getSkillId()));
-        request.setDisplayName(workflow.getDisplayName() + "（每日自动）");
-        request.setDescription("每天由 Temporal 执行到期工作发现；无可物化业务输入时安全返回 NO_ACTION_DUE，"
+        boolean highFrequencySupplyChain = isTenMinuteSupplyChainWorkflow(workflow.getSkillId());
+        request.setDisplayName(workflow.getDisplayName()
+                + (highFrequencySupplyChain ? "（每10分钟自动）" : "（每日自动）"));
+        request.setDescription(highFrequencySupplyChain
+                ? "每10分钟由 Temporal 执行供应链到期工作发现与候选分发；无可物化业务输入时安全返回 NO_ACTION_DUE，"
+                + "不发起审批、不写业务数据。"
+                : "每天由 Temporal 执行到期工作发现；无可物化业务输入时安全返回 NO_ACTION_DUE，"
                 + "不发起审批、不写业务数据。");
         request.setSkillId(workflow.getSkillId());
         request.setSkillVersion(workflow.getSkillVersion());
         request.setInputJson(DAILY_DISCOVERY_INPUT);
-        request.setIntervalSeconds(DAILY_INTERVAL_SECONDS);
+        request.setIntervalSeconds(intervalSeconds(workflow.getSkillId()));
         request.setTimeZone(properties.getTimeZone());
         request.setPaused(properties.isPaused());
         if (Boolean.TRUE.equals(workflow.getApprovalRequired())) {
@@ -246,13 +282,16 @@ final class ManagedWorkflowDailyAutomationCatalog {
                 .operatorUserType(properties.getOperatorUserType())
                 .roleCode(schedule.getRoleCode())
                 .actionCode(schedule.getActionCode())
-                .approvalTimeoutSeconds(86_400L)
+                .approvalTimeoutSeconds(approvalTimeoutSeconds(workflow.getSkillId()))
                 .businessEventTimeoutSeconds(300L)
                 .timeZone(properties.getTimeZone())
                 .build();
     }
 
     static String cronExpression(String skillId) {
+        if (isTenMinuteSupplyChainWorkflow(skillId)) {
+            return "*/10 * * * *";
+        }
         int hash = Math.floorMod(skillId.hashCode(), 180);
         int hour = 2 + hash / 60;
         int minute = hash % 60;
@@ -277,8 +316,10 @@ final class ManagedWorkflowDailyAutomationCatalog {
         TemporalScheduleCreateReqVO request = dailyRequest(workflow, properties);
         String canonical = workflow.getSkillId() + "|" + workflow.getSkillVersion()
                 + "|" + workflow.getDefinitionClosureSha256()
+                + "|" + request.getIntervalSeconds()
                 + "|" + cronExpression(workflow.getSkillId())
                 + "|" + inputStrategy(workflow.getSkillId())
+                + "|" + approvalTimeoutSeconds(workflow.getSkillId())
                 + "|" + properties.getTimeZone()
                 + "|" + request.getRoleCode()
                 + "|" + request.getActionCode()
@@ -304,6 +345,20 @@ final class ManagedWorkflowDailyAutomationCatalog {
 
     static boolean isDailyEligible(String skillId) {
         return !RETIRED_DAILY_WORKFLOWS.contains(skillId);
+    }
+
+    static boolean isTenMinuteSupplyChainWorkflow(String skillId) {
+        return TEN_MINUTE_SUPPLY_CHAIN_WORKFLOWS.contains(skillId);
+    }
+
+    static long intervalSeconds(String skillId) {
+        return isTenMinuteSupplyChainWorkflow(skillId)
+                ? SUPPLY_CHAIN_INTERVAL_SECONDS : DAILY_INTERVAL_SECONDS;
+    }
+
+    static long approvalTimeoutSeconds(String skillId) {
+        return isTenMinuteSupplyChainWorkflow(skillId)
+                ? SUPPLY_CHAIN_APPROVAL_TIMEOUT_SECONDS : DAILY_APPROVAL_TIMEOUT_SECONDS;
     }
 
     static ApprovalRoute approvalRoute(String skillId) {
