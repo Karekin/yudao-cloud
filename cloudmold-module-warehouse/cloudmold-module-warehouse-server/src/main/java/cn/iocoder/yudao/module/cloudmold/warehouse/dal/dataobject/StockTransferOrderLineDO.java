@@ -14,8 +14,13 @@ public class StockTransferOrderLineDO {
     private String orderId;
     private Integer lineNumber;
     private String canonicalSkuId;
+    private String movementGroupId;
     private BigDecimal requestedQuantity;
+    private BigDecimal outboundQuantity;
+    private BigDecimal receivedQuantity;
     private String uomCode;
+    private String status;
+    private Long version;
     private String remark;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

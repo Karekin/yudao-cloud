@@ -36,6 +36,15 @@ class CloudMoldCapabilityIdsTest {
                 .isEqualTo("capability.cloudmold.merchant.merchant-managed-admission-workflow-query.inspect.v1");
     }
 
+    @Test
+    void shouldDeriveManagedMerchantWorkflowInspectByMerchantCapabilityId() throws Exception {
+        Method method = cn.iocoder.yudao.module.cloudmold.merchant.api.workflow
+                .MerchantManagedAdmissionWorkflowQueryApi.class.getMethod("inspectByMerchantId", String.class);
+
+        assertThat(CloudMoldCapabilityIds.forMethod(method))
+                .isEqualTo("capability.cloudmold.merchant.merchant-managed-admission-workflow-query.inspect-by-merchant-id.v1");
+    }
+
     interface SampleQueryApi {
         Object get(String id);
         Object require(Long id);

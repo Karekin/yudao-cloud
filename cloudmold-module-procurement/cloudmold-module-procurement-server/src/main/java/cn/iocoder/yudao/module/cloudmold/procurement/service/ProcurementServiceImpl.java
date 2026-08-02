@@ -5,6 +5,9 @@ import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventCommand;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
+import cn.iocoder.yudao.module.cloudmold.finance.api.p2p.FinanceCommandEnvelope;
+import cn.iocoder.yudao.module.cloudmold.finance.api.p2p.P2pEvidenceCommands;
+import cn.iocoder.yudao.module.cloudmold.finance.api.p2p.P2pEvidenceIngestionApi;
 import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommand;
 import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommandApi;
 import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementOrderView;
@@ -14,8 +17,12 @@ import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementR
 import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.OrderStatusHistory;
 import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.ProcurementOrder;
 import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.PurchaseOrderDeliverySchedule;
+import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.PurchaseOrderAwardSource;
 import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.PurchaseOrderItem;
 import cn.iocoder.yudao.module.cloudmold.procurement.dal.mysql.ProcurementMapper;
+import cn.iocoder.yudao.module.cloudmold.procurement.dal.mysql.ProcurementSourcingMapper;
+import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementSourcingRecords.Award;
+import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementSourcingRecords.AwardLine;
 import cn.iocoder.yudao.module.cloudmold.procurement.service.actor.ProcurementActorPrincipalPort;
 import cn.iocoder.yudao.module.cloudmold.procurement.service.reference.ProcurementReferenceValidationPort;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +51,7 @@ import java.util.regex.Pattern;
 public class ProcurementServiceImpl implements ProcurementCommandApi {
     private static final int OPERATION_SUCCEEDED = 10;
     private static final int EVENT_SCHEMA_VERSION = 2;
+    private static final int RELEASE_EVENT_SCHEMA_VERSION = 4;
     private static final String SOURCE_SYSTEM = "cloudmold-procurement";
     private static final String DEFAULT_TAX_POLICY = "STANDARD_V1";
     private static final String DEFAULT_ROUNDING_POLICY = "HALF_UP";
@@ -52,9 +60,11 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
     private static final BigDecimal BPS_DENOMINATOR = BigDecimal.valueOf(10_000);
 
     private final ProcurementMapper mapper;
+    private final ProcurementSourcingMapper sourcingMapper;
     private final OutboxAppender outboxAppender;
     private final ProcurementActorPrincipalPort actorPrincipalPort;
     private final ProcurementReferenceValidationPort referenceValidationPort;
+    private final P2pEvidenceIngestionApi p2pEvidenceIngestionApi;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -84,6 +94,9 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
 
         Outcome outcome = switch (command.getOperation()) {
             case CREATE_PURCHASE_ORDER -> createOrder(tenantId, operationId, command, actorPrincipalId, now);
+            case SUBMIT_PURCHASE_ORDER -> submitOrder(tenantId, operationId, command, actorPrincipalId, now);
+            case APPROVE_PURCHASE_ORDER -> approveOrder(tenantId, operationId, command, actorPrincipalId, now);
+            case RELEASE_PURCHASE_ORDER -> releaseOrder(tenantId, operationId, command, actorPrincipalId, now);
             case DISPATCH_PURCHASE_ORDER -> dispatchOrder(tenantId, operationId, command, actorPrincipalId, now);
             case SUPPLIER_CONFIRM_PURCHASE_ORDER -> confirmOrder(tenantId, operationId, command, actorPrincipalId, now);
             case CANCEL_PURCHASE_ORDER -> cancelOrder(tenantId, operationId, command, actorPrincipalId, now);
@@ -101,12 +114,49 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
                                 String actorPrincipalId, LocalDateTime now) {
         NormalizedCreateOrder normalized = normalizeCreateOrder(
                 nonNull(command.getPurchaseOrder(), "purchaseOrder is required"));
+        ProcurementCommand.PurchaseOrderDefinition input = command.getPurchaseOrder();
+        requireRef(input.getAwardId(), "awardId", 128);
+        require(input.getAwardVersion() != null && input.getAwardVersion() > 0,
+                "awardVersion must identify the approved immutable award snapshot");
+        require("SOURCING_AWARD".equals(normalized.sourceBusinessType())
+                        && input.getAwardId().equals(normalized.sourceBusinessRef()),
+                "award-backed purchase order source must be SOURCING_AWARD and reference the exact award");
+        Award award = nonNull(sourcingMapper.selectApprovedAward(tenantId, input.getAwardId()), "approved award not found");
+        require("APPROVED".equals(award.getStatus()) && Objects.equals(input.getAwardVersion(), award.getVersion()),
+                "purchase order requires the exact approved award version");
+        Map<String, AwardLine> awardLines = new LinkedHashMap<>();
+        for (AwardLine line : sourcingMapper.selectAwardLines(tenantId, award.getAwardId())) awardLines.put(line.getAwardLineId(), line);
+        require(!awardLines.isEmpty(), "approved award has no lines");
+        Set<String> consumedAwardLines = new LinkedHashSet<>();
+        for (NormalizedLine line : normalized.lines()) {
+            require(consumedAwardLines.add(line.awardLineId()), "purchase order cannot consume an award line more than once");
+            AwardLine source = nonNull(awardLines.get(line.awardLineId()), "purchase order line requires an award line from the approved award");
+            require(line.schedules().size() == 1, "award-backed purchase order line must have exactly one frozen delivery schedule");
+            NormalizedSchedule schedule = line.schedules().get(0);
+            require(source.getSupplierId().equals(normalized.supplierId())
+                    && source.getCanonicalSkuId().equals(line.canonicalSkuId())
+                    && source.getAwardedQuantity().compareTo(line.orderedQuantity()) == 0
+                    && source.getUomCode().equals(line.uomCode())
+                    && source.getCurrencyCode().equals(normalized.currencyCode())
+                    && source.getUnitNetPriceMinor().compareTo(line.unitNetPriceMinor()) == 0
+                    && source.getTaxCode().equals(line.taxCode())
+                    && source.getTaxRateBps().equals(line.taxRateBps())
+                    && source.getLineNetAmountMinor().equals(line.lineNetAmountMinor())
+                    && source.getLineTaxAmountMinor().equals(line.lineTaxAmountMinor())
+                    && source.getLineGrossAmountMinor().equals(line.lineGrossAmountMinor())
+                    && source.getCanonicalWarehouseId().equals(schedule.canonicalWarehouseId())
+                    && source.getPromisedDeliveryDate().equals(schedule.requiredDeliveryDate())
+                    && source.getAwardedQuantity().compareTo(schedule.scheduledQuantity()) == 0,
+                    "purchase order line must exactly freeze its award line");
+        }
         ProcurementOrder row = new ProcurementOrder()
                 .setOrderId(normalized.orderId())
                 .setTenantId(tenantId)
                 .setOrderCode(normalized.orderCode())
                 .setSourceBusinessType(normalized.sourceBusinessType())
                 .setSourceBusinessRef(normalized.sourceBusinessRef())
+                .setAwardId(award.getAwardId()).setAwardVersion(award.getVersion())
+                .setLegalEntityId(normalized.legalEntityId())
                 .setSupplierId(normalized.supplierId())
                 .setCurrencyCode(normalized.currencyCode())
                 .setLeadTimeDays(normalized.leadTimeDays())
@@ -115,7 +165,7 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
                 .setHeaderGrossAmountMinor(normalized.headerGrossAmountMinor())
                 .setTaxCalculationPolicyCode(normalized.taxCalculationPolicyCode())
                 .setRoundingPolicyCode(normalized.roundingPolicyCode())
-                .setStatus("CREATED")
+                .setStatus("DRAFT")
                 .setCreatedByPrincipalId(actorPrincipalId)
                 .setReasonCode(normalized.reasonCode())
                 .setRemark(normalized.remark())
@@ -126,11 +176,88 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
 
         List<PurchaseOrderItem> items = buildItemRows(tenantId, row.getOrderId(), now, normalized.lines());
         require(mapper.insertItems(items) == items.size(), "failed to persist procurement order items");
+        List<PurchaseOrderAwardSource> awardSources = buildAwardSourceRows(tenantId, row, items, now);
+        require(mapper.insertAwardSources(awardSources) == awardSources.size(),
+                "failed to persist immutable purchase order award sources");
         List<PurchaseOrderDeliverySchedule> schedules = buildScheduleRows(tenantId, row.getOrderId(), now, normalized.lines());
         require(mapper.insertSchedules(schedules) == schedules.size(), "failed to persist procurement delivery schedules");
         insertStatusHistory(tenantId, operationId, row.getOrderId(), row.getVersion(), row.getStatus(),
                 actorPrincipalId, row.getReasonCode(), now);
         return outcome("procurement.order.created", snapshot(row, items, schedules));
+    }
+
+    private Outcome submitOrder(Long tenantId, Long operationId, ProcurementCommand command, String actor, LocalDateTime now) {
+        return transition(tenantId, operationId, command, actor, now, "DRAFT", "SUBMITTED",
+                mapper::submitOrder, "procurement.order.submitted");
+    }
+
+    private Outcome approveOrder(Long tenantId, Long operationId, ProcurementCommand command, String actor, LocalDateTime now) {
+        return transition(tenantId, operationId, command, actor, now, "SUBMITTED", "APPROVED",
+                mapper::approveOrder, "procurement.order.approved");
+    }
+
+    private Outcome releaseOrder(Long tenantId, Long operationId, ProcurementCommand command, String actor, LocalDateTime now) {
+        Outcome released = transition(tenantId, operationId, command, actor, now, "APPROVED", "RELEASED",
+                mapper::releaseOrder, "procurement.order.released");
+        validateReleasedValuationPolicySnapshot(released.snapshot().items());
+        ingestReleasedOrderEvidence(command, actor, released.snapshot());
+        return released;
+    }
+
+    private static void validateReleasedValuationPolicySnapshot(List<PurchaseOrderItem> items) {
+        require(!items.isEmpty(), "released purchase order requires at least one immutable item");
+        for (PurchaseOrderItem item : items) {
+            requireRef(item.getValuationPolicyId(), "valuationPolicyId", 128);
+            requireRef(item.getValuationPolicyVersion(), "valuationPolicyVersion", 64);
+            requireSha256(item.getValuationPolicyHash(), "valuationPolicyHash");
+        }
+    }
+
+    private void ingestReleasedOrderEvidence(ProcurementCommand command, String actor, OrderSnapshot snapshot) {
+        ProcurementOrder order = snapshot.order();
+        Map<String, List<PurchaseOrderDeliverySchedule>> schedulesByItem = new LinkedHashMap<>();
+        for (PurchaseOrderDeliverySchedule schedule : snapshot.schedules()) {
+            schedulesByItem.computeIfAbsent(schedule.getItemId(), ignored -> new ArrayList<>()).add(schedule);
+        }
+        for (PurchaseOrderItem item : snapshot.items()) {
+            List<PurchaseOrderDeliverySchedule> schedules = schedulesByItem.getOrDefault(item.getItemId(), List.of());
+            require(!schedules.isEmpty(), "released purchase order item requires delivery schedule evidence");
+            long allocatedNet=0,allocatedTax=0,allocatedGross=0;
+            for(int i=0;i<schedules.size();i++) {
+                PurchaseOrderDeliverySchedule schedule=schedules.get(i); boolean last=i==schedules.size()-1;
+                long net=last?item.getLineNetAmountMinor()-allocatedNet:allocate(item.getLineNetAmountMinor(),schedule.getScheduledQuantity(),item.getOrderedQuantity());
+                long tax=last?item.getLineTaxAmountMinor()-allocatedTax:allocate(item.getLineTaxAmountMinor(),schedule.getScheduledQuantity(),item.getOrderedQuantity());
+                long gross=last?item.getLineGrossAmountMinor()-allocatedGross:Math.addExact(net,tax);
+                allocatedNet+=net;allocatedTax+=tax;allocatedGross+=gross;
+                String sourceEventId="po-release:"+DigestUtil.sha256Hex(order.getOrderId()+"\n"+order.getVersion()+"\n"+item.getItemId()+"\n"+schedule.getScheduleId());
+                Map<String,Object> evidence=payload("source_event_id",sourceEventId,"source_version",order.getVersion(),"purchase_order_id",order.getOrderId(),
+                        "purchase_order_item_id",item.getItemId(),"delivery_schedule_id",schedule.getScheduleId(),"legal_entity_id",order.getLegalEntityId(),
+                        "supplier_id",order.getSupplierId(),"currency_code",order.getCurrencyCode(),"ordered_quantity",schedule.getScheduledQuantity().toPlainString(),
+                        "unit_of_measure",item.getUomCode(),"unit_net_price",item.getUnitNetPriceMinor().toPlainString(),
+                        "valuation_policy_id",item.getValuationPolicyId(),"valuation_policy_version",item.getValuationPolicyVersion(),
+                        "valuation_policy_hash",item.getValuationPolicyHash(),"net_amount_minor",net,"tax_amount_minor",tax,"gross_amount_minor",gross);
+                p2pEvidenceIngestionApi.ingestPurchaseOrderLine(P2pEvidenceCommands.PurchaseOrderLine.builder()
+                        .envelope(FinanceCommandEnvelope.builder().correlationId(command.getCorrelationId()).causationId(command.getCausationId())
+                                .runId(command.getRunId()).idempotencyKey("p2p-po:"+DigestUtil.sha256Hex(command.getIdempotencyKey()+"\n"+item.getItemId()+"\n"+schedule.getScheduleId())).occurredAt(command.getOccurredAt()).build())
+                        .sourceEventId(sourceEventId).sourceVersion(order.getVersion()).evidenceSha256(DigestUtil.sha256Hex(JsonUtils.toJsonString(evidence)))
+                        .sourceOccurredAt(command.getOccurredAt()).purchaseOrderId(order.getOrderId()).purchaseOrderItemId(item.getItemId()).deliveryScheduleId(schedule.getScheduleId())
+                        .legalEntityId(order.getLegalEntityId()).supplierId(order.getSupplierId()).currencyCode(order.getCurrencyCode()).orderedQuantity(schedule.getScheduledQuantity())
+                        .unitOfMeasure(item.getUomCode()).unitNetPrice(item.getUnitNetPriceMinor()).netAmountMinor(net).taxAmountMinor(tax).grossAmountMinor(gross).build(),actor);
+            }
+            require(allocatedNet==item.getLineNetAmountMinor()&&allocatedTax==item.getLineTaxAmountMinor()&&allocatedGross==item.getLineGrossAmountMinor(),
+                    "finance evidence allocation must exactly preserve line totals");
+        }
+    }
+
+    private Outcome transition(Long tenantId, Long operationId, ProcurementCommand command, String actor,
+                               LocalDateTime now, String from, String to, OrderTransition updater, String eventType) {
+        ProcurementCommand.PurchaseOrderDefinition input = nonNull(command.getPurchaseOrder(), "purchaseOrder is required");
+        ProcurementOrder row = nonNull(mapper.selectOrderForUpdate(tenantId, input.getOrderId()), "procurement order not found");
+        requireExpectedVersion(input.getExpectedVersion(), row.getVersion()); require(from.equals(row.getStatus()), "purchase order must be " + from);
+        String reason = normalizeReasonCode(input.getReasonCode()); require(updater.update(tenantId,row.getOrderId(),row.getVersion(),actor,reason,now)==1,"purchase order transition conflict");
+        row.setStatus(to).setVersion(row.getVersion()+1).setReasonCode(reason).setUpdatedAt(now);
+        insertStatusHistory(tenantId,operationId,row.getOrderId(),row.getVersion(),to,actor,reason,now);
+        return outcome(eventType,loadSnapshot(tenantId,row.getOrderId()));
     }
 
     private Outcome dispatchOrder(Long tenantId, Long operationId, ProcurementCommand command,
@@ -139,7 +266,8 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
         requireRef(input.getOrderId(), "orderId", 128);
         ProcurementOrder row = nonNull(mapper.selectOrderForUpdate(tenantId, input.getOrderId()), "procurement order not found");
         requireExpectedVersion(input.getExpectedVersion(), row.getVersion());
-        require("CREATED".equals(row.getStatus()), "only a created procurement order can be dispatched");
+        require("RELEASED".equals(row.getStatus()) && row.getAwardId() != null,
+                "only an award-backed released purchase order can be dispatched");
         String reasonCode = normalizeReasonCode(input.getReasonCode());
         require(mapper.dispatchOrder(tenantId, row.getOrderId(), row.getVersion(), actorPrincipalId, reasonCode, now) == 1,
                 "procurement order dispatch conflict");
@@ -220,7 +348,8 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
         outboxAppender.append(AppendDomainEventCommand.builder()
                 .eventId(UUID.randomUUID().toString())
                 .eventType(outcome.eventType())
-                .schemaVersion(EVENT_SCHEMA_VERSION)
+                .schemaVersion("procurement.order.released".equals(outcome.eventType())
+                        ? RELEASE_EVENT_SCHEMA_VERSION : EVENT_SCHEMA_VERSION)
                 .sourceSystem(SOURCE_SYSTEM)
                 .tenantId(tenantId)
                 .aggregateType(outcome.aggregateType())
@@ -280,6 +409,9 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
                     "tax_code", item.getTaxCode(),
                     "tax_rate_bps", item.getTaxRateBps(),
                     "unit_net_price_minor", item.getUnitNetPriceMinor(),
+                    "valuation_policy_id", item.getValuationPolicyId(),
+                    "valuation_policy_version", item.getValuationPolicyVersion(),
+                    "valuation_policy_hash", item.getValuationPolicyHash(),
                     "line_net_amount_minor", item.getLineNetAmountMinor(),
                     "line_tax_amount_minor", item.getLineTaxAmountMinor(),
                     "line_gross_amount_minor", item.getLineGrossAmountMinor(),
@@ -314,12 +446,16 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
                     .setTenantId(tenantId)
                     .setOrderId(orderId)
                     .setLineNumber(line.lineNumber())
+                    .setAwardLineId(line.awardLineId())
                     .setCanonicalSkuId(line.canonicalSkuId())
                     .setOrderedQuantity(line.orderedQuantity())
                     .setUomCode(line.uomCode())
                     .setTaxCode(line.taxCode())
                     .setTaxRateBps(line.taxRateBps())
                     .setUnitNetPriceMinor(line.unitNetPriceMinor())
+                    .setValuationPolicyId(line.valuationPolicyId())
+                    .setValuationPolicyVersion(line.valuationPolicyVersion())
+                    .setValuationPolicyHash(line.valuationPolicyHash())
                     .setLineNetAmountMinor(line.lineNetAmountMinor())
                     .setLineTaxAmountMinor(line.lineTaxAmountMinor())
                     .setLineGrossAmountMinor(line.lineGrossAmountMinor())
@@ -350,6 +486,24 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
         return rows;
     }
 
+    private List<PurchaseOrderAwardSource> buildAwardSourceRows(Long tenantId, ProcurementOrder order,
+                                                                 List<PurchaseOrderItem> items, LocalDateTime now) {
+        String snapshotId = order.getAwardId() + ":v" + order.getAwardVersion();
+        List<PurchaseOrderAwardSource> rows = new ArrayList<>(items.size());
+        for (PurchaseOrderItem item : items) {
+            rows.add(new PurchaseOrderAwardSource()
+                    .setTenantId(tenantId)
+                    .setOrderId(order.getOrderId())
+                    .setAwardId(order.getAwardId())
+                    .setAwardVersion(order.getAwardVersion())
+                    .setAwardLineId(item.getAwardLineId())
+                    .setItemId(item.getItemId())
+                    .setSourceSnapshotId(snapshotId)
+                    .setCreatedAt(now));
+        }
+        return rows;
+    }
+
     private void insertStatusHistory(Long tenantId, Long operationId, String orderId, Long version,
                                      String status, String actorPrincipalId, String reasonCode, LocalDateTime now) {
         require(mapper.insertStatusHistory(new OrderStatusHistory()
@@ -369,6 +523,7 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
         requireRef(input.getOrderCode(), "orderCode", 64);
         requireCode(input.getSourceBusinessType(), "sourceBusinessType");
         requireRef(input.getSourceBusinessRef(), "sourceBusinessRef", 128);
+        requireRef(input.getLegalEntityId(), "legalEntityId", 128);
         requireRef(input.getSupplierId(), "supplierId", 128);
         String supplierId = input.getSupplierId();
         requireCurrency(input.getCurrencyCode());
@@ -390,7 +545,7 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
         require(requestedHeaderNet == headerNet && requestedHeaderTax == headerTax && requestedHeaderGross == headerGross,
                 "purchase order header totals must equal the sum of line totals");
         return new NormalizedCreateOrder(orderId, input.getOrderCode(), upper(input.getSourceBusinessType()),
-                input.getSourceBusinessRef(), supplierId, upper(input.getCurrencyCode()), input.getLeadTimeDays(),
+                input.getSourceBusinessRef(), input.getLegalEntityId(), supplierId, upper(input.getCurrencyCode()), input.getLeadTimeDays(),
                 requestedHeaderNet, requestedHeaderTax, requestedHeaderGross, taxPolicy, roundingPolicy,
                 input.getRemark(), normalizeReasonCode(input.getReasonCode()), lines);
     }
@@ -408,6 +563,7 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
             require(lineNumber > 0, "purchase order lineNumber must be positive");
             require(lineNumbers.add(lineNumber), "purchase order lineNumber must be unique");
             String itemId = valueOrUuid(line.getItemId(), "itemId");
+            requireRef(line.getAwardLineId(), "awardLineId", 128);
             require(itemIds.add(itemId), "purchase order itemId must be unique");
             requireRef(line.getCanonicalSkuId(), "canonicalSkuId", 128);
             requirePositive(line.getOrderedQuantity(), "orderedQuantity");
@@ -417,6 +573,9 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
             int taxRateBps = line.getTaxRateBps() == null ? 0 : line.getTaxRateBps();
             require(taxRateBps >= 0 && taxRateBps <= 10000, "taxRateBps must be between 0 and 10000");
             BigDecimal unitNetPriceMinor = nonNegativePrice(line.getUnitNetPriceMinor(), "unitNetPriceMinor");
+            requireRef(line.getValuationPolicyId(), "valuationPolicyId", 128);
+            requireRef(line.getValuationPolicyVersion(), "valuationPolicyVersion", 64);
+            requireSha256(line.getValuationPolicyHash(), "valuationPolicyHash");
             long lineNetAmountMinor = nonNegativeAmount(line.getLineNetAmountMinor(), "lineNetAmountMinor");
             long lineTaxAmountMinor = nonNegativeAmount(line.getLineTaxAmountMinor(), "lineTaxAmountMinor");
             long lineGrossAmountMinor = nonNegativeAmount(line.getLineGrossAmountMinor(), "lineGrossAmountMinor");
@@ -431,8 +590,9 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
             List<NormalizedSchedule> schedules = normalizeSchedules(line);
             require(sumQuantities(schedules).compareTo(line.getOrderedQuantity()) == 0,
                     "purchase order schedule quantities must equal the line ordered quantity");
-            lines.add(new NormalizedLine(itemId, lineNumber, line.getCanonicalSkuId(), line.getOrderedQuantity(),
-                    upper(line.getUomCode()), taxCode, taxRateBps, unitNetPriceMinor, lineNetAmountMinor,
+            lines.add(new NormalizedLine(itemId, lineNumber, line.getAwardLineId(), line.getCanonicalSkuId(), line.getOrderedQuantity(),
+                    upper(line.getUomCode()), taxCode, taxRateBps, unitNetPriceMinor,
+                    line.getValuationPolicyId(), line.getValuationPolicyVersion(), line.getValuationPolicyHash(), lineNetAmountMinor,
                     lineTaxAmountMinor, lineGrossAmountMinor, schedules));
         }
         return lines;
@@ -525,6 +685,11 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
                 field + " must be a safe opaque reference");
     }
 
+    private static void requireSha256(String value, String field) {
+        require(value != null && value.matches("[0-9a-f]{64}"),
+                field + " must be a lowercase SHA-256");
+    }
+
     private static void requireCode(String value, String field) {
         String normalized = upper(value);
         require(normalized != null && SAFE_CODE.matcher(normalized).matches(),
@@ -565,6 +730,10 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
                 .multiply(BigDecimal.valueOf(taxRateBps))
                 .divide(BPS_DENOMINATOR, 0, RoundingMode.HALF_UP)
                 .longValueExact();
+    }
+
+    private static long allocate(long amount, BigDecimal part, BigDecimal total) {
+        return BigDecimal.valueOf(amount).multiply(part).divide(total, 0, RoundingMode.HALF_UP).longValueExact();
     }
 
     private static long addExact(long left, long right) {
@@ -612,16 +781,18 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
     }
 
     private record NormalizedCreateOrder(String orderId, String orderCode, String sourceBusinessType,
-                                         String sourceBusinessRef, String supplierId, String currencyCode,
+                                         String sourceBusinessRef, String legalEntityId, String supplierId, String currencyCode,
                                          Integer leadTimeDays, long headerNetAmountMinor,
                                          long headerTaxAmountMinor, long headerGrossAmountMinor,
                                          String taxCalculationPolicyCode, String roundingPolicyCode,
                                          String remark, String reasonCode, List<NormalizedLine> lines) {
     }
 
-    private record NormalizedLine(String itemId, Integer lineNumber, String canonicalSkuId,
+    private record NormalizedLine(String itemId, Integer lineNumber, String awardLineId, String canonicalSkuId,
                                   BigDecimal orderedQuantity, String uomCode, String taxCode, Integer taxRateBps,
-                                  BigDecimal unitNetPriceMinor, Long lineNetAmountMinor, Long lineTaxAmountMinor,
+                                  BigDecimal unitNetPriceMinor, String valuationPolicyId,
+                                  String valuationPolicyVersion, String valuationPolicyHash,
+                                  Long lineNetAmountMinor, Long lineTaxAmountMinor,
                                   Long lineGrossAmountMinor, List<NormalizedSchedule> schedules) {
     }
 
@@ -636,5 +807,10 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
     private record Outcome(String eventType, String aggregateType, String aggregateId,
                            Long version, String status, Map<String, Object> payload,
                            OrderSnapshot snapshot) {
+    }
+
+    @FunctionalInterface
+    private interface OrderTransition {
+        int update(Long tenantId,String orderId,Long version,String actor,String reason,LocalDateTime now);
     }
 }

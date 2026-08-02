@@ -4,6 +4,11 @@ import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.cloudmold.identity.api.IdentityQueryApi;
 import cn.iocoder.yudao.module.cloudmold.identity.api.SourceIdentityReference;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommand;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementOperation;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.PurchaseRequisitionCommand;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.SourcingCommand;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.SourcingOperation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -14,6 +19,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -61,8 +67,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.engagement.promotion-campaign-operations.v1";
     static final String GROWTH_EXPERIMENT_SKILL =
             "skill.cloudmold.growth.experiment-lifecycle.v1";
-    static final String SUPPLIER_SOURCING_SKILL =
-            "skill.cloudmold.supplier.sourcing-lifecycle.v1";
+    static final String PROCUREMENT_SOURCING_SKILL =
+            "skill.cloudmold.procurement.sourcing-lifecycle.v1";
     static final String PROCUREMENT_ORDER_SKILL =
             "skill.cloudmold.procurement.order-lifecycle.v1";
     static final String WMS_OPERATIONS_SKILL =
@@ -115,6 +121,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.pricing.reprice-lifecycle.v1";
     static final String READY_MASTER_SKILL = "skill.cloudmold.commerce.reuse-ready-master.v1";
     static final String LEGACY_PROJECTION_SKILL = "skill.cloudmold.commerce.legacy-projection-plan.v1";
+    private static final String PROCUREMENT_SOURCING_INPUT_SCHEMA =
+            "cloudmold.procurement-sourcing-input/v1";
     private static final String ZERO_UUID = "00000000-0000-0000-0000-000000000000";
 
     private final AiOperationsTemporalMapper mapper;
@@ -231,33 +239,37 @@ class RotatingBusinessScenarioInputFactory {
                     principal.path("principalId").asText());
         } else if (GROWTH_EXPERIMENT_SKILL.equals(targetSkillId)) {
             output = growthExperiment(newPrefix, occurredAt);
-        } else if (SUPPLIER_SOURCING_SKILL.equals(targetSkillId)) {
-            JsonNode catalog = result(tenantId, CATALOG_MATRIX_SKILL, "define_1");
-            JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
-            if (catalog.path("canonicalSkuId").asText().isBlank()
-                    || principal.path("principalId").asText().isBlank()) {
-                return Optional.empty();
-            }
-            output = supplierSourcing(newPrefix, occurredAt,
-                    catalog.path("canonicalSkuId").asText(),
-                    principal.path("principalId").asText());
-        } else if (PROCUREMENT_ORDER_SKILL.equals(targetSkillId)) {
-            JsonNode award = result(tenantId, SUPPLIER_SOURCING_SKILL, "supplier_award");
-            JsonNode catalog = result(tenantId, CATALOG_MATRIX_SKILL, "define_1");
+        } else if (PROCUREMENT_SOURCING_SKILL.equals(targetSkillId)) {
+            Optional<ProcurementSourcingSeed> seed = procurementSourcingSeed(tenantId);
             JsonNode warehouse = result(tenantId, READY_MASTER_SKILL, "warehouse_network");
-            JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
-            if (award.path("supplierId").asText().isBlank()
-                    || catalog.path("canonicalSkuId").asText().isBlank()
-                    || warehouse.path("warehouseId").asText().isBlank()
-                    || principal.path("principalId").asText().isBlank()) {
+            CatalogProcurementLine firstLine = catalogProcurementLine(tenantId, "define_1", 0);
+            CatalogProcurementLine secondLine = catalogProcurementLine(tenantId, "define_2", 1);
+            if (seed.isEmpty() || !seed.get().matches(firstLine, secondLine)
+                    || !firstLine.usable() || !secondLine.usable()
+                    || firstLine.canonicalSkuId().equals(secondLine.canonicalSkuId())
+                    || warehouse.path("warehouseId").asText().isBlank()) {
                 return Optional.empty();
             }
-            output = procurementOrder(newPrefix, occurredAt,
-                    award.path("supplierId").asText(),
-                    award.path("sourcingCaseId").asText(),
-                    catalog.path("canonicalSkuId").asText(),
-                    warehouse.path("warehouseId").asText(),
-                    principal.path("principalId").asText());
+            output = procurementSourcing(newPrefix, occurredAt, firstLine, secondLine,
+                    warehouse.path("warehouseId").asText(), seed.get(), 500);
+        } else if (PROCUREMENT_ORDER_SKILL.equals(targetSkillId)) {
+            JsonNode award = result(tenantId, PROCUREMENT_SOURCING_SKILL, "award_approve");
+            JsonNode sourcingInput = JsonUtils.parseTree(mapper.selectLatestSuccessfulSkillTaskInput(
+                    tenantId, PROCUREMENT_SOURCING_SKILL));
+            String awardId = award.path("aggregateId").asText();
+            if (awardId.isBlank() || !"APPROVED".equals(award.path("status").asText())
+                    || award.path("aggregateVersion").asLong() != 3L
+                    || sourcingInput == null || !sourcingInput.isObject()
+                    || !awardId.equals(sourcingInput.path("awardId").asText())
+                    || !sourcingInput.path("purchaseOrderPlans").isArray()
+                    || sourcingInput.path("purchaseOrderPlans").size() != 2) {
+                return Optional.empty();
+            }
+            ObjectNode procurement = JsonNodeFactory.instance.objectNode();
+            procurement.put("schemaVersion", PROCUREMENT_SOURCING_INPUT_SCHEMA)
+                    .put("awardId", awardId);
+            procurement.set("purchaseOrders", sourcingInput.path("purchaseOrderPlans").deepCopy());
+            output = procurement;
         } else if (WMS_OPERATIONS_SKILL.equals(targetSkillId)) {
             JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
             JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
@@ -279,16 +291,20 @@ class RotatingBusinessScenarioInputFactory {
                     catalogProjection.getSkuCode(), catalogProjection.getPrimaryBarcode(),
                     catalogProjection.getBaseUomCode());
         } else if (REPLENISHMENT_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            Optional<ProcurementSourcingSeed> seed = procurementSourcingSeed(tenantId);
             JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
             JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
-            JsonNode catalog = result(tenantId, CATALOG_MATRIX_SKILL, "define_1");
+            CatalogProcurementLine firstLine = catalogProcurementLine(tenantId, "define_1", 0);
+            CatalogProcurementLine secondLine = catalogProcurementLine(tenantId, "define_2", 1);
             WmsCatalogProjectionSeedRecord catalogProjection =
                     mapper.selectLatestWmsCatalogProjectionSeed(tenantId);
             JsonNode warehouse = result(tenantId, READY_MASTER_SKILL, "warehouse_network");
-            if (merchant.path("merchantId").asText().isBlank()
+            if (seed.isEmpty() || !seed.get().matches(firstLine, secondLine)
+                    || merchant.path("merchantId").asText().isBlank()
                     || merchant.path("shopId").asText().isBlank()
                     || principal.path("principalId").asText().isBlank()
-                    || catalog.path("canonicalSkuId").asText().isBlank()
+                    || !firstLine.usable() || !secondLine.usable()
+                    || firstLine.canonicalSkuId().equals(secondLine.canonicalSkuId())
                     || warehouse.path("warehouseId").asText().isBlank()
                     || !usable(catalogProjection)) {
                 return Optional.empty();
@@ -297,7 +313,7 @@ class RotatingBusinessScenarioInputFactory {
                     merchant.path("merchantId").asText(),
                     merchant.path("shopId").asText(),
                     principal.path("principalId").asText(),
-                    catalog.path("canonicalSkuId").asText(),
+                    firstLine, secondLine, seed.get(),
                     warehouse.path("warehouseId").asText(),
                     catalogProjection.getSkuCode(), catalogProjection.getPrimaryBarcode(),
                     catalogProjection.getBaseUomCode());
@@ -498,6 +514,9 @@ class RotatingBusinessScenarioInputFactory {
                     catalog.path("canonicalSkuId").asText(),
                     seedProperties.getOperatorUserId());
         } else if (WAREHOUSE_ADMISSION_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            Optional<ProcurementSourcingSeed> seed = procurementSourcingSeed(tenantId);
+            CatalogProcurementLine firstLine = catalogProcurementLine(tenantId, "define_1", 0);
+            CatalogProcurementLine secondLine = catalogProcurementLine(tenantId, "define_2", 1);
             JsonNode listing = result(
                     tenantId, PRODUCT_MANAGEMENT_LIFECYCLE_SKILL, "wait_platform_store_listing");
             JsonNode quality = result(
@@ -518,8 +537,13 @@ class RotatingBusinessScenarioInputFactory {
                     .path("listingId").asText();
             WmsCatalogProjectionSeedRecord catalogProjection =
                     mapper.selectLatestWmsCatalogProjectionSeed(tenantId);
-            if (!"VERIFIED".equals(qualityStatus)
-                    || canonicalSkuId.isBlank() || merchantId.isBlank() || shopId.isBlank()
+            if (seed.isEmpty() || !seed.get().matches(firstLine, secondLine)
+                    || !firstLine.usable() || !secondLine.usable()
+                    || firstLine.canonicalSkuId().equals(secondLine.canonicalSkuId())
+                    || !"VERIFIED".equals(qualityStatus)
+                    || canonicalSkuId.isBlank()
+                    || !canonicalSkuId.equals(firstLine.canonicalSkuId())
+                    || merchantId.isBlank() || shopId.isBlank()
                     || principalId.isBlank() || warehouseId.isBlank() || listingId.isBlank()
                     || !usable(catalogProjection)) {
                 return Optional.empty();
@@ -527,6 +551,7 @@ class RotatingBusinessScenarioInputFactory {
             output = warehouseAdmissionLifecycle(
                     newPrefix, occurredAt, canonicalSkuId, listingId,
                     merchantId, shopId, principalId, warehouseId,
+                    firstLine, secondLine, seed.get(),
                     catalogProjection.getSkuCode(), catalogProjection.getPrimaryBarcode(),
                     catalogProjection.getBaseUomCode());
         } else if (CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL
@@ -715,7 +740,7 @@ class RotatingBusinessScenarioInputFactory {
             case MERCHANT_MANAGED_GROWTH_LIFECYCLE_SKILL -> "mg";
             case PROMOTION_CAMPAIGN_SKILL -> "e";
             case GROWTH_EXPERIMENT_SKILL -> "g";
-            case SUPPLIER_SOURCING_SKILL -> "s";
+            case PROCUREMENT_SOURCING_SKILL -> "s";
             case PROCUREMENT_ORDER_SKILL -> "q";
             case WMS_OPERATIONS_SKILL -> "w";
             case REPLENISHMENT_LIFECYCLE_SKILL -> "r";
@@ -1242,6 +1267,50 @@ class RotatingBusinessScenarioInputFactory {
                 ? JsonNodeFactory.instance.missingNode() : JsonUtils.parseTree(result);
     }
 
+    private CatalogProcurementLine catalogProcurementLine(Long tenantId, String stepCode, int definitionIndex) {
+        JsonNode result = result(tenantId, CATALOG_MATRIX_SKILL, stepCode);
+        JsonNode catalogInput = JsonUtils.parseTree(
+                mapper.selectLatestSuccessfulSkillTaskInput(tenantId, CATALOG_MATRIX_SKILL));
+        JsonNode definition = catalogInput == null
+                ? JsonNodeFactory.instance.missingNode()
+                : catalogInput.path("definitions").path(definitionIndex);
+        return new CatalogProcurementLine(
+                result.path("canonicalSkuId").asText(), definition.path("baseUomCode").asText());
+    }
+
+    private Optional<ProcurementSourcingSeed> procurementSourcingSeed(Long tenantId) {
+        JsonNode input = JsonUtils.parseTree(mapper.selectLatestSuccessfulSkillTaskInput(
+                tenantId, PROCUREMENT_SOURCING_SKILL));
+        if (input == null || !input.isObject()
+                || !PROCUREMENT_SOURCING_INPUT_SCHEMA.equals(input.path("schemaVersion").asText())
+                || !input.path("supplierCandidates").isArray()
+                || input.path("supplierCandidates").size() != 2
+                || !input.path("valuationPolicies").isArray()
+                || input.path("valuationPolicies").size() != 2) {
+            return Optional.empty();
+        }
+        JsonNode actors = input.path("actors");
+        ProcurementSourcingSeed seed = new ProcurementSourcingSeed(
+                input.path("legalEntityId").asText(),
+                input.path("supplierCandidates").get(0).path("supplierId").asText(),
+                input.path("supplierCandidates").get(1).path("supplierId").asText(),
+                valuationPolicy(input.path("valuationPolicies").get(0)),
+                valuationPolicy(input.path("valuationPolicies").get(1)),
+                actors.path("creatorPrincipalId").asText(),
+                actors.path("reviewerAPrincipalId").asText(),
+                actors.path("reviewerBPrincipalId").asText(),
+                actors.path("approverPrincipalId").asText());
+        return seed.usable() ? Optional.of(seed) : Optional.empty();
+    }
+
+    private static ValuationPolicySeed valuationPolicy(JsonNode input) {
+        return new ValuationPolicySeed(
+                input.path("canonicalSkuId").asText(),
+                input.path("valuationPolicyId").asText(),
+                input.path("valuationPolicyVersion").asText(),
+                input.path("valuationPolicyHash").asText());
+    }
+
     private static boolean usable(WmsCatalogProjectionSeedRecord projection) {
         return projection != null && projection.getSkuCode() != null
                 && !projection.getSkuCode().isBlank() && projection.getPrimaryBarcode() != null
@@ -1491,6 +1560,8 @@ class RotatingBusinessScenarioInputFactory {
     private static ObjectNode warehouseAdmissionLifecycle(
             String prefix, String occurredAt, String canonicalSkuId, String listingId,
             String merchantId, String shopId, String principalId, String warehouseId,
+            CatalogProcurementLine firstLine, CatalogProcurementLine secondLine,
+            ProcurementSourcingSeed sourcingSeed,
             String canonicalSkuCode, String canonicalBarcode,
             String canonicalBaseUomCode) {
         ObjectNode output = JsonNodeFactory.instance.objectNode();
@@ -1515,7 +1586,7 @@ class RotatingBusinessScenarioInputFactory {
                 merchantOnboarding(prefix + "-bd", occurredAt, principalId));
         output.set("replenishment", replenishmentLifecycle(
                 prefix + "-warehouse", occurredAt,
-                merchantId, shopId, principalId, canonicalSkuId, warehouseId,
+                merchantId, shopId, principalId, firstLine, secondLine, sourcingSeed, warehouseId,
                 canonicalSkuCode, canonicalBarcode, canonicalBaseUomCode));
         ObjectNode traffic = promotionCampaign(
                 prefix + "-quality-traffic", occurredAt, principalId);
@@ -2304,133 +2375,515 @@ class RotatingBusinessScenarioInputFactory {
                 .put("evidenceRef", "evidence://growth/" + prefix + "/" + suffix);
     }
 
-    private static ObjectNode supplierSourcing(String prefix, String occurredAt,
-                                               String canonicalSkuId, String actorPrincipalId) {
-        LocalDate date = Instant.parse(occurredAt).atZone(java.time.ZoneOffset.UTC).toLocalDate();
-        String caseId = stableUuid(prefix + ":sourcing-case");
-        String supplierA = stableUuid(prefix + ":supplier:a");
-        String supplierB = stableUuid(prefix + ":supplier:b");
-        String quoteA = stableUuid(prefix + ":quote:a");
-        String quoteB = stableUuid(prefix + ":quote:b");
+    private static ObjectNode procurementSourcing(
+            String prefix, String occurredAt, CatalogProcurementLine firstCatalogLine,
+            CatalogProcurementLine secondCatalogLine, String warehouseId,
+            ProcurementSourcingSeed seed, int totalQuantity) {
+        Instant instant = Instant.parse(occurredAt);
+        LocalDate date = instant.atZone(ZoneOffset.UTC).toLocalDate();
+        String runId = stableUuid(prefix + ":procurement-sourcing-run");
+        String correlationId = stableUuid(prefix + ":procurement-sourcing-correlation");
+        String requisitionId = stableUuid(prefix + ":purchase-requisition");
+        String eventId = stableUuid(prefix + ":sourcing-event");
+        String awardId = stableUuid(prefix + ":award");
+        String policyId = stableUuid(prefix + ":evaluation-policy");
+        String line1 = stableUuid(prefix + ":requisition-line:1");
+        String line2 = stableUuid(prefix + ":requisition-line:2");
+        String schedule11 = stableUuid(prefix + ":requisition-line:1:schedule:1");
+        String schedule12 = stableUuid(prefix + ":requisition-line:1:schedule:2");
+        String schedule21 = stableUuid(prefix + ":requisition-line:2:schedule:1");
+        String schedule22 = stableUuid(prefix + ":requisition-line:2:schedule:2");
+        String sourcingLine1 = stableUuid(prefix + ":sourcing-line:1");
+        String sourcingLine2 = stableUuid(prefix + ":sourcing-line:2");
+        String sourcingSchedule11 = stableUuid(prefix + ":sourcing-line:1:schedule:1");
+        String sourcingSchedule12 = stableUuid(prefix + ":sourcing-line:1:schedule:2");
+        String sourcingSchedule21 = stableUuid(prefix + ":sourcing-line:2:schedule:1");
+        String sourcingSchedule22 = stableUuid(prefix + ":sourcing-line:2:schedule:2");
+        BigDecimal quantity1 = BigDecimal.valueOf(Math.multiplyExact(totalQuantity, 3L) / 5L);
+        BigDecimal quantity2 = BigDecimal.valueOf(totalQuantity).subtract(quantity1);
+        BigDecimal quantity11 = quantity1.multiply(new BigDecimal("0.4"));
+        BigDecimal quantity12 = quantity1.subtract(quantity11);
+        BigDecimal quantity21 = quantity2.multiply(new BigDecimal("0.4"));
+        BigDecimal quantity22 = quantity2.subtract(quantity21);
+
+        PurchaseRequisitionCommand requisition = PurchaseRequisitionCommand.builder()
+                .idempotencyKey(prefix + ":purchase-requisition:create-approved")
+                .runId(runId).correlationId(correlationId).occurredAt(instant)
+                .requisitionId(requisitionId).requisitionCode(code("AI_PR_", prefix))
+                .sourceBusinessType("AI_SUPPLY_PLAN").sourceBusinessRef(prefix)
+                .reasonCode("AI_SOURCING_REQUIRED")
+                .remark("AI 采购寻源的已审批多行、多交期采购申请")
+                .lines(List.of(
+                        requisitionLine(line1, 1, firstCatalogLine, quantity1,
+                                requisitionSchedule(schedule11, 1, warehouseId, date.plusDays(21), quantity11),
+                                requisitionSchedule(schedule12, 2, warehouseId, date.plusDays(35), quantity12)),
+                        requisitionLine(line2, 2, secondCatalogLine, quantity2,
+                                requisitionSchedule(schedule21, 1, warehouseId, date.plusDays(21), quantity21),
+                                requisitionSchedule(schedule22, 2, warehouseId, date.plusDays(35), quantity22))))
+                .build();
+
+        SourcingCommand.EventDefinition event = SourcingCommand.EventDefinition.builder()
+                .eventId(eventId).eventCode(code("AI_RFQ_", prefix)).requisitionId(requisitionId)
+                .title("AI 多供应商、多商品、多交期寻源 " + prefix.toUpperCase(Locale.ROOT))
+                .quotationDeadline(date.plusDays(7).atTime(23, 59, 59))
+                .lines(List.of(
+                        sourcingLine(sourcingLine1, 1, line1,
+                                sourcingSchedule(sourcingSchedule11, 1, schedule11),
+                                sourcingSchedule(sourcingSchedule12, 2, schedule12)),
+                        sourcingLine(sourcingLine2, 2, line2,
+                                sourcingSchedule(sourcingSchedule21, 1, schedule21),
+                                sourcingSchedule(sourcingSchedule22, 2, schedule22))))
+                .build();
+
+        QuotationIds quoteA = quotationIds(prefix, "a");
+        QuotationIds quoteB = quotationIds(prefix, "b");
+        SourcingCommand.QuotationRevisionDefinition revisionA = quotationRevision(
+                quoteA, eventId, seed.supplierAId(), 5L, firstCatalogLine, secondCatalogLine,
+                sourcingLine1, sourcingLine2, sourcingSchedule11, sourcingSchedule12,
+                sourcingSchedule21, sourcingSchedule22, quantity1, quantity2,
+                quantity11, quantity12, quantity21, quantity22, date, 2100, 3200);
+        SourcingCommand.QuotationRevisionDefinition revisionB = quotationRevision(
+                quoteB, eventId, seed.supplierBId(), 6L, firstCatalogLine, secondCatalogLine,
+                sourcingLine1, sourcingLine2, sourcingSchedule11, sourcingSchedule12,
+                sourcingSchedule21, sourcingSchedule22, quantity1, quantity2,
+                quantity11, quantity12, quantity21, quantity22, date, 2200, 3100);
+
+        SourcingCommand.EvaluationDimensionDefinition costDimension = evaluationDimension(
+                prefix, "cost", "TOTAL_COST", "总成本", 4000);
+        SourcingCommand.EvaluationDimensionDefinition qualityDimension = evaluationDimension(
+                prefix, "quality", "QUALITY_ASSURANCE", "质量保证", 3500);
+        SourcingCommand.EvaluationDimensionDefinition deliveryDimension = evaluationDimension(
+                prefix, "delivery", "DELIVERY_RELIABILITY", "交付可靠性", 2500);
+        SourcingCommand.EvaluationPolicyDefinition policy = SourcingCommand.EvaluationPolicyDefinition.builder()
+                .policyId(policyId).policyCode(code("AI_EVAL_", prefix)).policyVersion(1)
+                .eventId(eventId).expectedEventVersion(8L)
+                .dimensions(List.of(costDimension, qualityDimension, deliveryDimension)).build();
+
+        List<SourcingCommand.AwardLineDefinition> awardLines = List.of(
+                awardLine(prefix, 1, sourcingLine1, sourcingSchedule11, quoteA.line1(),
+                        quoteA.schedule11(), seed.supplierAId(), quantity11),
+                awardLine(prefix, 2, sourcingLine1, sourcingSchedule12, quoteB.line1(),
+                        quoteB.schedule12(), seed.supplierBId(), quantity12),
+                awardLine(prefix, 3, sourcingLine2, sourcingSchedule21, quoteA.line2(),
+                        quoteA.schedule21(), seed.supplierAId(), quantity21),
+                awardLine(prefix, 4, sourcingLine2, sourcingSchedule22, quoteB.line2(),
+                        quoteB.schedule22(), seed.supplierBId(), quantity22));
+
         ObjectNode input = JsonNodeFactory.instance.objectNode();
-        input.put("correlationId", stableUuid(prefix + ":supplier-correlation"))
-                .put("occurredAt", occurredAt)
-                .put("actorPrincipalId", actorPrincipalId);
-        supplier(input, "supplierA", supplierA, "A", prefix, "LOW");
-        supplier(input, "supplierB", supplierB, "B", prefix, "MEDIUM");
-        admission(input, "admissionA", supplierA,
-                DigestUtil.sha256Hex(prefix + ":qualification:a"),
-                DigestUtil.sha256Hex(prefix + ":risk:a"));
-        admission(input, "admissionB", supplierB,
-                DigestUtil.sha256Hex(prefix + ":qualification:b"),
-                DigestUtil.sha256Hex(prefix + ":risk:b"));
-        input.putObject("sourcingCase")
-                .put("sourcingCaseId", caseId)
-                .put("rfqCode", "AI-RFQ-" + prefix.toUpperCase())
-                .put("requestRef", "assortment:" + prefix)
-                .put("canonicalSkuId", canonicalSkuId)
-                .put("targetQuantity", 500)
-                .put("uomCode", "EA")
-                .put("currencyCode", "CNY")
-                .put("maxUnitCostMinor", 2500)
-                .put("requiredDeliveryDate", date.plusDays(21).toString())
-                .put("requirements", "质量、交期、成本和产能须同时达到 AI 选品计划门槛");
-        quote(input, "quoteA", quoteA, caseId, supplierA,
-                date.plusDays(14), 2100, 14, 800);
-        quote(input, "quoteB", quoteB, caseId, supplierB,
-                date.plusDays(14), 2350, 12, 700);
-        sample(input, "sampleA", prefix, "a", caseId, supplierA, quoteA,
-                93, 91, 88, 90, "PASS");
-        sample(input, "sampleB", prefix, "b", caseId, supplierB, quoteB,
-                86, 84, 92, 82, "PASS");
-        input.putObject("award")
-                .put("sourcingCaseId", caseId)
-                .put("supplierId", supplierA)
-                .put("quoteId", quoteA)
-                .put("decisionRationale", "比较两家合格供应商的成本、样品、交期和产能后选择综合得分最高者");
+        input.put("schemaVersion", PROCUREMENT_SOURCING_INPUT_SCHEMA)
+                .put("awardId", awardId)
+                .put("legalEntityId", seed.legalEntityId());
+        ArrayNode supplierCandidates = input.putArray("supplierCandidates");
+        supplierCandidates.addObject().put("supplierId", seed.supplierAId());
+        supplierCandidates.addObject().put("supplierId", seed.supplierBId());
+        input.putObject("actors")
+                .put("creatorPrincipalId", seed.creatorPrincipalId())
+                .put("reviewerAPrincipalId", seed.reviewerAPrincipalId())
+                .put("reviewerBPrincipalId", seed.reviewerBPrincipalId())
+                .put("approverPrincipalId", seed.approverPrincipalId());
+        ArrayNode valuationPolicies = input.putArray("valuationPolicies");
+        valuationPolicies.add(valuationPolicyNode(seed.firstValuationPolicy()));
+        valuationPolicies.add(valuationPolicyNode(seed.secondValuationPolicy()));
+        input.set("purchaseRequisition", commandEnvelope("purchase_requisition", seed.creatorPrincipalId(), requisition));
+
+        ArrayNode commands = input.putArray("sourcingCommands");
+        commands.add(commandEnvelope("event_create", seed.creatorPrincipalId(), sourcingCommand(prefix, instant,
+                runId, correlationId, SourcingOperation.CREATE_SOURCING_EVENT, event, null)));
+        commands.add(commandEnvelope("event_publish", seed.creatorPrincipalId(), sourcingTransitionCommand(prefix,
+                instant, runId, correlationId, SourcingOperation.PUBLISH_SOURCING_EVENT, eventId, 1L, null)));
+        commands.add(commandEnvelope("invite_supplier_a", seed.creatorPrincipalId(), invitationCommand(prefix,
+                instant, runId, correlationId, eventId, seed.supplierAId(), 2L, "a")));
+        commands.add(commandEnvelope("invite_supplier_b", seed.creatorPrincipalId(), invitationCommand(prefix,
+                instant, runId, correlationId, eventId, seed.supplierBId(), 3L, "b")));
+        commands.add(commandEnvelope("open_quoting", seed.creatorPrincipalId(), sourcingTransitionCommand(prefix,
+                instant, runId, correlationId, SourcingOperation.OPEN_QUOTING, eventId, 4L, null)));
+        commands.add(commandEnvelope("quotation_a_submit", seed.creatorPrincipalId(), quotationCommand(prefix,
+                instant, runId, correlationId, revisionA, "a")));
+        commands.add(commandEnvelope("quotation_b_submit", seed.creatorPrincipalId(), quotationCommand(prefix,
+                instant, runId, correlationId, revisionB, "b")));
+        commands.add(commandEnvelope("close_quoting", seed.creatorPrincipalId(), sourcingTransitionCommand(prefix,
+                instant, runId, correlationId, SourcingOperation.CLOSE_QUOTING, eventId, 7L, null)));
+        commands.add(commandEnvelope("evaluation_policy_create", seed.creatorPrincipalId(), evaluationPolicyCommand(
+                prefix, instant, runId, correlationId, policy)));
+        commands.add(commandEnvelope("evaluation_a_record", seed.reviewerAPrincipalId(), evaluationScoreCommand(
+                prefix, instant, runId, correlationId, eventId, policyId, quoteA.revision(),
+                costDimension, qualityDimension, deliveryDimension, 9L, "a", 96, 93, 90)));
+        commands.add(commandEnvelope("evaluation_b_record", seed.reviewerBPrincipalId(), evaluationScoreCommand(
+                prefix, instant, runId, correlationId, eventId, policyId, quoteB.revision(),
+                costDimension, qualityDimension, deliveryDimension, 10L, "b", 90, 95, 94)));
+        commands.add(commandEnvelope("award_draft_create", seed.creatorPrincipalId(), awardCommand(prefix,
+                instant, runId, correlationId, awardId, eventId, policyId, 11L, awardLines)));
+        commands.add(commandEnvelope("award_submit", seed.creatorPrincipalId(), awardTransitionCommand(prefix,
+                instant, runId, correlationId, SourcingOperation.SUBMIT_AWARD, awardId, 1L, 12L, null)));
+        commands.add(commandEnvelope("award_approve", seed.approverPrincipalId(), awardTransitionCommand(prefix,
+                instant, runId, correlationId, SourcingOperation.APPROVE_AWARD, awardId, 2L, 13L,
+                "DUAL_SOURCE_APPROVED")));
+        commands.add(commandEnvelope("event_close", seed.creatorPrincipalId(), sourcingTransitionCommand(prefix,
+                instant, runId, correlationId, SourcingOperation.CLOSE_SOURCING_EVENT, eventId, 14L,
+                "SOURCING_COMPLETED")));
+
+        AwardPurchaseLine award11 = new AwardPurchaseLine(awardLines.get(0).getAwardLineId(),
+                firstCatalogLine, seed.valuationPolicyFor(firstCatalogLine.canonicalSkuId()),
+                warehouseId, quantity11, 2100, date.plusDays(21));
+        AwardPurchaseLine award12 = new AwardPurchaseLine(awardLines.get(1).getAwardLineId(),
+                firstCatalogLine, seed.valuationPolicyFor(firstCatalogLine.canonicalSkuId()),
+                warehouseId, quantity12, 2200, date.plusDays(35));
+        AwardPurchaseLine award21 = new AwardPurchaseLine(awardLines.get(2).getAwardLineId(),
+                secondCatalogLine, seed.valuationPolicyFor(secondCatalogLine.canonicalSkuId()),
+                warehouseId, quantity21, 3200, date.plusDays(21));
+        AwardPurchaseLine award22 = new AwardPurchaseLine(awardLines.get(3).getAwardLineId(),
+                secondCatalogLine, seed.valuationPolicyFor(secondCatalogLine.canonicalSkuId()),
+                warehouseId, quantity22, 3100, date.plusDays(35));
+        ArrayNode plans = input.putArray("purchaseOrderPlans");
+        plans.add(purchaseOrderPlan(prefix, "a", instant, runId, correlationId, awardId,
+                seed.legalEntityId(), seed.supplierAId(), seed.creatorPrincipalId(),
+                seed.approverPrincipalId(),
+                List.of(award11, award21)));
+        plans.add(purchaseOrderPlan(prefix, "b", instant, runId, correlationId, awardId,
+                seed.legalEntityId(), seed.supplierBId(), seed.creatorPrincipalId(),
+                seed.approverPrincipalId(),
+                List.of(award12, award22)));
         return input;
     }
 
-    private static void supplier(ObjectNode input, String field, String supplierId,
-                                 String suffix, String prefix, String riskLevel) {
-        input.putObject(field)
-                .put("supplierId", supplierId)
-                .put("supplierCode", "AI_SUP_" + suffix + "_" + prefix.replace("-", "").toUpperCase())
-                .put("supplierName", "AI 模拟供应商 " + suffix + " " + prefix.toUpperCase())
-                .put("countryCode", "CN")
-                .put("capabilitySummary", "服装柔性供应、快速打样、稳定交付与可审计质量体系")
-                .put("riskLevel", riskLevel)
-                .put("reasonCode", "AI_DAILY_SOURCING");
+    private static PurchaseRequisitionCommand.LineDefinition requisitionLine(
+            String lineId, int lineNumber, CatalogProcurementLine catalogLine, BigDecimal quantity,
+            PurchaseRequisitionCommand.DeliveryScheduleDefinition... schedules) {
+        return PurchaseRequisitionCommand.LineDefinition.builder()
+                .lineId(lineId).lineNumber(lineNumber).canonicalSkuId(catalogLine.canonicalSkuId())
+                .requestedQuantity(quantity).uomCode(catalogLine.baseUomCode())
+                .schedules(List.of(schedules)).build();
     }
 
-    private static void admission(ObjectNode input, String field, String supplierId,
-                                  String qualificationHash, String riskHash) {
-        input.putObject(field)
-                .put("supplierId", supplierId)
-                .put("qualificationEvidenceSha256", qualificationHash)
-                .put("riskEvidenceSha256", riskHash)
-                .put("reasonCode", "AI_EVIDENCE_VERIFIED");
+    private static ObjectNode valuationPolicyNode(ValuationPolicySeed policy) {
+        return JsonNodeFactory.instance.objectNode()
+                .put("canonicalSkuId", policy.canonicalSkuId())
+                .put("valuationPolicyId", policy.valuationPolicyId())
+                .put("valuationPolicyVersion", policy.valuationPolicyVersion())
+                .put("valuationPolicyHash", policy.valuationPolicyHash());
     }
 
-    private static void quote(ObjectNode input, String field, String quoteId, String caseId,
-                              String supplierId, LocalDate validUntil, long unitCostMinor,
-                              int leadTimeDays, int capacity) {
-        input.putObject(field)
-                .put("quoteId", quoteId)
-                .put("sourcingCaseId", caseId)
-                .put("supplierId", supplierId)
-                .put("quoteVersion", 1)
-                .put("unitCostMinor", unitCostMinor)
-                .put("moq", 100)
-                .put("leadTimeDays", leadTimeDays)
-                .put("capacityQuantity", capacity)
-                .put("validUntil", validUntil.toString())
-                .put("termsSummary", "含税到仓，样品通过后按采购订单交付");
+    private static PurchaseRequisitionCommand.DeliveryScheduleDefinition requisitionSchedule(
+            String scheduleId, int scheduleNumber, String warehouseId, LocalDate date,
+            BigDecimal quantity) {
+        return PurchaseRequisitionCommand.DeliveryScheduleDefinition.builder()
+                .scheduleId(scheduleId).scheduleNumber(scheduleNumber)
+                .canonicalWarehouseId(warehouseId).requiredDeliveryDate(date)
+                .scheduledQuantity(quantity).build();
     }
 
-    private static void sample(ObjectNode input, String field, String prefix, String suffix,
-                               String caseId, String supplierId, String quoteId,
-                               int quality, int fit, int delivery, int risk, String result) {
-        input.putObject(field)
-                .put("evaluationId", stableUuid(prefix + ":sample:" + suffix))
-                .put("sourcingCaseId", caseId)
-                .put("supplierId", supplierId)
-                .put("quoteId", quoteId)
-                .put("qualityScore", quality)
-                .put("fitScore", fit)
-                .put("deliveryScore", delivery)
-                .put("riskScore", risk)
-                .put("result", result)
-                .put("notes", "AI 样品评估覆盖质量、版型、交期与供应风险");
+    private static SourcingCommand.EventLineDefinition sourcingLine(
+            String sourcingLineId, int lineNumber, String requisitionLineId,
+            SourcingCommand.EventScheduleDefinition... schedules) {
+        return SourcingCommand.EventLineDefinition.builder()
+                .sourcingLineId(sourcingLineId).lineNumber(lineNumber)
+                .requisitionLineId(requisitionLineId).schedules(List.of(schedules)).build();
     }
 
-    private static ObjectNode procurementOrder(String prefix, String occurredAt,
-                                               String supplierId, String sourcingCaseId,
-                                               String canonicalSkuId, String warehouseId,
-                                               String actorPrincipalId) {
-        LocalDate date = Instant.parse(occurredAt).atZone(java.time.ZoneOffset.UTC).toLocalDate();
-        ObjectNode input = JsonNodeFactory.instance.objectNode();
-        input.put("correlationId", stableUuid(prefix + ":procurement-correlation"))
-                .put("occurredAt", occurredAt)
-                .put("actorPrincipalId", actorPrincipalId);
-        input.putObject("purchaseOrder")
-                .put("orderId", stableUuid(prefix + ":purchase-order"))
-                .put("orderCode", "AI-PO-" + prefix.toUpperCase())
-                .put("sourceBusinessType", "SUPPLIER_SOURCING")
-                .put("sourceBusinessRef", sourcingCaseId)
-                .put("supplierRef", supplierId)
-                .put("canonicalSkuId", canonicalSkuId)
-                .put("canonicalWarehouseId", warehouseId)
-                .put("orderedQuantity", 500)
-                .put("uomCode", "EA")
-                .put("unitCostMinor", 2100)
-                .put("totalAmountMinor", 1_050_000)
-                .put("currencyCode", "CNY")
-                .put("leadTimeDays", 14)
-                .put("requiredDeliveryDate", date.plusDays(21).toString())
-                .put("remark", "AI 根据定标结果创建并向供应商下发采购订单")
-                .put("reasonCode", "AI_SOURCING_AWARD");
-        return input;
+    private static SourcingCommand.EventScheduleDefinition sourcingSchedule(
+            String sourcingScheduleId, int scheduleNumber, String requisitionScheduleId) {
+        return SourcingCommand.EventScheduleDefinition.builder()
+                .sourcingScheduleId(sourcingScheduleId).scheduleNumber(scheduleNumber)
+                .requisitionScheduleId(requisitionScheduleId).build();
+    }
+
+    private static QuotationIds quotationIds(String prefix, String supplierSuffix) {
+        return new QuotationIds(
+                stableUuid(prefix + ":quotation:" + supplierSuffix),
+                stableUuid(prefix + ":quotation:" + supplierSuffix + ":revision:1"),
+                stableUuid(prefix + ":quotation:" + supplierSuffix + ":line:1"),
+                stableUuid(prefix + ":quotation:" + supplierSuffix + ":line:2"),
+                stableUuid(prefix + ":quotation:" + supplierSuffix + ":line:1:schedule:1"),
+                stableUuid(prefix + ":quotation:" + supplierSuffix + ":line:1:schedule:2"),
+                stableUuid(prefix + ":quotation:" + supplierSuffix + ":line:2:schedule:1"),
+                stableUuid(prefix + ":quotation:" + supplierSuffix + ":line:2:schedule:2"),
+                supplierSuffix);
+    }
+
+    private static SourcingCommand.QuotationRevisionDefinition quotationRevision(
+            QuotationIds ids, String eventId, String supplierId, long expectedEventVersion,
+            CatalogProcurementLine firstCatalogLine, CatalogProcurementLine secondCatalogLine,
+            String sourcingLine1, String sourcingLine2, String sourcingSchedule11,
+            String sourcingSchedule12, String sourcingSchedule21, String sourcingSchedule22,
+            BigDecimal quantity1, BigDecimal quantity2, BigDecimal quantity11,
+            BigDecimal quantity12, BigDecimal quantity21, BigDecimal quantity22,
+            LocalDate date, long firstPrice, long secondPrice) {
+        return SourcingCommand.QuotationRevisionDefinition.builder()
+                .quotationId(ids.quotation()).quotationCode(code("AI_Q_" + ids.suffix() + "_", eventId))
+                .revisionId(ids.revision()).revisionNumber(1).eventId(eventId)
+                .supplierId(supplierId).currencyCode("CNY").expectedEventVersion(expectedEventVersion)
+                .lines(List.of(
+                        quotationLine(ids.line1(), 1, sourcingLine1, quantity1,
+                                firstCatalogLine.baseUomCode(), firstPrice,
+                                quotationSchedule(ids.schedule11(), 1, sourcingSchedule11,
+                                        quantity11, date.plusDays(21)),
+                                quotationSchedule(ids.schedule12(), 2, sourcingSchedule12,
+                                        quantity12, date.plusDays(35))),
+                        quotationLine(ids.line2(), 2, sourcingLine2, quantity2,
+                                secondCatalogLine.baseUomCode(), secondPrice,
+                                quotationSchedule(ids.schedule21(), 1, sourcingSchedule21,
+                                        quantity21, date.plusDays(21)),
+                                quotationSchedule(ids.schedule22(), 2, sourcingSchedule22,
+                                        quantity22, date.plusDays(35)))))
+                .build();
+    }
+
+    private static SourcingCommand.QuotationRevisionLineDefinition quotationLine(
+            String revisionLineId, int lineNumber, String sourcingLineId, BigDecimal quantity,
+            String uomCode, long priceMinor,
+            SourcingCommand.QuotationRevisionScheduleDefinition... schedules) {
+        return SourcingCommand.QuotationRevisionLineDefinition.builder()
+                .revisionLineId(revisionLineId).lineNumber(lineNumber).sourcingLineId(sourcingLineId)
+                .offeredQuantity(quantity).uomCode(uomCode)
+                .unitNetPriceMinor(BigDecimal.valueOf(priceMinor)).taxCode("VAT13").taxRateBps(1300)
+                .schedules(List.of(schedules)).build();
+    }
+
+    private static SourcingCommand.QuotationRevisionScheduleDefinition quotationSchedule(
+            String revisionScheduleId, int scheduleNumber, String sourcingScheduleId,
+            BigDecimal quantity, LocalDate promisedDate) {
+        return SourcingCommand.QuotationRevisionScheduleDefinition.builder()
+                .revisionScheduleId(revisionScheduleId).scheduleNumber(scheduleNumber)
+                .sourcingScheduleId(sourcingScheduleId).offeredQuantity(quantity)
+                .promisedDeliveryDate(promisedDate).build();
+    }
+
+    private static SourcingCommand.EvaluationDimensionDefinition evaluationDimension(
+            String prefix, String suffix, String code, String name, int weightBps) {
+        return SourcingCommand.EvaluationDimensionDefinition.builder()
+                .dimensionId(stableUuid(prefix + ":evaluation-dimension:" + suffix))
+                .dimensionCode(code).dimensionName(name).weightBps(weightBps).maximumScore(100).build();
+    }
+
+    private static SourcingCommand.AwardLineDefinition awardLine(
+            String prefix, int lineNumber, String sourcingLineId, String sourcingScheduleId,
+            String quotationRevisionLineId, String quotationRevisionScheduleId,
+            String supplierId, BigDecimal quantity) {
+        return SourcingCommand.AwardLineDefinition.builder()
+                .awardLineId(stableUuid(prefix + ":award-line:" + lineNumber))
+                .lineNumber(lineNumber).sourcingLineId(sourcingLineId)
+                .sourcingScheduleId(sourcingScheduleId)
+                .quotationRevisionLineId(quotationRevisionLineId)
+                .quotationRevisionScheduleId(quotationRevisionScheduleId)
+                .supplierId(supplierId).awardedQuantity(quantity).build();
+    }
+
+    private static SourcingCommand sourcingCommand(
+            String prefix, Instant occurredAt, String runId, String correlationId,
+            SourcingOperation operation, SourcingCommand.EventDefinition event,
+            String causationId) {
+        return SourcingCommand.builder().operation(operation)
+                .idempotencyKey(prefix + ":" + operation.name().toLowerCase(Locale.ROOT))
+                .runId(runId).correlationId(correlationId).causationId(causationId)
+                .occurredAt(occurredAt).event(event).build();
+    }
+
+    private static SourcingCommand sourcingTransitionCommand(
+            String prefix, Instant occurredAt, String runId, String correlationId,
+            SourcingOperation operation, String eventId, long expectedVersion, String reasonCode) {
+        return SourcingCommand.builder().operation(operation)
+                .idempotencyKey(prefix + ":" + operation.name().toLowerCase(Locale.ROOT))
+                .runId(runId).correlationId(correlationId).occurredAt(occurredAt)
+                .eventTransition(SourcingCommand.EventTransitionDefinition.builder()
+                        .eventId(eventId).expectedVersion(expectedVersion).reasonCode(reasonCode).build())
+                .build();
+    }
+
+    private static SourcingCommand invitationCommand(
+            String prefix, Instant occurredAt, String runId, String correlationId,
+            String eventId, String supplierId, long expectedVersion, String suffix) {
+        return SourcingCommand.builder().operation(SourcingOperation.INVITE_SUPPLIER)
+                .idempotencyKey(prefix + ":invite-supplier:" + suffix)
+                .runId(runId).correlationId(correlationId).occurredAt(occurredAt)
+                .invitation(SourcingCommand.InvitationDefinition.builder()
+                        .invitationId(stableUuid(prefix + ":invitation:" + suffix))
+                        .eventId(eventId).supplierId(supplierId)
+                        .expectedEventVersion(expectedVersion).build())
+                .build();
+    }
+
+    private static SourcingCommand quotationCommand(
+            String prefix, Instant occurredAt, String runId, String correlationId,
+            SourcingCommand.QuotationRevisionDefinition revision, String suffix) {
+        return SourcingCommand.builder().operation(SourcingOperation.SUBMIT_QUOTATION_REVISION)
+                .idempotencyKey(prefix + ":quotation-submit:" + suffix)
+                .runId(runId).correlationId(correlationId).occurredAt(occurredAt)
+                .quotationRevision(revision).build();
+    }
+
+    private static SourcingCommand evaluationPolicyCommand(
+            String prefix, Instant occurredAt, String runId, String correlationId,
+            SourcingCommand.EvaluationPolicyDefinition policy) {
+        return SourcingCommand.builder().operation(SourcingOperation.CREATE_EVALUATION_POLICY)
+                .idempotencyKey(prefix + ":evaluation-policy:create")
+                .runId(runId).correlationId(correlationId).occurredAt(occurredAt)
+                .evaluationPolicy(policy).build();
+    }
+
+    private static SourcingCommand evaluationScoreCommand(
+            String prefix, Instant occurredAt, String runId, String correlationId,
+            String eventId, String policyId, String revisionId,
+            SourcingCommand.EvaluationDimensionDefinition cost,
+            SourcingCommand.EvaluationDimensionDefinition quality,
+            SourcingCommand.EvaluationDimensionDefinition delivery,
+            long expectedVersion, String suffix, int costScore, int qualityScore,
+            int deliveryScore) {
+        return SourcingCommand.builder().operation(SourcingOperation.RECORD_EVALUATION_SCORE)
+                .idempotencyKey(prefix + ":evaluation-score:" + suffix)
+                .runId(runId).correlationId(correlationId).occurredAt(occurredAt)
+                .evaluationScore(SourcingCommand.EvaluationScoreDefinition.builder()
+                        .scoreId(stableUuid(prefix + ":evaluation-score:" + suffix))
+                        .eventId(eventId).policyId(policyId).policyVersion(1)
+                        .quotationRevisionId(revisionId)
+                        .reviewerEvidenceSha256(DigestUtil.sha256Hex(prefix + ":review-evidence:" + suffix))
+                        .expectedEventVersion(expectedVersion)
+                        .dimensions(List.of(
+                                dimensionScore(cost.getDimensionId(), costScore, prefix, suffix, "cost"),
+                                dimensionScore(quality.getDimensionId(), qualityScore, prefix, suffix, "quality"),
+                                dimensionScore(delivery.getDimensionId(), deliveryScore, prefix, suffix, "delivery")))
+                        .build()).build();
+    }
+
+    private static SourcingCommand.DimensionScoreDefinition dimensionScore(
+            String dimensionId, int score, String prefix, String supplierSuffix, String dimension) {
+        return SourcingCommand.DimensionScoreDefinition.builder().dimensionId(dimensionId).score(score)
+                .evidenceReference("evidence://procurement/" + prefix + "/" + supplierSuffix + "/" + dimension)
+                .build();
+    }
+
+    private static SourcingCommand awardCommand(
+            String prefix, Instant occurredAt, String runId, String correlationId,
+            String awardId, String eventId, String policyId, long expectedVersion,
+            List<SourcingCommand.AwardLineDefinition> lines) {
+        return SourcingCommand.builder().operation(SourcingOperation.CREATE_AWARD_DRAFT)
+                .idempotencyKey(prefix + ":award:create-draft")
+                .runId(runId).correlationId(correlationId).occurredAt(occurredAt)
+                .award(SourcingCommand.AwardDefinition.builder()
+                        .awardId(awardId).awardCode(code("AI_AWARD_", prefix))
+                        .eventId(eventId).policyId(policyId).policyVersion(1)
+                        .decisionReasonCode("DUAL_SOURCE_RESILIENCE")
+                        .expectedEventVersion(expectedVersion).lines(lines).build())
+                .build();
+    }
+
+    private static SourcingCommand awardTransitionCommand(
+            String prefix, Instant occurredAt, String runId, String correlationId,
+            SourcingOperation operation, String awardId, long expectedAwardVersion,
+            long expectedEventVersion, String reasonCode) {
+        return SourcingCommand.builder().operation(operation)
+                .idempotencyKey(prefix + ":" + operation.name().toLowerCase(Locale.ROOT))
+                .runId(runId).correlationId(correlationId).occurredAt(occurredAt)
+                .awardTransition(SourcingCommand.AwardTransitionDefinition.builder()
+                        .awardId(awardId).expectedAwardVersion(expectedAwardVersion)
+                        .expectedEventVersion(expectedEventVersion).reasonCode(reasonCode).build())
+                .build();
+    }
+
+    private static ObjectNode purchaseOrderPlan(
+            String prefix, String suffix, Instant occurredAt, String runId, String correlationId,
+            String awardId, String legalEntityId, String supplierId, String creatorPrincipalId,
+            String approverPrincipalId, List<AwardPurchaseLine> awardLines) {
+        String orderId = stableUuid(prefix + ":purchase-order:" + suffix);
+        List<ProcurementCommand.PurchaseOrderLineDefinition> lines = java.util.stream.IntStream
+                .range(0, awardLines.size())
+                .mapToObj(index -> purchaseOrderLine(prefix, suffix, index + 1, awardLines.get(index)))
+                .toList();
+        long headerNet = lines.stream().mapToLong(ProcurementCommand.PurchaseOrderLineDefinition::getLineNetAmountMinor).sum();
+        long headerTax = lines.stream().mapToLong(ProcurementCommand.PurchaseOrderLineDefinition::getLineTaxAmountMinor).sum();
+        ProcurementCommand.PurchaseOrderDefinition order = ProcurementCommand.PurchaseOrderDefinition.builder()
+                .orderId(orderId).orderCode(code("AI_PO_" + suffix + "_", prefix))
+                .sourceBusinessType("SOURCING_AWARD").sourceBusinessRef(awardId)
+                .awardId(awardId).awardVersion(3L).legalEntityId(legalEntityId)
+                .supplierId(supplierId)
+                .currencyCode("CNY").leadTimeDays(35)
+                .headerNetAmountMinor(headerNet).headerTaxAmountMinor(headerTax)
+                .headerGrossAmountMinor(Math.addExact(headerNet, headerTax))
+                .taxCalculationPolicyCode("STANDARD_V1").roundingPolicyCode("HALF_UP")
+                .remark("AI 根据已批准定标快照创建采购订单")
+                .reasonCode("AI_SOURCING_AWARD").lines(lines).build();
+        ArrayNode commands = JsonNodeFactory.instance.arrayNode();
+        commands.add(commandEnvelope("purchase_order_create", creatorPrincipalId,
+                procurementCommand(prefix, suffix, occurredAt, runId, correlationId,
+                        ProcurementOperation.CREATE_PURCHASE_ORDER, order)));
+        commands.add(commandEnvelope("purchase_order_submit", creatorPrincipalId,
+                procurementTransitionCommand(prefix, suffix, occurredAt, runId, correlationId,
+                        ProcurementOperation.SUBMIT_PURCHASE_ORDER, orderId, 1L, "AI_PO_SUBMITTED")));
+        commands.add(commandEnvelope("purchase_order_approve", approverPrincipalId,
+                procurementTransitionCommand(prefix, suffix, occurredAt, runId, correlationId,
+                        ProcurementOperation.APPROVE_PURCHASE_ORDER, orderId, 2L, "AI_PO_APPROVED")));
+        commands.add(commandEnvelope("purchase_order_release", approverPrincipalId,
+                procurementTransitionCommand(prefix, suffix, occurredAt, runId, correlationId,
+                        ProcurementOperation.RELEASE_PURCHASE_ORDER, orderId, 3L, "AI_PO_RELEASED")));
+        commands.add(commandEnvelope("purchase_order_dispatch", creatorPrincipalId,
+                procurementTransitionCommand(prefix, suffix, occurredAt, runId, correlationId,
+                        ProcurementOperation.DISPATCH_PURCHASE_ORDER, orderId, 4L, "AI_PO_DISPATCHED")));
+        commands.add(commandEnvelope("supplier_confirm", creatorPrincipalId,
+                procurementTransitionCommand(prefix, suffix, occurredAt, runId, correlationId,
+                        ProcurementOperation.SUPPLIER_CONFIRM_PURCHASE_ORDER, orderId, 5L,
+                        "SUPPLIER_CONFIRMED")));
+        ObjectNode plan = JsonNodeFactory.instance.objectNode();
+        plan.put("supplierId", supplierId).put("orderId", orderId);
+        plan.set("commands", commands);
+        return plan;
+    }
+
+    private static ProcurementCommand.PurchaseOrderLineDefinition purchaseOrderLine(
+            String prefix, String suffix, int lineNumber, AwardPurchaseLine source) {
+        long net = source.quantity().multiply(BigDecimal.valueOf(source.unitNetPriceMinor()))
+                .setScale(0, java.math.RoundingMode.HALF_UP).longValueExact();
+        long tax = BigDecimal.valueOf(net).multiply(BigDecimal.valueOf(1300))
+                .divide(BigDecimal.valueOf(10000), 0, java.math.RoundingMode.HALF_UP).longValueExact();
+        String itemId = stableUuid(prefix + ":purchase-order:" + suffix + ":item:" + lineNumber);
+        return ProcurementCommand.PurchaseOrderLineDefinition.builder()
+                .itemId(itemId).lineNumber(lineNumber).awardLineId(source.awardLineId())
+                .canonicalSkuId(source.catalogLine().canonicalSkuId()).orderedQuantity(source.quantity())
+                .uomCode(source.catalogLine().baseUomCode()).taxCode("VAT13").taxRateBps(1300)
+                .valuationPolicyId(source.valuationPolicy().valuationPolicyId())
+                .valuationPolicyVersion(source.valuationPolicy().valuationPolicyVersion())
+                .valuationPolicyHash(source.valuationPolicy().valuationPolicyHash())
+                .unitNetPriceMinor(BigDecimal.valueOf(source.unitNetPriceMinor()))
+                .lineNetAmountMinor(net).lineTaxAmountMinor(tax)
+                .lineGrossAmountMinor(Math.addExact(net, tax))
+                .schedules(List.of(ProcurementCommand.PurchaseOrderDeliveryScheduleDefinition.builder()
+                        .scheduleId(stableUuid(itemId + ":schedule:1")).scheduleNumber(1)
+                        .requiredDeliveryDate(source.promisedDate())
+                        .canonicalWarehouseId(source.warehouseId())
+                        .scheduledQuantity(source.quantity()).build()))
+                .build();
+    }
+
+    private static ProcurementCommand procurementCommand(
+            String prefix, String suffix, Instant occurredAt, String runId, String correlationId,
+            ProcurementOperation operation, ProcurementCommand.PurchaseOrderDefinition order) {
+        return ProcurementCommand.builder().operation(operation)
+                .idempotencyKey(prefix + ":purchase-order:" + suffix + ":create")
+                .runId(runId).correlationId(correlationId).occurredAt(occurredAt)
+                .purchaseOrder(order).build();
+    }
+
+    private static ProcurementCommand procurementTransitionCommand(
+            String prefix, String suffix, Instant occurredAt, String runId, String correlationId,
+            ProcurementOperation operation, String orderId, long expectedVersion, String reasonCode) {
+        return ProcurementCommand.builder().operation(operation)
+                .idempotencyKey(prefix + ":purchase-order:" + suffix + ":"
+                        + operation.name().toLowerCase(Locale.ROOT))
+                .runId(runId).correlationId(correlationId).occurredAt(occurredAt)
+                .purchaseOrder(ProcurementCommand.PurchaseOrderDefinition.builder()
+                        .orderId(orderId).expectedVersion(expectedVersion).reasonCode(reasonCode).build())
+                .build();
+    }
+
+    private static ObjectNode commandEnvelope(String stepCode, String actorPrincipalId, Object command) {
+        ObjectNode envelope = JsonNodeFactory.instance.objectNode();
+        envelope.put("stepCode", stepCode).put("actorPrincipalId", actorPrincipalId);
+        envelope.set("command", JsonUtils.parseTree(JsonUtils.toJsonString(command)));
+        return envelope;
+    }
+
+    private static String code(String prefix, String value) {
+        String normalized = (prefix + value).replace('-', '_').replace(':', '_')
+                .toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9_]", "_");
+        return normalized.length() <= 64 ? normalized : normalized.substring(0, 64);
     }
 
     private static ObjectNode wmsOperations(String prefix, String occurredAt,
@@ -2527,26 +2980,22 @@ class RotatingBusinessScenarioInputFactory {
 
     private static ObjectNode replenishmentLifecycle(String prefix, String occurredAt,
                                                      String merchantId, String shopId,
-                                                     String principalId, String canonicalSkuId,
+                                                     String principalId,
+                                                     CatalogProcurementLine firstCatalogLine,
+                                                     CatalogProcurementLine secondCatalogLine,
+                                                     ProcurementSourcingSeed sourcingSeed,
                                                      String warehouseId, String canonicalSkuCode,
                                                      String canonicalBarcode,
                                                      String canonicalBaseUomCode) {
         LocalDate date = Instant.parse(occurredAt).atZone(java.time.ZoneOffset.UTC).toLocalDate();
         boolean promotion = date.getDayOfMonth() % 5 == 0;
         int orderedQuantity = promotion ? 2_000 : 500;
-        ObjectNode sourcing = supplierSourcing(prefix + "-src", occurredAt,
-                canonicalSkuId, principalId);
-        sourcing.withObject("/sourcingCase").put("targetQuantity", orderedQuantity);
-        String sourcingCaseId = sourcing.path("sourcingCase").path("sourcingCaseId").asText();
-        String supplierId = sourcing.path("supplierA").path("supplierId").asText();
-        ObjectNode procurement = procurementOrder(prefix + "-po", occurredAt,
-                supplierId, sourcingCaseId, canonicalSkuId, warehouseId, principalId);
-        procurement.withObject("/purchaseOrder")
-                .put("orderedQuantity", orderedQuantity)
-                .put("totalAmountMinor", orderedQuantity * 2_100L)
-                .put("remark", promotion
-                        ? "AI 根据大促销量预测与安全库存缺口下发加急补货"
-                        : "AI 根据日销、在途与安全库存缺口下发日常补货");
+        ObjectNode sourcing = procurementSourcing(prefix + "-src", occurredAt,
+                firstCatalogLine, secondCatalogLine, warehouseId, sourcingSeed, orderedQuantity);
+        ObjectNode procurement = JsonNodeFactory.instance.objectNode();
+        procurement.put("schemaVersion", PROCUREMENT_SOURCING_INPUT_SCHEMA)
+                .put("awardId", sourcing.path("awardId").asText());
+        procurement.set("purchaseOrders", sourcing.path("purchaseOrderPlans").deepCopy());
         ObjectNode physical = wmsOperations(prefix + "-wms", occurredAt,
                 merchantId, shopId, principalId, warehouseId, canonicalSkuCode,
                 canonicalBarcode, canonicalBaseUomCode);
@@ -3947,5 +4396,75 @@ class RotatingBusinessScenarioInputFactory {
             return result;
         }
         return node.deepCopy();
+    }
+
+    private record CatalogProcurementLine(String canonicalSkuId, String baseUomCode) {
+        private boolean usable() {
+            return canonicalSkuId != null && !canonicalSkuId.isBlank()
+                    && baseUomCode != null && baseUomCode.matches("[A-Z][A-Z0-9_-]{0,63}");
+        }
+    }
+
+    private record ProcurementSourcingSeed(
+            String legalEntityId, String supplierAId, String supplierBId,
+            ValuationPolicySeed firstValuationPolicy,
+            ValuationPolicySeed secondValuationPolicy, String creatorPrincipalId,
+            String reviewerAPrincipalId, String reviewerBPrincipalId,
+            String approverPrincipalId) {
+        private boolean usable() {
+            return legalEntityId != null && !legalEntityId.isBlank()
+                    && distinctNonBlank(supplierAId, supplierBId)
+                    && firstValuationPolicy != null && firstValuationPolicy.usable()
+                    && secondValuationPolicy != null && secondValuationPolicy.usable()
+                    && !firstValuationPolicy.canonicalSkuId()
+                    .equals(secondValuationPolicy.canonicalSkuId())
+                    && distinctNonBlank(creatorPrincipalId, reviewerAPrincipalId,
+                    reviewerBPrincipalId, approverPrincipalId);
+        }
+
+        private boolean matches(CatalogProcurementLine firstLine,
+                                CatalogProcurementLine secondLine) {
+            return firstLine != null && secondLine != null
+                    && valuationPolicyFor(firstLine.canonicalSkuId()) != null
+                    && valuationPolicyFor(secondLine.canonicalSkuId()) != null;
+        }
+
+        private ValuationPolicySeed valuationPolicyFor(String canonicalSkuId) {
+            if (firstValuationPolicy.canonicalSkuId().equals(canonicalSkuId)) {
+                return firstValuationPolicy;
+            }
+            return secondValuationPolicy.canonicalSkuId().equals(canonicalSkuId)
+                    ? secondValuationPolicy : null;
+        }
+    }
+
+    private record ValuationPolicySeed(
+            String canonicalSkuId, String valuationPolicyId,
+            String valuationPolicyVersion, String valuationPolicyHash) {
+        private boolean usable() {
+            return java.util.stream.Stream.of(
+                    canonicalSkuId, valuationPolicyId, valuationPolicyVersion)
+                    .allMatch(value -> value != null && !value.isBlank())
+                    && valuationPolicyHash != null
+                    && valuationPolicyHash.matches("[0-9a-f]{64}");
+        }
+    }
+
+    private record QuotationIds(
+            String quotation, String revision, String line1, String line2,
+            String schedule11, String schedule12, String schedule21, String schedule22,
+            String suffix) {
+    }
+
+    private record AwardPurchaseLine(
+            String awardLineId, CatalogProcurementLine catalogLine,
+            ValuationPolicySeed valuationPolicy, String warehouseId,
+            BigDecimal quantity, long unitNetPriceMinor, LocalDate promisedDate) {
+    }
+
+    private static boolean distinctNonBlank(String... values) {
+        return values != null && values.length > 0
+                && java.util.Arrays.stream(values).allMatch(value -> value != null && !value.isBlank())
+                && java.util.Arrays.stream(values).distinct().count() == values.length;
     }
 }

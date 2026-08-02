@@ -713,10 +713,13 @@ class RotatingBusinessScenarioInputFactoryTest {
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(
                 162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL, "define_1"))
                 .thenReturn("{\"canonicalSkuId\":\"canonical-sku-1\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL))
+                .thenReturn(procurementSourcingSeed("canonical-sku-1"));
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(
-                162L, RotatingBusinessScenarioInputFactory.SUPPLIER_SOURCING_SKILL, "supplier_award"))
+                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL, "award_approve"))
                 .thenReturn("""
-                        {"supplierId":"supplier-awarded","sourcingCaseId":"sourcing-case-awarded"}
+                        {"aggregateId":"award-approved","aggregateVersion":3,"status":"APPROVED"}
                         """);
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(
                 162L, RotatingBusinessScenarioInputFactory.CONSUMER_JOURNEY_SKILL, "consumer_principal"))
@@ -735,7 +738,14 @@ class RotatingBusinessScenarioInputFactoryTest {
 
         JsonNode campaign = build(RotatingBusinessScenarioInputFactory.PROMOTION_CAMPAIGN_SKILL);
         JsonNode growth = build(RotatingBusinessScenarioInputFactory.GROWTH_EXPERIMENT_SKILL);
-        JsonNode sourcing = build(RotatingBusinessScenarioInputFactory.SUPPLIER_SOURCING_SKILL);
+        JsonNode sourcing = build(RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL);
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL))
+                .thenReturn(JsonUtils.toJsonString(sourcing));
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL, "award_approve"))
+                .thenReturn("{\"aggregateId\":\"" + sourcing.path("awardId").asText()
+                        + "\",\"aggregateVersion\":3,\"status\":\"APPROVED\"}");
         JsonNode procurement = build(RotatingBusinessScenarioInputFactory.PROCUREMENT_ORDER_SKILL);
         JsonNode warehouse = build(RotatingBusinessScenarioInputFactory.WMS_OPERATIONS_SKILL);
         JsonNode replenishment = build(
@@ -761,18 +771,41 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(growth.path("treatmentExposure30").path("variantCode").asText())
                 .isEqualTo("TREATMENT");
         assertThat(growth.path("conclusion").path("decision").asText()).isEqualTo("TREATMENT");
-        assertThat(sourcing.path("sourcingCase").path("canonicalSkuId").asText())
-                .isEqualTo("canonical-sku-1");
-        assertThat(sourcing.path("supplierA").path("supplierId").asText())
-                .isNotEqualTo(sourcing.path("supplierB").path("supplierId").asText());
-        assertThat(sourcing.path("admissionA").path("qualificationEvidenceSha256").asText())
+        assertThat(sourcing.path("schemaVersion").asText())
+                .isEqualTo("cloudmold.procurement-sourcing-input/v1");
+        assertThat(sourcing.path("supplierCandidates")).hasSize(2);
+        assertThat(sourcing.path("legalEntityId").asText()).isEqualTo("legal-entity-01");
+        assertThat(sourcing.path("purchaseRequisition").path("command").path("lines")).hasSize(2);
+        assertThat(sourcing.path("purchaseRequisition").path("command").path("lines").get(0)
+                .path("schedules")).hasSize(2);
+        assertThat(sourcing.path("sourcingCommands")).hasSize(15);
+        assertThat(sourcing.path("sourcingCommands").get(5).path("command")
+                .path("quotationRevision").path("lines")).hasSize(2);
+        assertThat(sourcing.path("sourcingCommands").get(5).path("command")
+                .path("quotationRevision").path("lines").get(0).path("schedules")).hasSize(2);
+        assertThat(sourcing.path("purchaseOrderPlans")).hasSize(2);
+        assertThat(sourcing.path("purchaseOrderPlans").get(0).path("commands").get(0)
+                .path("command").path("purchaseOrder").path("supplierId").asText())
+                .isEqualTo("supplier-a");
+        assertThat(sourcing.path("purchaseOrderPlans").get(0).path("commands").get(0)
+                .path("command").path("purchaseOrder").path("legalEntityId").asText())
+                .isEqualTo("legal-entity-01");
+        assertThat(sourcing.path("purchaseOrderPlans").get(1).path("commands").get(0)
+                .path("command").path("purchaseOrder").path("legalEntityId").asText())
+                .isEqualTo("legal-entity-01");
+        assertThat(sourcing.path("purchaseOrderPlans").get(0).path("commands").get(0)
+                .path("command").path("purchaseOrder").path("lines").get(0)
+                .path("valuationPolicyId").asText()).isEqualTo("policy-1");
+        assertThat(sourcing.path("purchaseOrderPlans").get(0).path("commands").get(0)
+                .path("command").path("purchaseOrder").path("lines").get(1)
+                .path("valuationPolicyId").asText()).isEqualTo("policy-2");
+        assertThat(sourcing.path("purchaseOrderPlans").get(1).path("commands").get(0)
+                .path("command").path("purchaseOrder").path("lines").get(0)
+                .path("valuationPolicyHash").asText())
                 .matches("[0-9a-f]{64}");
-        assertThat(sourcing.path("quoteA").path("unitCostMinor").asLong())
-                .isLessThan(sourcing.path("quoteB").path("unitCostMinor").asLong());
-        assertThat(procurement.path("purchaseOrder").path("supplierRef").asText())
-                .isEqualTo("supplier-awarded");
-        assertThat(procurement.path("purchaseOrder").path("canonicalWarehouseId").asText())
-                .isEqualTo("warehouse-1");
+        assertThat(procurement.path("purchaseOrders")).hasSize(2);
+        assertThat(procurement.path("purchaseOrders").get(0).path("commands").get(0)
+                .path("command").path("purchaseOrder").path("awardVersion").asLong()).isEqualTo(3L);
         assertThat(warehouse.path("authority").path("operator").path("principalId").asText())
                 .isEqualTo("principal-owner");
         assertThat(warehouse.path("canonicalWarehouseId").asText()).isEqualTo("warehouse-1");
@@ -796,8 +829,9 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .path("category").asText()).isEqualTo("SUPPLY_OPERATIONS");
         assertThat(replenishment.path("operationsCommands").get(3)
                 .path("operation").asText()).isEqualTo("RESOLVE_ALERT");
-        assertThat(replenishment.path("sourcing").path("sourcingCase")
-                .path("targetQuantity").asInt()).isEqualTo(500);
+        assertThat(replenishment.path("sourcing").path("purchaseRequisition")
+                .path("command").path("lines").get(0).path("requestedQuantity").decimalValue())
+                .isEqualByComparingTo("300");
         assertThat(replenishment.path("warehouse").path("quantities")
                 .path("receipt").asInt()).isEqualTo(10);
         assertThat(promotionReplenishment.path("scenarioType").asText())
@@ -805,8 +839,7 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(promotionReplenishment.path("operationsCommands").get(0)
                 .path("alert").path("subcategory").asText())
                 .isEqualTo("PROMOTION_REPLENISHMENT");
-        assertThat(promotionReplenishment.path("procurement").path("purchaseOrder")
-                .path("orderedQuantity").asInt()).isEqualTo(2_000);
+        assertThat(promotionReplenishment.path("procurement").path("purchaseOrders")).hasSize(2);
         assertThat(promotionReplenishment.path("warehouse").path("quantities")
                 .path("receipt").asInt()).isEqualTo(30);
         assertThat(customerService.path("commands")).hasSize(8);
@@ -816,6 +849,83 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .path("referenceId").asText()).isEqualTo("consumer-order");
         assertThat(customerService.path("commands").get(3)
                 .path("assignedAgentPrincipalId").asText()).isEqualTo("principal-owner");
+    }
+
+    @Test
+    void shouldFailClosedWithoutTwoExplicitSuppliersAndIndependentActors() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL))
+                .thenReturn("""
+                        {"schemaVersion":"cloudmold.procurement-sourcing-input/v1",
+                         "legalEntityId":"legal-entity-01",
+                         "supplierCandidates":[{"supplierId":"supplier-a"}],
+                         "valuationPolicies":[
+                           {"canonicalSkuId":"sku-1","valuationPolicyId":"policy-1",
+                            "valuationPolicyVersion":"2026.1","valuationPolicyHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+                           {"canonicalSkuId":"sku-2","valuationPolicyId":"policy-2",
+                            "valuationPolicyVersion":"2026.1","valuationPolicyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+                         "actors":{"creatorPrincipalId":"principal-creator",
+                                   "reviewerAPrincipalId":"principal-reviewer-a",
+                                   "reviewerBPrincipalId":"principal-reviewer-b",
+                                   "approverPrincipalId":"principal-approver"}}
+                        """);
+
+        assertThat(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL,
+                "2026-07-29", "temporal-missing-supplier")).isEmpty();
+
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL))
+                .thenReturn("""
+                        {"schemaVersion":"cloudmold.procurement-sourcing-input/v1",
+                         "legalEntityId":"legal-entity-01",
+                         "supplierCandidates":[{"supplierId":"supplier-a"},
+                                               {"supplierId":"supplier-a"}],
+                         "valuationPolicies":[
+                           {"canonicalSkuId":"sku-1","valuationPolicyId":"policy-1",
+                            "valuationPolicyVersion":"2026.1","valuationPolicyHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+                           {"canonicalSkuId":"sku-2","valuationPolicyId":"policy-2",
+                            "valuationPolicyVersion":"2026.1","valuationPolicyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+                         "actors":{"creatorPrincipalId":"principal-shared",
+                                   "reviewerAPrincipalId":"principal-shared",
+                                   "reviewerBPrincipalId":"principal-reviewer-b",
+                                   "approverPrincipalId":"principal-approver"}}
+                        """);
+
+        assertThat(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL,
+                "2026-07-29", "temporal-duplicate-authority")).isEmpty();
+
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL))
+                .thenReturn("""
+                        {"schemaVersion":"cloudmold.procurement-sourcing-input/v1",
+                         "supplierCandidates":[{"supplierId":"supplier-a"},
+                                               {"supplierId":"supplier-b"}],
+                         "valuationPolicies":[
+                           {"canonicalSkuId":"sku-1","valuationPolicyId":"policy-1",
+                            "valuationPolicyVersion":"2026.1","valuationPolicyHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+                           {"canonicalSkuId":"sku-2","valuationPolicyId":"policy-2",
+                            "valuationPolicyVersion":"2026.1","valuationPolicyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+                         "actors":{"creatorPrincipalId":"principal-creator",
+                                   "reviewerAPrincipalId":"principal-reviewer-a",
+                                   "reviewerBPrincipalId":"principal-reviewer-b",
+                                   "approverPrincipalId":"principal-approver"}}
+                        """);
+
+        assertThat(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL,
+                "2026-07-29", "temporal-missing-legal-entity")).isEmpty();
+
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL))
+                .thenReturn(procurementSourcingSeed("sku-1")
+                        .replace("a".repeat(64), "UNVERIFIED"));
+
+        assertThat(factory.build(162L,
+                RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL,
+                "2026-07-29", "temporal-invalid-valuation-policy")).isEmpty();
     }
 
     @Test
@@ -1233,6 +1343,12 @@ class RotatingBusinessScenarioInputFactoryTest {
     @Test
     void shouldBuildWarehouseAdmissionOnlyFromLatestVerifiedProductManagementResult() {
         mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL, "define_1"))
+                .thenReturn("{\"canonicalSpuId\":\"spu-product\",\"canonicalSkuId\":\"sku-product\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL))
+                .thenReturn(procurementSourcingSeed("sku-product"));
         when(mapper.selectLatestSuccessfulSkillTaskInput(
                 162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
                 .thenReturn(JsonUtils.toJsonString(completeAfterSaleTemplate()));
@@ -1264,8 +1380,9 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .isEqualTo("VERIFIED_ONLY");
         assertThat(input.path("merchant").path("draftCommand")
                 .path("ownerPrincipalId").asText()).isEqualTo("principal-product");
-        assertThat(input.path("replenishment").path("procurement").path("purchaseOrder")
-                .path("canonicalSkuId").asText()).isEqualTo("sku-product");
+        assertThat(input.path("replenishment").path("procurement").path("purchaseOrders")
+                .get(0).path("commands").get(0).path("command").path("purchaseOrder")
+                .path("lines").get(0).path("canonicalSkuId").asText()).isEqualTo("sku-product");
         assertThat(input.path("traffic").path("campaignCommand")
                 .path("sourceType").asText())
                 .isEqualTo("QUALITY_VERIFIED_WAREHOUSE_ADMISSION");
@@ -1604,12 +1721,20 @@ class RotatingBusinessScenarioInputFactoryTest {
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(
                 162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL, "define_1"))
                 .thenReturn("{\"canonicalSpuId\":\"spu-1\",\"canonicalSkuId\":\"sku-1\"}");
+        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
+                162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL, "define_2"))
+                .thenReturn("{\"canonicalSpuId\":\"spu-2\",\"canonicalSkuId\":\"sku-2\"}");
         when(mapper.selectLatestSuccessfulSkillTaskInput(
                 162L, RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL))
                 .thenReturn("""
                         {"definitions":[{"skuCode":"YS-BASE-BLACK-S",
-                        "barcode":"CM-BASE-BLACK-S","baseUomCode":"PCS"}]}
+                        "barcode":"CM-BASE-BLACK-S","baseUomCode":"PCS"},
+                        {"skuCode":"YS-BASE-WHITE-M",
+                        "barcode":"CM-BASE-WHITE-M","baseUomCode":"PCS"}]}
                         """);
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL))
+                .thenReturn(procurementSourcingSeed("sku-1"));
         when(mapper.selectLatestWmsCatalogProjectionSeed(162L))
                 .thenReturn(new WmsCatalogProjectionSeedRecord()
                         .setCanonicalSkuId("sku-1")
@@ -1635,5 +1760,22 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .thenReturn("""
                         {"listingId":"listing-1","offers":[{"listingOfferId":"offer-1"}]}
                         """);
+    }
+
+    private static String procurementSourcingSeed(String firstCanonicalSkuId) {
+        return """
+                {"schemaVersion":"cloudmold.procurement-sourcing-input/v1",
+                 "legalEntityId":"legal-entity-01",
+                 "supplierCandidates":[{"supplierId":"supplier-a"},{"supplierId":"supplier-b"}],
+                 "valuationPolicies":[
+                   {"canonicalSkuId":"%s","valuationPolicyId":"policy-1",
+                    "valuationPolicyVersion":"2026.1","valuationPolicyHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+                   {"canonicalSkuId":"sku-2","valuationPolicyId":"policy-2",
+                    "valuationPolicyVersion":"2026.1","valuationPolicyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+                 "actors":{"creatorPrincipalId":"principal-creator",
+                           "reviewerAPrincipalId":"principal-reviewer-a",
+                           "reviewerBPrincipalId":"principal-reviewer-b",
+                           "approverPrincipalId":"principal-approver"}}
+                """.formatted(firstCanonicalSkuId);
     }
 }

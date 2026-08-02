@@ -17,6 +17,10 @@ public class StockTransferResult {
     private String orderId;
     private String orderCode;
     private String orderStatus;
+    private String batchId;
+    private String batchNo;
+    private String batchType;
+    private Integer processedLineCount;
     private String currentStageCode;
     private String currentStageLabel;
     private Long aggregateVersion;

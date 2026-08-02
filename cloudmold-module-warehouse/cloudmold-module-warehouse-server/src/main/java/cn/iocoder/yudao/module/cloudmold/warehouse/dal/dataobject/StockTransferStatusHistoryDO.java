@@ -17,6 +17,7 @@ public class StockTransferStatusHistoryDO {
     private Long statusVersion;
     private String stageCode;
     private String stageLabel;
+    private String remark;
     private LocalDateTime changedAt;
     private LocalDateTime createdAt;
 }

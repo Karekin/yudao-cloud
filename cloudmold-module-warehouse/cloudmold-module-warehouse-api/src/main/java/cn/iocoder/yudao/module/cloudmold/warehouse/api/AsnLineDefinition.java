@@ -14,15 +14,19 @@ import java.math.BigDecimal;
 public class AsnLineDefinition {
     private String asnLineId;
     private Integer lineNo;
+    private String procurementOrderId;
+    private String procurementOrderItemId;
+    private String deliveryScheduleId;
+    private Long poReleaseVersion;
+    private String supplierId;
+    private String warehouseId;
+    private String receiptLocationId;
     private String canonicalSkuId;
     private String ownerType;
     private String ownerId;
     private String baseUomCode;
-    /** 预期收货数量 */
-    private BigDecimal expectedQuantity;
-    /** 单价（最小货币单位），从采购行透传给库存 RECEIVE 成本证据 */
-    private Long unitCostAmountMinor;
-    private String currencyCode;
-    /** 收货暂存库位：RECEIVE 落 NON_SELLABLE/PENDING_QC 余额到此 location */
-    private String stagingLocationId;
+    private BigDecimal scheduledQuantity;
+    private BigDecimal allowedOverReceiptQuantity;
+    private String tolerancePolicyVersion;
+    private String tolerancePolicyHash;
 }

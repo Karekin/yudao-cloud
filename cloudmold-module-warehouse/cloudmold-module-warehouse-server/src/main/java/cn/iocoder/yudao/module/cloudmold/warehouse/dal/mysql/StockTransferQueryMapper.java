@@ -53,6 +53,8 @@ public interface StockTransferQueryMapper {
                    r.source_warehouse_id,sw.warehouse_code AS source_warehouse_code,sw.name AS source_warehouse_name,
                    r.target_warehouse_id,tw.warehouse_code AS target_warehouse_code,tw.name AS target_warehouse_name,
                    COUNT(rl.line_id) AS line_count,SUM(rl.requested_quantity) AS total_requested_quantity,
+                   SUM(ol.outbound_quantity) AS total_outbound_quantity,
+                   SUM(ol.received_quantity) AS total_received_quantity,
                    CASE WHEN COUNT(DISTINCT rl.uom_code)=1 THEN MAX(rl.uom_code) ELSE 'MIXED' END AS uom_code,
                    r.approved_at,o.prepared_at,GREATEST(r.updated_at,COALESCE(o.updated_at,r.updated_at)) AS updated_at
             FROM cloudmold_stock_transfer_request r
@@ -64,6 +66,8 @@ public interface StockTransferQueryMapper {
               ON tw.tenant_id=r.tenant_id AND tw.warehouse_id=r.target_warehouse_id
             JOIN cloudmold_stock_transfer_request_line rl
               ON rl.tenant_id=r.tenant_id AND rl.request_id=r.request_id
+            JOIN cloudmold_stock_transfer_order_line ol
+              ON ol.tenant_id=o.tenant_id AND ol.order_id=o.order_id AND ol.line_number=rl.line_number
             WHERE r.tenant_id=#{tenantId}
             <if test="keyword != null">
               AND (r.request_code LIKE CONCAT('%',#{keyword},'%')

@@ -27,6 +27,8 @@ public class StockTransferPageItem {
     private String targetWarehouseName;
     private Integer lineCount;
     private BigDecimal totalRequestedQuantity;
+    private BigDecimal totalOutboundQuantity;
+    private BigDecimal totalReceivedQuantity;
     private String uomCode;
     private String currentStageCode;
     private String currentStageLabel;

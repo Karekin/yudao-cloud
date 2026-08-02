@@ -33,6 +33,8 @@ public class StockTransferCommand {
     private String reasonCode;
     private String remark;
     private List<LineDefinition> lines;
+    private OutboundBatchDefinition outboundBatch;
+    private ReceiptBatchDefinition receiptBatch;
 
     @Data
     @Builder
@@ -44,6 +46,57 @@ public class StockTransferCommand {
         private String canonicalSkuId;
         private BigDecimal requestedQuantity;
         private String uomCode;
+        private String remark;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class OutboundBatchDefinition {
+        private String batchId;
+        private String batchNo;
+        private String remark;
+        private List<OutboundLineDefinition> lines;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class OutboundLineDefinition {
+        private String executionLineId;
+        private Integer lineNumber;
+        private BigDecimal quantity;
+        private String lotId;
+        private String sourceLocationId;
+        private String sourceStockStatus;
+        private String sourceQualityStatus;
+        private String targetLocationId;
+        private String targetStockStatus;
+        private String targetQualityStatus;
+        private String remark;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ReceiptBatchDefinition {
+        private String batchId;
+        private String batchNo;
+        private String remark;
+        private List<ReceiptLineDefinition> lines;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ReceiptLineDefinition {
+        private String executionLineId;
+        private String outboundExecutionLineId;
+        private BigDecimal quantity;
         private String remark;
     }
 }

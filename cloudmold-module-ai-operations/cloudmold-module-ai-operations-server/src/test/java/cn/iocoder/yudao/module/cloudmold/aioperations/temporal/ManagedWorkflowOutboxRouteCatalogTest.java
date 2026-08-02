@@ -318,60 +318,68 @@ class ManagedWorkflowOutboxRouteCatalogTest {
     }
 
     @Test
-    void routesCanonicalProcurementCreationToSupplierConfirmationReadback() {
-        AutomationOutboxEventRecord created = event(
-                "procurement.order.created", "procurement_order", "procurement-1",
+    void routesCanonicalReleasedAwardBackedOrderToSupplierConfirmationReadback() {
+        AutomationOutboxEventRecord released = event(
+                "procurement.order.released", "procurement_order", "procurement-1",
                 """
-                {"order_id":"procurement-1","supplier_ref":"ERP_SUPPLIER:3",
-                 "current_status":"CREATED"}
+                {"order_id":"procurement-1","supplier_id":"supplier-3",
+                 "source_business_type":"SOURCING_AWARD","source_business_ref":"award-1",
+                 "current_status":"RELEASED","items":[{"item_id":"item-1"}]}
                 """)
-                .setSchemaVersion(1)
+                .setSchemaVersion(2)
+                .setAggregateVersion(4L)
                 .setSourceSystem("cloudmold-procurement");
-        AutomationOutboxEventRecord missingSupplier = event(
-                "procurement.order.created", "procurement_order", "procurement-2",
+        AutomationOutboxEventRecord legacySchema = event(
+                "procurement.order.released", "procurement_order", "procurement-2",
                 """
-                {"order_id":"procurement-2","current_status":"CREATED"}
+                {"order_id":"procurement-2","supplier_id":"supplier-3",
+                 "current_status":"RELEASED"}
                 """)
                 .setSchemaVersion(1)
+                .setAggregateVersion(4L)
                 .setSourceSystem("cloudmold-procurement");
 
         assertThat(ManagedWorkflowOutboxRouteCatalog.materialize(
-                "skill.cloudmold.procurement.supplier-confirmation-readback.v1", created))
+                "skill.cloudmold.procurement.supplier-confirmation-readback.v1", released))
                 .extracting(ManagedWorkflowOutboxRouteCatalog.MaterializedInput::businessKey,
                         ManagedWorkflowOutboxRouteCatalog.MaterializedInput::inputJson)
                 .containsExactly("procurement-1",
                         "{\"procurementOrderId\":\"procurement-1\"}");
         assertThat(ManagedWorkflowOutboxRouteCatalog.materialize(
                 "skill.cloudmold.procurement.supplier-confirmation-readback.v1",
-                missingSupplier)).isNull();
+                legacySchema)).isNull();
+        assertThat(ManagedWorkflowOutboxRouteCatalog.routeVersion(
+                "skill.cloudmold.procurement.supplier-confirmation-readback.v1")).isEqualTo("route-v2");
     }
 
     @Test
-    void routesCanonicalRfqCreationToSupplierSourcingDecisionReadback() {
-        AutomationOutboxEventRecord created = event(
-                "supplier.sourcing_case.created", "supplier_sourcing_case", "sourcing-1",
+    void routesCanonicalProcurementAwardToSourcingDecisionReadback() {
+        AutomationOutboxEventRecord approved = event(
+                "procurement.award.approved", "procurement_award", "award-1",
                 """
-                {"sourcing_case_id":"sourcing-1","rfq_code":"RFQ-2026-001",
-                 "request_ref":"assortment-wave-1","current_status":"OPEN"}
+                {"event_id":"event-1","snapshot_id":"award-1:v3","line_count":4}
                 """)
-                .setSchemaVersion(1)
-                .setSourceSystem("cloudmold-supplier");
-        AutomationOutboxEventRecord wrongSource = event(
-                "supplier.sourcing_case.created", "supplier_sourcing_case", "sourcing-2",
+                .setSchemaVersion(2)
+                .setAggregateVersion(3L)
+                .setSourceSystem("cloudmold-procurement");
+        AutomationOutboxEventRecord unapprovedAwardEvent = event(
+                "procurement.award.created", "procurement_award", "award-2",
                 """
-                {"sourcing_case_id":"sourcing-2","rfq_code":"RFQ-2026-002",
-                 "request_ref":"assortment-wave-2","current_status":"OPEN"}
+                {"event_id":"event-2","snapshot_id":"award-2:v1","line_count":4}
                 """)
-                .setSchemaVersion(1)
-                .setSourceSystem("legacy-erp");
+                .setSchemaVersion(2)
+                .setAggregateVersion(1L)
+                .setSourceSystem("cloudmold-procurement");
 
         assertThat(ManagedWorkflowOutboxRouteCatalog.materialize(
-                "skill.cloudmold.supplier.sourcing-decision-readback.v1", created))
+                "skill.cloudmold.procurement.sourcing-decision-readback.v1", approved))
                 .extracting(ManagedWorkflowOutboxRouteCatalog.MaterializedInput::businessKey,
                         ManagedWorkflowOutboxRouteCatalog.MaterializedInput::inputJson)
-                .containsExactly("sourcing-1", "{\"sourcingCaseId\":\"sourcing-1\"}");
+                .containsExactly("award-1", "{\"awardId\":\"award-1\"}");
         assertThat(ManagedWorkflowOutboxRouteCatalog.materialize(
-                "skill.cloudmold.supplier.sourcing-decision-readback.v1", wrongSource)).isNull();
+                "skill.cloudmold.procurement.sourcing-decision-readback.v1", unapprovedAwardEvent)).isNull();
+        assertThat(ManagedWorkflowOutboxRouteCatalog.routeVersion(
+                "skill.cloudmold.procurement.sourcing-decision-readback.v1")).isEqualTo("route-v2");
     }
 
     @Test

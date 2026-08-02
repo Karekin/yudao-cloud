@@ -15,8 +15,17 @@ class QualitySerializationContractTest {
     void everyPublicDtoIncludingNestedDefinitionsIsSerializable() {
         Stream.concat(Stream.of(QualityCommand.class, QualityResult.class,
                                 QualityConsumerEvidenceView.class,
+                                ProcurementReceiptInspectionCommand.class,
+                                ProcurementReceiptInspectionResult.class,
+                                ProcurementReceiptInspectionView.class,
                                 QualityRecallWorkflowResult.class),
-                        Stream.concat(Arrays.stream(QualityCommand.class.getDeclaredClasses()),
+                        Stream.concat(Stream.concat(
+                                                Arrays.stream(QualityCommand.class.getDeclaredClasses()),
+                                                Stream.concat(
+                                                        Arrays.stream(ProcurementReceiptInspectionCommand.class
+                                                                .getDeclaredClasses()),
+                                                        Arrays.stream(ProcurementReceiptInspectionView.class
+                                                                .getDeclaredClasses()))),
                                         Arrays.stream(QualityRecallWorkflowResult.class
                                                 .getDeclaredClasses()))
                                 .filter(type -> !type.isEnum())

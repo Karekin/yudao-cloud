@@ -6,14 +6,13 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("cloudmold_asn")
+@TableName("cloudmold_warehouse_procurement_asn")
 public class AsnDO {
     private String asnId;
     private Long tenantId;
     private String asnNo;
-    private String sourceBusinessType;
-    private String sourceBusinessRef;
-    private String supplierRef;
+    private String procurementOrderId;
+    private String supplierId;
     private String warehouseId;
     private String status;
     private Long version;

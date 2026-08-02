@@ -448,7 +448,7 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
         if ("CANCELLED".equals(stage.getProcurementOrderStatus())
                 || "CANCELLED".equals(stage.getReceiptStatus())
                 || "CANCELLED".equals(stage.getPutawayStatus())
-                || "CANCELED".equals(stage.getProjectionDocumentStatus())) {
+                || "CANCELED".equals(stage.getStockTransferStatus())) {
             mapper.updateRunBinding(request.getTenantId(), current.getTemporalRunId(), "CANCELLED",
                     "BUSINESS_CANCELLED", current.getManagedRunId(), current.getTaskId(), now());
             return current.toBuilder().status("CANCELLED").phase("COMPLETED")
@@ -497,8 +497,8 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
                                                              ReplenishmentBusinessStageView stage) {
         String domainType = stage.getProcurementOrderId() != null ? "PROCUREMENT_ORDER" : stage.getTargetType();
         String domainId = stage.getProcurementOrderId() != null ? stage.getProcurementOrderId() : stage.getRecommendationId();
-        String evidenceRef = stage.getProjectionExternalDocumentId() != null
-                ? stage.getProjectionSourceSystem() + ":" + stage.getProjectionDocumentType() + ":" + stage.getProjectionExternalDocumentId()
+        String evidenceRef = stage.getStockTransferId() != null
+                ? "cloudmold-warehouse:stock_transfer:" + stage.getStockTransferId()
                 : stage.getRecommendationId();
         return TemporalManagedBusinessResult.builder()
                 .outcomeCode(outcomeCode)
@@ -511,7 +511,7 @@ public class TemporalManagedRunActivitiesImpl implements TemporalManagedRunActiv
 
     private static boolean isBusinessStageCompleted(ReplenishmentBusinessStageView stage) {
         if ("TRANSFER_REQUEST".equals(stage.getTargetType())) {
-            return "FINISHED".equals(stage.getProjectionDocumentStatus());
+            return "COMPLETED".equals(stage.getStockTransferStatus());
         }
         return "COMPLETED".equals(stage.getSupplierConfirmationStatus())
                 && "COMPLETED".equals(stage.getAsnStatus())

@@ -1,8 +1,7 @@
 package cn.iocoder.yudao.module.cloudmold.procurement.service.reference;
 
 import cn.iocoder.yudao.module.cloudmold.catalog.api.CatalogSkuProjectionApi;
-import cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierProfileView;
-import cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierSourcingQueryApi;
+import cn.iocoder.yudao.module.cloudmold.supplier.api.SupplierProfileQueryApi;
 import cn.iocoder.yudao.module.cloudmold.warehouse.api.WarehouseReferenceValidationApi;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -10,15 +9,13 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 public class CanonicalProcurementReferenceValidationAdapter implements ProcurementReferenceValidationPort {
-    private final SupplierSourcingQueryApi supplierSourcingQueryApi;
+    private final SupplierProfileQueryApi supplierProfileQueryApi;
     private final CatalogSkuProjectionApi catalogSkuProjectionApi;
     private final WarehouseReferenceValidationApi warehouseReferenceValidationApi;
 
     @Override
     public void requireActiveSupplier(String supplierId) {
-        SupplierProfileView supplier = supplierSourcingQueryApi.requireSupplier(supplierId);
-        require("ACTIVE".equals(supplier.getStatus()), "supplier is not ACTIVE");
-        require("ADMITTED".equals(supplier.getAdmissionStatus()), "supplier is not ADMITTED");
+        supplierProfileQueryApi.requireProcurementEligibleSupplier(supplierId);
     }
 
     @Override

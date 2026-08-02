@@ -2,6 +2,9 @@ package cn.iocoder.yudao.module.cloudmold.procurement.api;
 
 public enum ProcurementOperation {
     CREATE_PURCHASE_ORDER,
+    SUBMIT_PURCHASE_ORDER,
+    APPROVE_PURCHASE_ORDER,
+    RELEASE_PURCHASE_ORDER,
     DISPATCH_PURCHASE_ORDER,
     SUPPLIER_CONFIRM_PURCHASE_ORDER,
     CANCEL_PURCHASE_ORDER,

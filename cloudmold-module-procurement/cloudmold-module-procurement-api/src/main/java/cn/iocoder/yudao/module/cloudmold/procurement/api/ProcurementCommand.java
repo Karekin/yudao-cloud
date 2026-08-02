@@ -32,6 +32,9 @@ public class ProcurementCommand {
         private String orderCode;
         private String sourceBusinessType;
         private String sourceBusinessRef;
+        private String awardId;
+        private Long awardVersion;
+        private String legalEntityId;
         private String supplierId;
         private String currencyCode;
         private Integer leadTimeDays;
@@ -53,12 +56,16 @@ public class ProcurementCommand {
     public static class PurchaseOrderLineDefinition {
         private String itemId;
         private Integer lineNumber;
+        private String awardLineId;
         private String canonicalSkuId;
         private BigDecimal orderedQuantity;
         private String uomCode;
         private String taxCode;
         private Integer taxRateBps;
         private BigDecimal unitNetPriceMinor;
+        private String valuationPolicyId;
+        private String valuationPolicyVersion;
+        private String valuationPolicyHash;
         private Long lineNetAmountMinor;
         private Long lineTaxAmountMinor;
         private Long lineGrossAmountMinor;

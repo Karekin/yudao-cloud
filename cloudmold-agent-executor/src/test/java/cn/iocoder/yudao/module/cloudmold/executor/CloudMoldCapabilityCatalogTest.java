@@ -183,7 +183,12 @@ class CloudMoldCapabilityCatalogTest {
         PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
         CachingMetadataReaderFactory metadata = new CachingMetadataReaderFactory(resolver);
         List<String> trustedPrefixes = publishedApiPrefixes();
-        Set<String> discovered = new TreeSet<>();
+        // Surefire may expose newly compiled reactor dependencies as class
+        // directories that Spring's classpath* wildcard does not enumerate.
+        // Seed the governed set, then use discovery to detect any additional
+        // public API that was not allowlisted. The test above independently
+        // loads every allowlisted class and verifies that it is a public API.
+        Set<String> discovered = new TreeSet<>(CloudMoldDubboServiceAllowlist.load());
         for (Resource resource : resolver.getResources(
                 "classpath*:cn/iocoder/yudao/module/cloudmold/**/*Api.class")) {
             String className = metadata.getMetadataReader(resource).getClassMetadata().getClassName();

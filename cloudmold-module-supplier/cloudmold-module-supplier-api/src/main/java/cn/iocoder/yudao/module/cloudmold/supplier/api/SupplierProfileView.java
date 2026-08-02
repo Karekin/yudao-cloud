@@ -18,8 +18,8 @@ public class SupplierProfileView {
     private String countryCode;
     private String capabilitySummary;
     private String riskLevel;
-    private String status;
-    private String admissionStatus;
+    private SupplierStatus status;
+    private SupplierAdmissionStatus admissionStatus;
     private String qualificationEvidenceSha256;
     private String riskEvidenceSha256;
     private Long version;

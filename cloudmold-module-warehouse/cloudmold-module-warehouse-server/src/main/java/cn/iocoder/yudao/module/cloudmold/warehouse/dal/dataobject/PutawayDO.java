@@ -6,13 +6,12 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("cloudmold_putaway")
+@TableName("cloudmold_warehouse_procurement_putaway")
 public class PutawayDO {
     private String putawayId;
     private Long tenantId;
     private String receiptId;
     private String warehouseId;
-    private String targetLocationId;
     private String status;
     private Long version;
     private LocalDateTime createdAt;

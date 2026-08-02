@@ -229,6 +229,57 @@ class SkillTaskDefinitionRegistryTest {
                     .isEqualTo("capability.cloudmold.finance.finance-close-query.require-period.v1");
             assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("CLOSED");
         });
+        SkillTaskDefinition sourcingLifecycle = workspaceRegistry.require(
+                "skill.cloudmold.procurement.sourcing-lifecycle.v1", "1.0.0");
+        assertThat(sourcingLifecycle.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(sourcingLifecycle.getOwnerRole()).isEqualTo("procurement-sourcing-operator");
+        assertThat(sourcingLifecycle.getRiskLevel()).isEqualTo("R3");
+        assertThat(sourcingLifecycle.getSteps()).hasSize(16)
+                .allSatisfy(step -> {
+                    assertThat(step.getOperationType()).isEqualTo("WRITE");
+                    assertThat(step.getApprovalRequired()).isTrue();
+                });
+        assertThat(sourcingLifecycle.getSteps().get(0).getCapabilityId()).isEqualTo(
+                "capability.cloudmold.procurement.purchase-requisition-command.create-approved.v1");
+        assertThat(sourcingLifecycle.getSteps().subList(1, 16))
+                .allSatisfy(step -> assertThat(step.getCapabilityId()).isEqualTo(
+                        "capability.cloudmold.procurement.sourcing-command.execute.v1"));
+        assertThat(sourcingLifecycle.getSteps()).extracting(SkillTaskDefinition.Step::getStepCode)
+                .containsExactly("purchase_requisition", "event_create", "event_publish",
+                        "invite_supplier_a", "invite_supplier_b", "open_quoting",
+                        "quotation_a_submit", "quotation_b_submit", "close_quoting",
+                        "evaluation_policy_create", "evaluation_a_record", "evaluation_b_record",
+                        "award_draft_create", "award_submit", "award_approve", "event_close");
+        assertThat(sourcingLifecycle.getSteps().get(14).getArguments().toString())
+                .contains("$input.sourcingCommands.13.actorPrincipalId");
+        SkillTaskDefinition procurementOrder = workspaceRegistry.require(
+                "skill.cloudmold.procurement.order-lifecycle.v1", "1.0.0");
+        assertThat(procurementOrder.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(procurementOrder.getOwnerRole()).isEqualTo("procurement-order-operator");
+        assertThat(procurementOrder.getSteps()).hasSize(12)
+                .allSatisfy(step -> {
+                    assertThat(step.getOperationType()).isEqualTo("WRITE");
+                    assertThat(step.getApprovalRequired()).isTrue();
+                    assertThat(step.getCapabilityId()).isEqualTo(
+                            "capability.cloudmold.procurement.procurement-command.execute.v1");
+                });
+        assertThat(procurementOrder.getSteps()).extracting(SkillTaskDefinition.Step::getStepCode)
+                .containsExactly("purchase_order_a_create", "purchase_order_a_submit",
+                        "purchase_order_a_approve", "purchase_order_a_release",
+                        "purchase_order_a_dispatch", "purchase_order_a_supplier_confirm",
+                        "purchase_order_b_create", "purchase_order_b_submit",
+                        "purchase_order_b_approve", "purchase_order_b_release",
+                        "purchase_order_b_dispatch", "purchase_order_b_supplier_confirm");
+        SkillTaskDefinition sourcingDecision = workspaceRegistry.require(
+                "skill.cloudmold.procurement.sourcing-decision-readback.v1", "1.0.0");
+        assertThat(sourcingDecision.getRiskLevel()).isEqualTo("R1");
+        assertThat(sourcingDecision.getSteps()).singleElement().satisfies(step -> {
+            assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
+            assertThat(step.getOperationType()).isEqualTo("READ");
+            assertThat(step.getCapabilityId()).isEqualTo(
+                    "capability.cloudmold.procurement.sourcing-query.require-award.v1");
+            assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("APPROVED");
+        });
         SkillTaskDefinition financeLifecycle = workspaceRegistry.require(
                 "skill.cloudmold.finance.close-lifecycle.v1", "1.0.0");
         assertThat(financeLifecycle.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
@@ -576,7 +627,7 @@ class SkillTaskDefinitionRegistryTest {
                 "skill.cloudmold.risk.dispute-readback.v1",
                 "skill.cloudmold.payment.reconciliation-readback.v1",
                 "skill.cloudmold.procurement.supplier-confirmation-readback.v1",
-                "skill.cloudmold.supplier.sourcing-decision-readback.v1",
+                "skill.cloudmold.procurement.sourcing-decision-readback.v1",
                 "skill.cloudmold.finance.close-readiness.v1",
                 "skill.cloudmold.listing.lifecycle-readback.v1",
                 "skill.cloudmold.warehouse.allocation-transfer-readback.v1",

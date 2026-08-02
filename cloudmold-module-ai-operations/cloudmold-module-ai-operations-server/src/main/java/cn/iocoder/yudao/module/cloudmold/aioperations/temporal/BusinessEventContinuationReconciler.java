@@ -74,12 +74,12 @@ public class BusinessEventContinuationReconciler implements ApplicationListener<
         String purchaseOrder = stage.getProcurementOrderStatus();
         String receipt = stage.getReceiptStatus();
         String putaway = stage.getPutawayStatus();
-        String projectionDocument = stage.getProjectionDocumentStatus();
+        String stockTransfer = stage.getStockTransferStatus();
         if ("CANCELLED".equals(purchaseOrder) || "CANCELLED".equals(receipt)
-                || "CANCELLED".equals(putaway) || "CANCELED".equals(projectionDocument)) {
+                || "CANCELLED".equals(putaway) || "CANCELED".equals(stockTransfer)) {
             return true;
         }
         return "CLOSED".equals(purchaseOrder) || "COMPLETED".equals(putaway)
-                || "FINISHED".equals(projectionDocument);
+                || "COMPLETED".equals(stockTransfer);
     }
 }

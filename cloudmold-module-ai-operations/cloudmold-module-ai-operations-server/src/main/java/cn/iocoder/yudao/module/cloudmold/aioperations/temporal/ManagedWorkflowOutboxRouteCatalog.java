@@ -45,9 +45,9 @@ final class ManagedWorkflowOutboxRouteCatalog {
             Map.entry("skill.cloudmold.payment.reconciliation-readback.v1",
                     Set.of("payment.status.changed")),
             Map.entry("skill.cloudmold.procurement.supplier-confirmation-readback.v1",
-                    Set.of("procurement.order.created")),
-            Map.entry("skill.cloudmold.supplier.sourcing-decision-readback.v1",
-                    Set.of("supplier.sourcing_case.created")),
+                    Set.of("procurement.order.released")),
+            Map.entry("skill.cloudmold.procurement.sourcing-decision-readback.v1",
+                    Set.of("procurement.award.approved")),
             Map.entry("skill.cloudmold.finance.close-readiness.v1",
                     Set.of("finance.accounting_period.opened")),
             Map.entry("skill.cloudmold.engagement.growth-experiment-readback.v1",
@@ -95,6 +95,8 @@ final class ManagedWorkflowOutboxRouteCatalog {
                  "skill.cloudmold.quality.recall-readback.v1",
                  "skill.cloudmold.risk.dispute-readback.v1",
                  "skill.cloudmold.payment.reconciliation-readback.v1",
+                 "skill.cloudmold.procurement.supplier-confirmation-readback.v1",
+                 "skill.cloudmold.procurement.sourcing-decision-readback.v1",
                  "skill.cloudmold.warehouse.inbound-readback.v1",
                  "skill.cloudmold.listing.lifecycle-readback.v1" -> "route-v2";
             default -> "route-v1";
@@ -249,33 +251,40 @@ final class ManagedWorkflowOutboxRouteCatalog {
                 businessKey = paymentId;
             }
             case "skill.cloudmold.procurement.supplier-confirmation-readback.v1" -> {
-                if (event.getSchemaVersion() == null || event.getSchemaVersion() != 1
+                if (event.getSchemaVersion() == null || event.getSchemaVersion() != 2
                         || !"cloudmold-procurement".equals(event.getSourceSystem())
-                        || !"procurement_order".equals(event.getAggregateType())) {
+                        || !"procurement_order".equals(event.getAggregateType())
+                        || event.getAggregateVersion() == null || event.getAggregateVersion() != 4L
+                        || !"RELEASED".equals(firstText(payload, "current_status", null))
+                        || !"SOURCING_AWARD".equals(firstText(payload, "source_business_type", null))
+                        || !payload.path("items").isArray() || payload.path("items").isEmpty()) {
                     return null;
                 }
                 String procurementOrderId = firstText(payload, "order_id", event.getAggregateId());
-                String supplierRef = firstText(payload, "supplier_ref", null);
-                if (blank(procurementOrderId) || blank(supplierRef)) {
+                String supplierId = firstText(payload, "supplier_id", null);
+                String awardId = firstText(payload, "source_business_ref", null);
+                if (blank(procurementOrderId) || blank(supplierId) || blank(awardId)) {
                     return null;
                 }
                 input.put("procurementOrderId", procurementOrderId);
                 businessKey = procurementOrderId;
             }
-            case "skill.cloudmold.supplier.sourcing-decision-readback.v1" -> {
-                if (event.getSchemaVersion() == null || event.getSchemaVersion() != 1
-                        || !"cloudmold-supplier".equals(event.getSourceSystem())
-                        || !"supplier_sourcing_case".equals(event.getAggregateType())) {
+            case "skill.cloudmold.procurement.sourcing-decision-readback.v1" -> {
+                if (event.getSchemaVersion() == null || event.getSchemaVersion() != 2
+                        || !"cloudmold-procurement".equals(event.getSourceSystem())
+                        || !"procurement_award".equals(event.getAggregateType())
+                        || event.getAggregateVersion() == null || event.getAggregateVersion() != 3L) {
                     return null;
                 }
-                String sourcingCaseId = firstText(payload, "sourcing_case_id", event.getAggregateId());
-                String rfqCode = firstText(payload, "rfq_code", null);
-                String requestRef = firstText(payload, "request_ref", null);
-                if (blank(sourcingCaseId) || blank(rfqCode) || blank(requestRef)) {
+                String awardId = event.getAggregateId();
+                String eventId = firstText(payload, "event_id", null);
+                String snapshotId = firstText(payload, "snapshot_id", null);
+                if (blank(awardId) || blank(eventId)
+                        || !(awardId + ":v3").equals(snapshotId)) {
                     return null;
                 }
-                input.put("sourcingCaseId", sourcingCaseId);
-                businessKey = sourcingCaseId;
+                input.put("awardId", awardId);
+                businessKey = awardId;
             }
             case "skill.cloudmold.finance.close-readiness.v1" -> {
                 if (event.getSchemaVersion() == null || event.getSchemaVersion() != 1
@@ -408,10 +417,10 @@ final class ManagedWorkflowOutboxRouteCatalog {
         return new MaterializedInput(businessKey, JsonUtils.toJsonString(input));
     }
 
-    private static String firstText(JsonNode payload, String field, String fallback) {
+    private static String firstText(JsonNode payload, String field, String defaultValue) {
         JsonNode value = payload.get(field);
         return value != null && value.isTextual() && !value.asText().isBlank()
-                ? value.asText() : fallback;
+                ? value.asText() : defaultValue;
     }
 
     private static boolean blank(String value) {

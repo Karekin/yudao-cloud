@@ -60,8 +60,8 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.payment.reconciliation-readback.v1",
             "skill.cloudmold.procurement.supplier-confirmation-readback.v1",
             "skill.cloudmold.procurement.order-lifecycle.v1",
-            "skill.cloudmold.supplier.sourcing-decision-readback.v1",
-            "skill.cloudmold.supplier.sourcing-lifecycle.v1",
+            "skill.cloudmold.procurement.sourcing-decision-readback.v1",
+            "skill.cloudmold.procurement.sourcing-lifecycle.v1",
             "skill.cloudmold.quality.inspection-recall-lifecycle.v1",
             "skill.cloudmold.quality.recall-readback.v1",
             "skill.cloudmold.risk.dispute-readback.v1",
@@ -97,7 +97,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.merchant.managed-growth-lifecycle.v1",
             "skill.cloudmold.merchant-experience.rectification-lifecycle.v1",
             "skill.cloudmold.procurement.order-lifecycle.v1",
-            "skill.cloudmold.supplier.sourcing-lifecycle.v1",
+            "skill.cloudmold.procurement.sourcing-lifecycle.v1",
             "skill.cloudmold.supply-planning.prepare.v1"
             ,"skill.cloudmold.wms.operations.v1"
             ,"skill.cloudmold.supply.replenishment-lifecycle.v1"
@@ -138,7 +138,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.merchant.managed-growth-lifecycle.v1",
             "skill.cloudmold.merchant-experience.rectification-lifecycle.v1",
             "skill.cloudmold.procurement.order-lifecycle.v1",
-            "skill.cloudmold.supplier.sourcing-lifecycle.v1"
+            "skill.cloudmold.procurement.sourcing-lifecycle.v1"
             ,"skill.cloudmold.wms.operations.v1"
             ,"skill.cloudmold.supply.replenishment-lifecycle.v1"
             ,"skill.cloudmold.supply.warehouse-admission-lifecycle.v1"

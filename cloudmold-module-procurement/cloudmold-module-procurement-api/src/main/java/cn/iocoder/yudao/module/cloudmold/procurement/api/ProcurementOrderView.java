@@ -57,6 +57,9 @@ public class ProcurementOrderView {
         private String taxCode;
         private Integer taxRateBps;
         private BigDecimal unitNetPriceMinor;
+        private String valuationPolicyId;
+        private String valuationPolicyVersion;
+        private String valuationPolicyHash;
         private Long lineNetAmountMinor;
         private Long lineTaxAmountMinor;
         private Long lineGrossAmountMinor;

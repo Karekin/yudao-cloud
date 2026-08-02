@@ -55,6 +55,9 @@ class ProcurementQueryServiceTest {
                         .setTaxCode("VAT13")
                         .setTaxRateBps(1300)
                         .setUnitNetPriceMinor(new BigDecimal("1000.000000"))
+                        .setValuationPolicyId("valuation-policy-01")
+                        .setValuationPolicyVersion("v1")
+                        .setValuationPolicyHash("a".repeat(64))
                         .setLineNetAmountMinor(12000L)
                         .setLineTaxAmountMinor(1560L)
                         .setLineGrossAmountMinor(13560L),
@@ -68,6 +71,9 @@ class ProcurementQueryServiceTest {
                         .setTaxCode("VAT13")
                         .setTaxRateBps(1300)
                         .setUnitNetPriceMinor(new BigDecimal("1000.000000"))
+                        .setValuationPolicyId("valuation-policy-02")
+                        .setValuationPolicyVersion("v2")
+                        .setValuationPolicyHash("b".repeat(64))
                         .setLineNetAmountMinor(8000L)
                         .setLineTaxAmountMinor(1040L)
                         .setLineGrossAmountMinor(9040L)));
@@ -92,5 +98,8 @@ class ProcurementQueryServiceTest {
         assertThat(result.getSupplierId()).isEqualTo("supplier-01");
         assertThat(result.getItems()).hasSize(2);
         assertThat(result.getItems().get(0).getSchedules()).hasSize(1);
+        assertThat(result.getItems().get(0).getValuationPolicyId()).isEqualTo("valuation-policy-01");
+        assertThat(result.getItems().get(1).getValuationPolicyVersion()).isEqualTo("v2");
+        assertThat(result.getItems().get(1).getValuationPolicyHash()).isEqualTo("b".repeat(64));
     }
 }

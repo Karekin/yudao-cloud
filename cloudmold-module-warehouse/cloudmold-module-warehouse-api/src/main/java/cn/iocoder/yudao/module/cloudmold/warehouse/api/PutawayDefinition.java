@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -12,7 +14,7 @@ import lombok.NoArgsConstructor;
 public class PutawayDefinition {
     private String putawayId;
     private String receiptId;
-    /** 上架最终库位 */
-    private String targetLocationId;
+    private String warehouseId;
+    private List<PutawayLineDefinition> lines;
     private Long expectedVersion;
 }

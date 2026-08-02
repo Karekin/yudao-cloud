@@ -44,6 +44,23 @@ public interface InventoryV3BalanceMapper extends BaseMapperX<InventoryV3Balance
                                                    @Param("stockStatus") String stockStatus,
                                                    @Param("qualityStatus") String qualityStatus);
 
+    @Select("""
+            SELECT * FROM cloudmold_inventory_balance_v3
+            WHERE tenant_id=#{tenantId} AND owner_type=#{ownerType} AND owner_id=#{ownerId}
+              AND canonical_sku_id=#{skuId} AND warehouse_id=#{warehouseId} AND location_id=#{locationId}
+              AND (lot_id=#{lotId} OR (lot_id IS NULL AND #{lotId} IS NULL))
+              AND stock_status=#{stockStatus} AND quality_status=#{qualityStatus}
+            """)
+    InventoryV3BalanceDO selectDimension(@Param("tenantId") Long tenantId,
+                                          @Param("ownerType") String ownerType,
+                                          @Param("ownerId") String ownerId,
+                                          @Param("skuId") String skuId,
+                                          @Param("warehouseId") String warehouseId,
+                                          @Param("locationId") String locationId,
+                                          @Param("lotId") String lotId,
+                                          @Param("stockStatus") String stockStatus,
+                                          @Param("qualityStatus") String qualityStatus);
+
     @Select("SELECT * FROM cloudmold_inventory_balance_v3 WHERE tenant_id=#{tenantId} AND balance_id=#{balanceId} FOR UPDATE")
     InventoryV3BalanceDO selectByIdForUpdate(@Param("tenantId") Long tenantId, @Param("balanceId") String balanceId);
 

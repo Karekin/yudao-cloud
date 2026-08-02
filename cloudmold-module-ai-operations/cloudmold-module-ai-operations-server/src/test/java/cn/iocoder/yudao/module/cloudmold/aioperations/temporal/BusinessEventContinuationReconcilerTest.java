@@ -38,7 +38,9 @@ class BusinessEventContinuationReconcilerTest {
                 .thenReturn(ReplenishmentBusinessStageView.builder()
                         .recommendationId("recommendation-transfer")
                         .targetType("TRANSFER_REQUEST")
-                        .projectionDocumentStatus("FINISHED")
+                        .stockTransferId("stock-transfer-1")
+                        .stockTransferNo("ST-1")
+                        .stockTransferStatus("COMPLETED")
                         .build());
 
         reconciler.reconcile();
@@ -59,7 +61,9 @@ class BusinessEventContinuationReconcilerTest {
                 .thenReturn(ReplenishmentBusinessStageView.builder()
                         .recommendationId("recommendation-transfer")
                         .targetType("TRANSFER_REQUEST")
-                        .projectionDocumentStatus("PREPARE")
+                        .stockTransferId("stock-transfer-1")
+                        .stockTransferNo("ST-1")
+                        .stockTransferStatus("CREATED")
                         .build());
 
         reconciler.reconcile();
