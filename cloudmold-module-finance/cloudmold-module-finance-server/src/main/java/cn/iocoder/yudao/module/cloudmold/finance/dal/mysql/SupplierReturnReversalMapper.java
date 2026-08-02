@@ -385,9 +385,9 @@ public interface SupplierReturnReversalMapper {
 
     @Update("""
             UPDATE cloudmold_finance_inventory_valuation_layer
-            SET remaining_quantity=remaining_quantity-#{quantity},
+            SET status=CASE WHEN remaining_quantity=#{quantity} THEN 'REVERSED' ELSE 'OPEN' END,
+                remaining_quantity=remaining_quantity-#{quantity},
                 remaining_cost_amount_minor=remaining_cost_amount_minor-#{amountMinor},
-                status=CASE WHEN remaining_quantity-#{quantity}=0 THEN 'CLOSED' ELSE 'OPEN' END,
                 version=version+1,updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND valuation_layer_id=#{valuationLayerId}
               AND version=#{expectedVersion}
