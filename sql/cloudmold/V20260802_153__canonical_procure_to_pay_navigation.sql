@@ -56,64 +56,58 @@ CREATE TEMPORARY TABLE cloudmold_v153_contract_guard (
 
 INSERT INTO cloudmold_v153_contract_guard (guard_value)
 SELECT CASE WHEN COUNT(*) = 0 THEN 'OK' ELSE 'FAIL' END
+FROM system_menu existing
+JOIN cloudmold_v153_menu_contract expected ON expected.id = existing.id
+WHERE NOT (
+  existing.name = expected.name
+  AND existing.permission = expected.permission
+  AND existing.type = expected.type
+  AND existing.sort = expected.sort
+  AND existing.parent_id = expected.parent_id
+  AND existing.path = expected.path
+  AND existing.icon = expected.icon
+  AND existing.component <=> expected.component
+  AND existing.component_name <=> expected.component_name
+  AND existing.status = 0
+  AND existing.visible = b'1'
+  AND existing.keep_alive = b'1'
+  AND existing.always_show = b'1'
+  AND existing.creator = 'CloudMold'
+  AND existing.deleted = b'0'
+);
+
+INSERT INTO cloudmold_v153_contract_guard (guard_value)
+SELECT CASE WHEN COUNT(*) = 0 THEN 'OK' ELSE 'FAIL' END
+FROM system_menu existing
+JOIN cloudmold_v153_menu_contract expected
+  ON expected.type = 2
+ AND existing.parent_id = expected.parent_id
+ AND existing.path = expected.path
+ AND existing.id <> expected.id
+WHERE existing.deleted = b'0';
+
+INSERT INTO cloudmold_v153_contract_guard (guard_value)
+SELECT CASE WHEN COUNT(*) = 0 THEN 'OK' ELSE 'FAIL' END
+FROM system_menu existing
+JOIN cloudmold_v153_menu_contract expected
+  ON expected.type = 2
+ AND existing.component = expected.component
+ AND existing.id <> expected.id
+WHERE existing.deleted = b'0';
+
+INSERT INTO cloudmold_v153_contract_guard (guard_value)
+SELECT CASE WHEN COUNT(*) = 0 THEN 'OK' ELSE 'FAIL' END
 FROM (
-  SELECT existing.id
-  FROM system_menu existing
-  JOIN cloudmold_v153_menu_contract expected ON expected.id = existing.id
-  WHERE NOT (
-    existing.name = expected.name
-    AND existing.permission = expected.permission
-    AND existing.type = expected.type
-    AND existing.sort = expected.sort
-    AND existing.parent_id = expected.parent_id
-    AND existing.path = expected.path
-    AND existing.icon = expected.icon
-    AND existing.component <=> expected.component
-    AND existing.component_name <=> expected.component_name
-    AND existing.status = 0
-    AND existing.visible = b'1'
-    AND existing.keep_alive = b'1'
-    AND existing.always_show = b'1'
-    AND existing.creator = 'CloudMold'
-    AND existing.deleted = b'0'
-  )
-
-  UNION ALL
-
-  SELECT existing.id
-  FROM system_menu existing
-  JOIN cloudmold_v153_menu_contract expected
-    ON expected.type = 2
-   AND existing.parent_id = expected.parent_id
-   AND existing.path = expected.path
-   AND existing.id <> expected.id
-  WHERE existing.deleted = b'0'
-
-  UNION ALL
-
-  SELECT existing.id
-  FROM system_menu existing
-  JOIN cloudmold_v153_menu_contract expected
-    ON expected.type = 2
-   AND existing.component = expected.component
-   AND existing.id <> expected.id
-  WHERE existing.deleted = b'0'
-
-  UNION ALL
-
-  SELECT parent.id
-  FROM (
-    SELECT 9100000000140 AS id
-    UNION ALL SELECT 9100000000150
-    UNION ALL SELECT 9100000000170
-  ) required
-  LEFT JOIN system_menu parent ON parent.id = required.id
-  WHERE parent.id IS NULL
-     OR parent.type <> 1
-     OR parent.status <> 0
-     OR parent.visible <> b'1'
-     OR parent.deleted <> b'0'
-) conflicts;
+  SELECT 9100000000140 AS id
+  UNION ALL SELECT 9100000000150
+  UNION ALL SELECT 9100000000170
+) required
+LEFT JOIN system_menu parent ON parent.id = required.id
+WHERE parent.id IS NULL
+   OR parent.type <> 1
+   OR parent.status <> 0
+   OR parent.visible <> b'1'
+   OR parent.deleted <> b'0';
 
 INSERT INTO system_menu
   (id,name,permission,type,sort,parent_id,path,icon,component,component_name,
