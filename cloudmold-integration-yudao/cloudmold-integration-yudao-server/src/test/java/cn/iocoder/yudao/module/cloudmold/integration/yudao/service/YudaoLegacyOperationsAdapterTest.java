@@ -117,26 +117,6 @@ class YudaoLegacyOperationsAdapterTest {
     }
 
     @Test
-    void shouldTranslateProcurementCommandWithoutLeakingUpstreamVo() {
-        LocalDateTime orderTime = LocalDateTime.of(2026, 7, 18, 9, 0);
-        YudaoErpCommandApi.PurchaseOrderCommand command = new YudaoErpCommandApi.PurchaseOrderCommand(
-                "purchase-create-001", 11L, 12L, orderTime.toString(), new BigDecimal("98.5"), new BigDecimal("10.00"), "skill-run",
-                List.of(new YudaoErpCommandApi.PurchaseOrderLine(21L, 22L,
-                        new BigDecimal("19.90"), new BigDecimal("2"), new BigDecimal("13"), "line")));
-        when(purchaseOrderService.createPurchaseOrder(org.mockito.ArgumentMatchers.any())).thenReturn(31L);
-
-        assertThat(adapter.createPurchaseOrder(command)).isEqualTo(31L);
-        ArgumentCaptor<ErpPurchaseOrderSaveReqVO> captor = ArgumentCaptor.forClass(ErpPurchaseOrderSaveReqVO.class);
-        verify(purchaseOrderService).createPurchaseOrder(captor.capture());
-        assertThat(captor.getValue().getSupplierId()).isEqualTo(11L);
-        assertThat(captor.getValue().getOrderTime()).isEqualTo(orderTime);
-        assertThat(captor.getValue().getItems()).singleElement().satisfies(item -> {
-            assertThat(item.getProductId()).isEqualTo(21L);
-            assertThat(item.getCount()).isEqualByComparingTo("2");
-        });
-    }
-
-    @Test
     void shouldCreateCustomerAsAnIdempotentRpcPrerequisite() {
         when(customerService.createCustomer(any())).thenReturn(71L);
         var command = new YudaoErpCommandApi.CustomerCommand(

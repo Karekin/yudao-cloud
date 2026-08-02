@@ -646,6 +646,7 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         String targetType = upper(input.getTargetType());
         validateExecutionFields(targetType, input.getOwnerType(), input.getOwnerId(),
                 input.getSourceWarehouseId(), input.getTargetWarehouseId());
+        validatePurchaseAuthority(targetType, input);
         requireCode(input.getPolicyCode(), "policyCode");
         require(upper(input.getPolicyCode()).length() <= 64,
                 "policyCode exceeds 64 characters");
@@ -670,6 +671,12 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                 .setOwnerType(input.getOwnerType()).setOwnerId(input.getOwnerId())
                 .setSourceWarehouseId(input.getSourceWarehouseId())
                 .setTargetWarehouseId(input.getTargetWarehouseId())
+                .setLegalEntityId(input.getLegalEntityId())
+                .setTaxCalculationPolicyCode(upper(input.getTaxCalculationPolicyCode()))
+                .setRoundingPolicyCode(upper(input.getRoundingPolicyCode()))
+                .setValuationPolicyId(input.getValuationPolicyId())
+                .setValuationPolicyVersion(input.getValuationPolicyVersion())
+                .setValuationPolicyHash(input.getValuationPolicyHash())
                 .setProposedByPrincipalId(input.getProposedByPrincipalId())
                 .setPolicyCode(upper(input.getPolicyCode())).setPolicySha256(input.getPolicySha256())
                 .setStatus("READY").setVersion(1L).setProposedAt(now)
@@ -685,6 +692,12 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                         "owner_type", input.getOwnerType(), "owner_id", input.getOwnerId(),
                         "source_warehouse_id", input.getSourceWarehouseId(),
                         "target_warehouse_id", input.getTargetWarehouseId(),
+                        "legal_entity_id", input.getLegalEntityId(),
+                        "tax_calculation_policy_code", input.getTaxCalculationPolicyCode(),
+                        "rounding_policy_code", input.getRoundingPolicyCode(),
+                        "valuation_policy_id", input.getValuationPolicyId(),
+                        "valuation_policy_version", input.getValuationPolicyVersion(),
+                        "valuation_policy_hash", input.getValuationPolicyHash(),
                         "proposed_by_principal_id", input.getProposedByPrincipalId(),
                         "policy_code", proposal.getPolicyCode(),
                         "policy_sha256", proposal.getPolicySha256(),
@@ -728,12 +741,20 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                                     .requisitionCode(canonicalPurchaseRequisitionCode(conversionId))
                                     .sourceBusinessType("REPLENISHMENT")
                                     .sourceBusinessRef(row.getRecommendationId())
+                                    .legalEntityId(executionProposal.getLegalEntityId())
+                                    .taxCalculationPolicyCode(
+                                            executionProposal.getTaxCalculationPolicyCode())
+                                    .roundingPolicyCode(executionProposal.getRoundingPolicyCode())
                                     .reasonCode("REPLENISHMENT_APPROVED")
                                     .remark("replenishment-conversion:" + conversionId)
                                     .lines(List.of(PurchaseRequisitionCommand.LineDefinition.builder()
                                             .lineId(requisitionId + ":line:10").lineNumber(10)
                                             .canonicalSkuId(row.getCanonicalSkuId())
                                             .requestedQuantity(row.getSuggestedQuantity()).uomCode(row.getUomCode())
+                                            .valuationPolicyId(executionProposal.getValuationPolicyId())
+                                            .valuationPolicyVersion(
+                                                    executionProposal.getValuationPolicyVersion())
+                                            .valuationPolicyHash(executionProposal.getValuationPolicyHash())
                                             .schedules(List.of(PurchaseRequisitionCommand.DeliveryScheduleDefinition.builder()
                                                     .scheduleId(requisitionId + ":line:10:schedule:1")
                                                     .scheduleNumber(1).canonicalWarehouseId(row.getWarehouseId())
@@ -1158,6 +1179,27 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         requireRef(targetWarehouseId, "targetWarehouseId", 128);
         require(!sourceWarehouseId.equals(targetWarehouseId),
                 "source and target warehouse must differ");
+    }
+
+    private static void validatePurchaseAuthority(
+            String targetType,
+            SupplyPlanningCommand.ReplenishmentExecutionProposalDefinition input) {
+        if ("PURCHASE_REQUEST".equals(targetType)) {
+            requireRef(input.getLegalEntityId(), "legalEntityId", 128);
+            requireCode(input.getTaxCalculationPolicyCode(), "taxCalculationPolicyCode");
+            requireCode(input.getRoundingPolicyCode(), "roundingPolicyCode");
+            requireRef(input.getValuationPolicyId(), "valuationPolicyId", 128);
+            requireRef(input.getValuationPolicyVersion(), "valuationPolicyVersion", 64);
+            requireSha256(input.getValuationPolicyHash(), "valuationPolicyHash");
+            return;
+        }
+        require(input.getLegalEntityId() == null
+                        && input.getTaxCalculationPolicyCode() == null
+                        && input.getRoundingPolicyCode() == null
+                        && input.getValuationPolicyId() == null
+                        && input.getValuationPolicyVersion() == null
+                        && input.getValuationPolicyHash() == null,
+                "stock transfer proposal must not contain purchase authority fields");
     }
 
     private static void requireExecutionProposalMatches(

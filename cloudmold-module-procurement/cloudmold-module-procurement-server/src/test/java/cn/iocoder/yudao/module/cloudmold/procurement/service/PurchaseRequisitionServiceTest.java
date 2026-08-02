@@ -76,6 +76,9 @@ class PurchaseRequisitionServiceTest {
         verify(mapper).insertPurchaseRequisition(argThat(header ->
                 header.getStatus().equals("APPROVED")
                         && header.getSourceBusinessType().equals("REPLENISHMENT")
+                        && header.getLegalEntityId().equals("legal-entity-01")
+                        && header.getTaxCalculationPolicyCode().equals("STANDARD_V1")
+                        && header.getRoundingPolicyCode().equals("HALF_UP")
                         && header.getSourceBusinessRef().equals("recommendation-01")));
         verify(outbox).append(argThat(event ->
                 event.getEventType().equals("procurement.purchase_requisition.approved")
@@ -93,6 +96,9 @@ class PurchaseRequisitionServiceTest {
                 .requisitionCode("PR-CM-CONVERSION01")
                 .sourceBusinessType("REPLENISHMENT")
                 .sourceBusinessRef("recommendation-01")
+                .legalEntityId("legal-entity-01")
+                .taxCalculationPolicyCode("STANDARD_V1")
+                .roundingPolicyCode("HALF_UP")
                 .reasonCode("REPLENISHMENT_APPROVED")
                 .lines(List.of(PurchaseRequisitionCommand.LineDefinition.builder()
                         .lineId("purchase-requisition:conversion-01:line:10")
@@ -100,6 +106,9 @@ class PurchaseRequisitionServiceTest {
                         .canonicalSkuId("sku-01")
                         .requestedQuantity(new BigDecimal("12.500000"))
                         .uomCode("PCS")
+                        .valuationPolicyId("valuation-policy-01")
+                        .valuationPolicyVersion("v1")
+                        .valuationPolicyHash("a".repeat(64))
                         .schedules(List.of(PurchaseRequisitionCommand.DeliveryScheduleDefinition.builder()
                                 .scheduleId("purchase-requisition:conversion-01:line:10:schedule:1")
                                 .scheduleNumber(1)

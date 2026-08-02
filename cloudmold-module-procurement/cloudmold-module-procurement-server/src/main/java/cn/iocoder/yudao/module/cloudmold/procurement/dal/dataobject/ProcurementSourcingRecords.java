@@ -129,13 +129,17 @@ public final class ProcurementSourcingRecords {
     @Data @Accessors(chain = true)
     public static class AwardSnapshot {
         private String snapshotId; private Long tenantId; private String awardId; private Long awardVersion;
-        private String eventId; private Long eventVersion; private String status; private String decisionReasonCode;
+        private String eventId; private Long eventVersion; private String requisitionId; private Long requisitionVersion;
+        private String legalEntityId; private String taxCalculationPolicyCode; private String roundingPolicyCode;
+        private String status; private String decisionReasonCode;
         private String approvedByPrincipalId; private LocalDateTime approvedAt; private LocalDateTime createdAt;
     }
 
     @Data @Accessors(chain = true)
     public static class AwardSnapshotLine extends AwardLine {
         private String snapshotLineId; private String snapshotId;
+        private String requisitionLineId; private String requisitionScheduleId;
+        private String valuationPolicyId; private String valuationPolicyVersion; private String valuationPolicyHash;
     }
 
     @Data @Accessors(chain = true)

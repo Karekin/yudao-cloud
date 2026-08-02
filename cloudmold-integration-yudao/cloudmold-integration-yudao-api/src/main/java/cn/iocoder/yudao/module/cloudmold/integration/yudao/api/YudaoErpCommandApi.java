@@ -14,8 +14,6 @@ public interface YudaoErpCommandApi {
 
     Long createWarehouse(WarehouseCommand command);
 
-    Long createPurchaseOrder(PurchaseOrderCommand command);
-
     Boolean setPurchaseOrderStatus(DocumentStatusCommand command);
 
     Long createPurchaseInFromOrder(PurchaseInFromOrderCommand command);
@@ -56,15 +54,6 @@ public interface YudaoErpCommandApi {
     record WarehouseCommand(String idempotencyKey, String name, String address, Long sort,
                             String remark, String principal, BigDecimal warehousePrice,
                             BigDecimal truckagePrice, Integer status) implements Serializable {
-    }
-
-    record PurchaseOrderCommand(String idempotencyKey, Long supplierId, Long accountId, String orderTime,
-                                BigDecimal discountPercent, BigDecimal depositPrice, String remark,
-                                List<PurchaseOrderLine> items) implements Serializable {
-    }
-
-    record PurchaseOrderLine(Long productId, Long productUnitId, BigDecimal productPrice,
-                             BigDecimal count, BigDecimal taxPercent, String remark) implements Serializable {
     }
 
     record PurchaseInFromOrderCommand(String idempotencyKey, Long orderId, Long warehouseId,

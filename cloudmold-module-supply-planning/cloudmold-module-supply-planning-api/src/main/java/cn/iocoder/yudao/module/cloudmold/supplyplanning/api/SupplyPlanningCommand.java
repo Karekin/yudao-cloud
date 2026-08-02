@@ -190,6 +190,12 @@ public class SupplyPlanningCommand {
         private String ownerId;
         private String sourceWarehouseId;
         private String targetWarehouseId;
+        private String legalEntityId;
+        private String taxCalculationPolicyCode;
+        private String roundingPolicyCode;
+        private String valuationPolicyId;
+        private String valuationPolicyVersion;
+        private String valuationPolicyHash;
         private String proposedByPrincipalId;
         private String policyCode;
         private String policySha256;

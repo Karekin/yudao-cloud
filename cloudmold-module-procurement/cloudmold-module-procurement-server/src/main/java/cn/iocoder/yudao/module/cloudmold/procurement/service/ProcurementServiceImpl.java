@@ -93,7 +93,6 @@ public class ProcurementServiceImpl implements ProcurementCommandApi {
         }
 
         Outcome outcome = switch (command.getOperation()) {
-            case CREATE_PURCHASE_ORDER -> createOrder(tenantId, operationId, command, actorPrincipalId, now);
             case SUBMIT_PURCHASE_ORDER -> submitOrder(tenantId, operationId, command, actorPrincipalId, now);
             case APPROVE_PURCHASE_ORDER -> approveOrder(tenantId, operationId, command, actorPrincipalId, now);
             case RELEASE_PURCHASE_ORDER -> releaseOrder(tenantId, operationId, command, actorPrincipalId, now);

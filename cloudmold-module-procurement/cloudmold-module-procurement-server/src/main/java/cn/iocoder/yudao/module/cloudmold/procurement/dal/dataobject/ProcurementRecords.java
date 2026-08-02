@@ -143,6 +143,9 @@ public final class ProcurementRecords {
         private String requisitionCode;
         private String sourceBusinessType;
         private String sourceBusinessRef;
+        private String legalEntityId;
+        private String taxCalculationPolicyCode;
+        private String roundingPolicyCode;
         private String status;
         private String requestedByPrincipalId;
         private String approvedByPrincipalId;
@@ -165,6 +168,9 @@ public final class ProcurementRecords {
         private String canonicalSkuId;
         private BigDecimal requestedQuantity;
         private String uomCode;
+        private String valuationPolicyId;
+        private String valuationPolicyVersion;
+        private String valuationPolicyHash;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
     }

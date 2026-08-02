@@ -319,11 +319,15 @@ public interface SupplyPlanningMapper {
             INSERT INTO cloudmold_replenishment_execution_proposal
               (proposal_id,tenant_id,recommendation_id,expected_recommendation_version,target_type,
                owner_type,owner_id,source_warehouse_id,target_warehouse_id,
+               legal_entity_id,tax_calculation_policy_code,rounding_policy_code,
+               valuation_policy_id,valuation_policy_version,valuation_policy_hash,
                proposed_by_principal_id,policy_code,policy_sha256,status,version,proposed_at,
                created_at,updated_at)
             VALUES (#{proposalId},#{tenantId},#{recommendationId},#{expectedRecommendationVersion},
                     #{targetType},#{ownerType},#{ownerId},#{sourceWarehouseId},
-                    #{targetWarehouseId},#{proposedByPrincipalId},#{policyCode},
+                    #{targetWarehouseId},#{legalEntityId},#{taxCalculationPolicyCode},
+                    #{roundingPolicyCode},#{valuationPolicyId},#{valuationPolicyVersion},
+                    #{valuationPolicyHash},#{proposedByPrincipalId},#{policyCode},
                     #{policySha256},#{status},#{version},#{proposedAt},#{createdAt},#{updatedAt})
             """)
     int insertReplenishmentExecutionProposal(ReplenishmentExecutionProposal value);
@@ -331,6 +335,8 @@ public interface SupplyPlanningMapper {
     @Select("""
             SELECT proposal_id,tenant_id,recommendation_id,expected_recommendation_version,target_type,
                    owner_type,owner_id,source_warehouse_id,target_warehouse_id,
+                   legal_entity_id,tax_calculation_policy_code,rounding_policy_code,
+                   valuation_policy_id,valuation_policy_version,valuation_policy_hash,
                    proposed_by_principal_id,policy_code,policy_sha256,status,version,
                    consumed_by_conversion_id,proposed_at,consumed_at,created_at,updated_at
             FROM cloudmold_replenishment_execution_proposal
@@ -364,6 +370,12 @@ public interface SupplyPlanningMapper {
                    proposal.owner_id ownerId,
                    proposal.source_warehouse_id sourceWarehouseId,
                    proposal.target_warehouse_id targetWarehouseId,
+                   proposal.legal_entity_id legalEntityId,
+                   proposal.tax_calculation_policy_code taxCalculationPolicyCode,
+                   proposal.rounding_policy_code roundingPolicyCode,
+                   proposal.valuation_policy_id valuationPolicyId,
+                   proposal.valuation_policy_version valuationPolicyVersion,
+                   proposal.valuation_policy_hash valuationPolicyHash,
                    proposal.proposed_by_principal_id proposedByPrincipalId,
                    proposal.policy_code policyCode,
                    proposal.policy_sha256 policySha256,
@@ -396,6 +408,12 @@ public interface SupplyPlanningMapper {
                    proposal.owner_id ownerId,
                    proposal.source_warehouse_id sourceWarehouseId,
                    proposal.target_warehouse_id targetWarehouseId,
+                   proposal.legal_entity_id legalEntityId,
+                   proposal.tax_calculation_policy_code taxCalculationPolicyCode,
+                   proposal.rounding_policy_code roundingPolicyCode,
+                   proposal.valuation_policy_id valuationPolicyId,
+                   proposal.valuation_policy_version valuationPolicyVersion,
+                   proposal.valuation_policy_hash valuationPolicyHash,
                    proposal.proposed_by_principal_id proposedByPrincipalId,
                    proposal.policy_code policyCode,
                    proposal.policy_sha256 policySha256,

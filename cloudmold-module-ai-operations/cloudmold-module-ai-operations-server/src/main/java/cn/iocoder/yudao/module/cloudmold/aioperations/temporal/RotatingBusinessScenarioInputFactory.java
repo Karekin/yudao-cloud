@@ -4,6 +4,7 @@ import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.cloudmold.identity.api.IdentityQueryApi;
 import cn.iocoder.yudao.module.cloudmold.identity.api.SourceIdentityReference;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.AwardReleaseCommand;
 import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommand;
 import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementOperation;
 import cn.iocoder.yudao.module.cloudmold.procurement.api.PurchaseRequisitionCommand;
@@ -120,7 +121,6 @@ class RotatingBusinessScenarioInputFactory {
     static final String PRICING_REPRICE_LIFECYCLE_SKILL =
             "skill.cloudmold.pricing.reprice-lifecycle.v1";
     static final String READY_MASTER_SKILL = "skill.cloudmold.commerce.reuse-ready-master.v1";
-    static final String LEGACY_PROJECTION_SKILL = "skill.cloudmold.commerce.legacy-projection-plan.v1";
     private static final String PROCUREMENT_SOURCING_INPUT_SCHEMA =
             "cloudmold.procurement-sourcing-input/v1";
     private static final String ZERO_UUID = "00000000-0000-0000-0000-000000000000";
@@ -211,8 +211,6 @@ class RotatingBusinessScenarioInputFactory {
                     principal.path("principalId").asText(), listing);
         } else if (READY_MASTER_SKILL.equals(targetSkillId)) {
             output = reusableMaster.get();
-        } else if (LEGACY_PROJECTION_SKILL.equals(targetSkillId)) {
-            output = rotated.path("legacyProjection").deepCopy();
         } else if (MERCHANT_ONBOARDING_SKILL.equals(targetSkillId)) {
             JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
             if (principal.path("principalId").asText().isBlank()) {
@@ -261,6 +259,7 @@ class RotatingBusinessScenarioInputFactory {
                     || award.path("aggregateVersion").asLong() != 3L
                     || sourcingInput == null || !sourcingInput.isObject()
                     || !awardId.equals(sourcingInput.path("awardId").asText())
+                    || !sourcingInput.path("awardRelease").isObject()
                     || !sourcingInput.path("purchaseOrderPlans").isArray()
                     || sourcingInput.path("purchaseOrderPlans").size() != 2) {
                 return Optional.empty();
@@ -268,6 +267,7 @@ class RotatingBusinessScenarioInputFactory {
             ObjectNode procurement = JsonNodeFactory.instance.objectNode();
             procurement.put("schemaVersion", PROCUREMENT_SOURCING_INPUT_SCHEMA)
                     .put("awardId", awardId);
+            procurement.set("awardRelease", sourcingInput.path("awardRelease").deepCopy());
             procurement.set("purchaseOrders", sourcingInput.path("purchaseOrderPlans").deepCopy());
             output = procurement;
         } else if (WMS_OPERATIONS_SKILL.equals(targetSkillId)) {
@@ -766,7 +766,6 @@ class RotatingBusinessScenarioInputFactory {
             case RISK_DISPUTE_RESOLUTION_LIFECYCLE_SKILL -> "rd";
             case DATA_QUALITY_RECOVERY_LIFECYCLE_SKILL -> "dq";
             case READY_MASTER_SKILL -> "m";
-            case LEGACY_PROJECTION_SKILL -> "l";
             default -> throw new IllegalArgumentException("Unsupported rotating scenario Skill: " + skillId);
         };
     }
@@ -2411,13 +2410,18 @@ class RotatingBusinessScenarioInputFactory {
                 .runId(runId).correlationId(correlationId).occurredAt(instant)
                 .requisitionId(requisitionId).requisitionCode(code("AI_PR_", prefix))
                 .sourceBusinessType("AI_SUPPLY_PLAN").sourceBusinessRef(prefix)
+                .legalEntityId(seed.legalEntityId())
+                .taxCalculationPolicyCode("STANDARD_V1")
+                .roundingPolicyCode("HALF_UP")
                 .reasonCode("AI_SOURCING_REQUIRED")
                 .remark("AI 采购寻源的已审批多行、多交期采购申请")
                 .lines(List.of(
-                        requisitionLine(line1, 1, firstCatalogLine, quantity1,
+                        requisitionLine(line1, 1, firstCatalogLine,
+                                seed.valuationPolicyFor(firstCatalogLine.canonicalSkuId()), quantity1,
                                 requisitionSchedule(schedule11, 1, warehouseId, date.plusDays(21), quantity11),
                                 requisitionSchedule(schedule12, 2, warehouseId, date.plusDays(35), quantity12)),
-                        requisitionLine(line2, 2, secondCatalogLine, quantity2,
+                        requisitionLine(line2, 2, secondCatalogLine,
+                                seed.valuationPolicyFor(secondCatalogLine.canonicalSkuId()), quantity2,
                                 requisitionSchedule(schedule21, 1, warehouseId, date.plusDays(21), quantity21),
                                 requisitionSchedule(schedule22, 2, warehouseId, date.plusDays(35), quantity22))))
                 .build();
@@ -2522,36 +2526,29 @@ class RotatingBusinessScenarioInputFactory {
                 instant, runId, correlationId, SourcingOperation.CLOSE_SOURCING_EVENT, eventId, 14L,
                 "SOURCING_COMPLETED")));
 
-        AwardPurchaseLine award11 = new AwardPurchaseLine(awardLines.get(0).getAwardLineId(),
-                firstCatalogLine, seed.valuationPolicyFor(firstCatalogLine.canonicalSkuId()),
-                warehouseId, quantity11, 2100, date.plusDays(21));
-        AwardPurchaseLine award12 = new AwardPurchaseLine(awardLines.get(1).getAwardLineId(),
-                firstCatalogLine, seed.valuationPolicyFor(firstCatalogLine.canonicalSkuId()),
-                warehouseId, quantity12, 2200, date.plusDays(35));
-        AwardPurchaseLine award21 = new AwardPurchaseLine(awardLines.get(2).getAwardLineId(),
-                secondCatalogLine, seed.valuationPolicyFor(secondCatalogLine.canonicalSkuId()),
-                warehouseId, quantity21, 3200, date.plusDays(21));
-        AwardPurchaseLine award22 = new AwardPurchaseLine(awardLines.get(3).getAwardLineId(),
-                secondCatalogLine, seed.valuationPolicyFor(secondCatalogLine.canonicalSkuId()),
-                warehouseId, quantity22, 3100, date.plusDays(35));
+        input.set("awardRelease", commandEnvelope("award_release", seed.approverPrincipalId(),
+                AwardReleaseCommand.builder()
+                        .idempotencyKey(prefix + ":award-release")
+                        .runId(runId).correlationId(correlationId).occurredAt(instant)
+                        .awardId(awardId).expectedAwardVersion(3L).build()));
         ArrayNode plans = input.putArray("purchaseOrderPlans");
-        plans.add(purchaseOrderPlan(prefix, "a", instant, runId, correlationId, awardId,
-                seed.legalEntityId(), seed.supplierAId(), seed.creatorPrincipalId(),
-                seed.approverPrincipalId(),
-                List.of(award11, award21)));
-        plans.add(purchaseOrderPlan(prefix, "b", instant, runId, correlationId, awardId,
-                seed.legalEntityId(), seed.supplierBId(), seed.creatorPrincipalId(),
-                seed.approverPrincipalId(),
-                List.of(award12, award22)));
+        plans.add(purchaseOrderPlan(prefix, "a", instant, runId, correlationId,
+                seed.creatorPrincipalId(), seed.approverPrincipalId()));
+        plans.add(purchaseOrderPlan(prefix, "b", instant, runId, correlationId,
+                seed.creatorPrincipalId(), seed.approverPrincipalId()));
         return input;
     }
 
     private static PurchaseRequisitionCommand.LineDefinition requisitionLine(
-            String lineId, int lineNumber, CatalogProcurementLine catalogLine, BigDecimal quantity,
+            String lineId, int lineNumber, CatalogProcurementLine catalogLine,
+            ValuationPolicySeed valuationPolicy, BigDecimal quantity,
             PurchaseRequisitionCommand.DeliveryScheduleDefinition... schedules) {
         return PurchaseRequisitionCommand.LineDefinition.builder()
                 .lineId(lineId).lineNumber(lineNumber).canonicalSkuId(catalogLine.canonicalSkuId())
                 .requestedQuantity(quantity).uomCode(catalogLine.baseUomCode())
+                .valuationPolicyId(valuationPolicy.valuationPolicyId())
+                .valuationPolicyVersion(valuationPolicy.valuationPolicyVersion())
+                .valuationPolicyHash(valuationPolicy.valuationPolicyHash())
                 .schedules(List.of(schedules)).build();
     }
 
@@ -2781,84 +2778,32 @@ class RotatingBusinessScenarioInputFactory {
 
     private static ObjectNode purchaseOrderPlan(
             String prefix, String suffix, Instant occurredAt, String runId, String correlationId,
-            String awardId, String legalEntityId, String supplierId, String creatorPrincipalId,
-            String approverPrincipalId, List<AwardPurchaseLine> awardLines) {
-        String orderId = stableUuid(prefix + ":purchase-order:" + suffix);
-        List<ProcurementCommand.PurchaseOrderLineDefinition> lines = java.util.stream.IntStream
-                .range(0, awardLines.size())
-                .mapToObj(index -> purchaseOrderLine(prefix, suffix, index + 1, awardLines.get(index)))
-                .toList();
-        long headerNet = lines.stream().mapToLong(ProcurementCommand.PurchaseOrderLineDefinition::getLineNetAmountMinor).sum();
-        long headerTax = lines.stream().mapToLong(ProcurementCommand.PurchaseOrderLineDefinition::getLineTaxAmountMinor).sum();
-        ProcurementCommand.PurchaseOrderDefinition order = ProcurementCommand.PurchaseOrderDefinition.builder()
-                .orderId(orderId).orderCode(code("AI_PO_" + suffix + "_", prefix))
-                .sourceBusinessType("SOURCING_AWARD").sourceBusinessRef(awardId)
-                .awardId(awardId).awardVersion(3L).legalEntityId(legalEntityId)
-                .supplierId(supplierId)
-                .currencyCode("CNY").leadTimeDays(35)
-                .headerNetAmountMinor(headerNet).headerTaxAmountMinor(headerTax)
-                .headerGrossAmountMinor(Math.addExact(headerNet, headerTax))
-                .taxCalculationPolicyCode("STANDARD_V1").roundingPolicyCode("HALF_UP")
-                .remark("AI 根据已批准定标快照创建采购订单")
-                .reasonCode("AI_SOURCING_AWARD").lines(lines).build();
+            String creatorPrincipalId, String approverPrincipalId) {
+        String authoritativeOrderId = "__AWARD_RELEASE_RESULT__";
         ArrayNode commands = JsonNodeFactory.instance.arrayNode();
-        commands.add(commandEnvelope("purchase_order_create", creatorPrincipalId,
-                procurementCommand(prefix, suffix, occurredAt, runId, correlationId,
-                        ProcurementOperation.CREATE_PURCHASE_ORDER, order)));
         commands.add(commandEnvelope("purchase_order_submit", creatorPrincipalId,
                 procurementTransitionCommand(prefix, suffix, occurredAt, runId, correlationId,
-                        ProcurementOperation.SUBMIT_PURCHASE_ORDER, orderId, 1L, "AI_PO_SUBMITTED")));
+                        ProcurementOperation.SUBMIT_PURCHASE_ORDER, authoritativeOrderId, 1L,
+                        "AI_PO_SUBMITTED")));
         commands.add(commandEnvelope("purchase_order_approve", approverPrincipalId,
                 procurementTransitionCommand(prefix, suffix, occurredAt, runId, correlationId,
-                        ProcurementOperation.APPROVE_PURCHASE_ORDER, orderId, 2L, "AI_PO_APPROVED")));
+                        ProcurementOperation.APPROVE_PURCHASE_ORDER, authoritativeOrderId, 2L,
+                        "AI_PO_APPROVED")));
         commands.add(commandEnvelope("purchase_order_release", approverPrincipalId,
                 procurementTransitionCommand(prefix, suffix, occurredAt, runId, correlationId,
-                        ProcurementOperation.RELEASE_PURCHASE_ORDER, orderId, 3L, "AI_PO_RELEASED")));
+                        ProcurementOperation.RELEASE_PURCHASE_ORDER, authoritativeOrderId, 3L,
+                        "AI_PO_RELEASED")));
         commands.add(commandEnvelope("purchase_order_dispatch", creatorPrincipalId,
                 procurementTransitionCommand(prefix, suffix, occurredAt, runId, correlationId,
-                        ProcurementOperation.DISPATCH_PURCHASE_ORDER, orderId, 4L, "AI_PO_DISPATCHED")));
+                        ProcurementOperation.DISPATCH_PURCHASE_ORDER, authoritativeOrderId, 4L,
+                        "AI_PO_DISPATCHED")));
         commands.add(commandEnvelope("supplier_confirm", creatorPrincipalId,
                 procurementTransitionCommand(prefix, suffix, occurredAt, runId, correlationId,
-                        ProcurementOperation.SUPPLIER_CONFIRM_PURCHASE_ORDER, orderId, 5L,
+                        ProcurementOperation.SUPPLIER_CONFIRM_PURCHASE_ORDER, authoritativeOrderId, 5L,
                         "SUPPLIER_CONFIRMED")));
         ObjectNode plan = JsonNodeFactory.instance.objectNode();
-        plan.put("supplierId", supplierId).put("orderId", orderId);
         plan.set("commands", commands);
         return plan;
-    }
-
-    private static ProcurementCommand.PurchaseOrderLineDefinition purchaseOrderLine(
-            String prefix, String suffix, int lineNumber, AwardPurchaseLine source) {
-        long net = source.quantity().multiply(BigDecimal.valueOf(source.unitNetPriceMinor()))
-                .setScale(0, java.math.RoundingMode.HALF_UP).longValueExact();
-        long tax = BigDecimal.valueOf(net).multiply(BigDecimal.valueOf(1300))
-                .divide(BigDecimal.valueOf(10000), 0, java.math.RoundingMode.HALF_UP).longValueExact();
-        String itemId = stableUuid(prefix + ":purchase-order:" + suffix + ":item:" + lineNumber);
-        return ProcurementCommand.PurchaseOrderLineDefinition.builder()
-                .itemId(itemId).lineNumber(lineNumber).awardLineId(source.awardLineId())
-                .canonicalSkuId(source.catalogLine().canonicalSkuId()).orderedQuantity(source.quantity())
-                .uomCode(source.catalogLine().baseUomCode()).taxCode("VAT13").taxRateBps(1300)
-                .valuationPolicyId(source.valuationPolicy().valuationPolicyId())
-                .valuationPolicyVersion(source.valuationPolicy().valuationPolicyVersion())
-                .valuationPolicyHash(source.valuationPolicy().valuationPolicyHash())
-                .unitNetPriceMinor(BigDecimal.valueOf(source.unitNetPriceMinor()))
-                .lineNetAmountMinor(net).lineTaxAmountMinor(tax)
-                .lineGrossAmountMinor(Math.addExact(net, tax))
-                .schedules(List.of(ProcurementCommand.PurchaseOrderDeliveryScheduleDefinition.builder()
-                        .scheduleId(stableUuid(itemId + ":schedule:1")).scheduleNumber(1)
-                        .requiredDeliveryDate(source.promisedDate())
-                        .canonicalWarehouseId(source.warehouseId())
-                        .scheduledQuantity(source.quantity()).build()))
-                .build();
-    }
-
-    private static ProcurementCommand procurementCommand(
-            String prefix, String suffix, Instant occurredAt, String runId, String correlationId,
-            ProcurementOperation operation, ProcurementCommand.PurchaseOrderDefinition order) {
-        return ProcurementCommand.builder().operation(operation)
-                .idempotencyKey(prefix + ":purchase-order:" + suffix + ":create")
-                .runId(runId).correlationId(correlationId).occurredAt(occurredAt)
-                .purchaseOrder(order).build();
     }
 
     private static ProcurementCommand procurementTransitionCommand(
@@ -2995,6 +2940,7 @@ class RotatingBusinessScenarioInputFactory {
         ObjectNode procurement = JsonNodeFactory.instance.objectNode();
         procurement.put("schemaVersion", PROCUREMENT_SOURCING_INPUT_SCHEMA)
                 .put("awardId", sourcing.path("awardId").asText());
+        procurement.set("awardRelease", sourcing.path("awardRelease").deepCopy());
         procurement.set("purchaseOrders", sourcing.path("purchaseOrderPlans").deepCopy());
         ObjectNode physical = wmsOperations(prefix + "-wms", occurredAt,
                 merchantId, shopId, principalId, warehouseId, canonicalSkuCode,
@@ -4454,12 +4400,6 @@ class RotatingBusinessScenarioInputFactory {
             String quotation, String revision, String line1, String line2,
             String schedule11, String schedule12, String schedule21, String schedule22,
             String suffix) {
-    }
-
-    private record AwardPurchaseLine(
-            String awardLineId, CatalogProcurementLine catalogLine,
-            ValuationPolicySeed valuationPolicy, String warehouseId,
-            BigDecimal quantity, long unitNetPriceMinor, LocalDate promisedDate) {
     }
 
     private static boolean distinctNonBlank(String... values) {

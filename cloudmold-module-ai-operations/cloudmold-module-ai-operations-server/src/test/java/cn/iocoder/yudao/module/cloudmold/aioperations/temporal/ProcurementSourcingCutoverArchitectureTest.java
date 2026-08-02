@@ -39,6 +39,21 @@ class ProcurementSourcingCutoverArchitectureTest {
                         "supplier-" + "sourcing", "supplier_" + "sourcing");
     }
 
+    @Test
+    void procurementAutomationOnlyCreatesOrdersFromApprovedAwardRelease() throws IOException {
+        String factory = source("RotatingBusinessScenarioInputFactory.java");
+        String dailyCatalog = source("ManagedWorkflowDailyAutomationCatalog.java");
+
+        assertThat(factory)
+                .contains("AwardReleaseCommand.builder()")
+                .doesNotContain("ProcurementOperation." + "CREATE_PURCHASE_ORDER",
+                        "PurchaseOrderLineDefinition.builder()",
+                        "skill.cloudmold.commerce." + "legacy-projection-plan.v1");
+        assertThat(dailyCatalog)
+                .contains("RETIRED_DAILY_WORKFLOWS",
+                        "skill.cloudmold.commerce.legacy-projection-plan.v1");
+    }
+
     private static String source(String fileName) throws IOException {
         return Files.readString(BASE_DIR.resolve(
                 "src/main/java/cn/iocoder/yudao/module/cloudmold/aioperations/temporal/" + fileName));

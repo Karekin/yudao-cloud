@@ -39,6 +39,10 @@ class AiOperationsTemporalSeedRunnerTest {
         properties.setTenantIds(List.of("162", "163"));
         List<ManagedSkillTaskWorkflowView> registered =
                 ManagedWorkflowDailyAutomationFixtures.workflows();
+        List<ManagedSkillTaskWorkflowView> dailyEligible = registered.stream()
+                .filter(workflow -> ManagedWorkflowDailyAutomationCatalog
+                        .isDailyEligible(workflow.getSkillId()))
+                .toList();
         List<String> reconciled = new ArrayList<>();
         when(workflows.listWorkflowsAs(
                 properties.getOperatorUserId(), properties.getOperatorUserType()))
@@ -59,11 +63,11 @@ class AiOperationsTemporalSeedRunnerTest {
         runner.reconcile();
 
         Set<String> expected = properties.getTenantIds().stream()
-                .flatMap(tenantId -> registered.stream()
+                .flatMap(tenantId -> dailyEligible.stream()
                         .map(workflow -> tenantId + "|" + workflow.getSkillId()
                                 + "@" + workflow.getSkillVersion()))
                 .collect(Collectors.toSet());
-        int expectedReconcileCount = properties.getTenantIds().size() * registered.size();
+        int expectedReconcileCount = properties.getTenantIds().size() * dailyEligible.size();
         assertThat(reconciled)
                 .hasSize(expectedReconcileCount)
                 .doesNotHaveDuplicates()
@@ -74,7 +78,7 @@ class AiOperationsTemporalSeedRunnerTest {
                 properties.getOperatorUserId(), properties.getOperatorUserType());
         verify(governance, times(2)).reconcile(any(), same(registered));
         verify(schedules, times(2)).pauseObsoleteManagedDaily(
-                registered.stream().map(ManagedSkillTaskWorkflowView::getSkillId)
+                dailyEligible.stream().map(ManagedSkillTaskWorkflowView::getSkillId)
                         .collect(Collectors.toSet()));
         assertThat(TenantContextHolder.getTenantId()).isNull();
     }
@@ -92,6 +96,10 @@ class AiOperationsTemporalSeedRunnerTest {
         properties.setTenantIds(List.of("162", "163"));
         List<ManagedSkillTaskWorkflowView> registered =
                 ManagedWorkflowDailyAutomationFixtures.workflows();
+        List<ManagedSkillTaskWorkflowView> dailyEligible = registered.stream()
+                .filter(workflow -> ManagedWorkflowDailyAutomationCatalog
+                        .isDailyEligible(workflow.getSkillId()))
+                .toList();
         String failingSkillId = registered.get(1).getSkillId();
         String finalSkillId = registered.get(registered.size() - 1).getSkillId();
         List<String> attempts = new ArrayList<>();
@@ -116,7 +124,7 @@ class AiOperationsTemporalSeedRunnerTest {
                 new AiOperationsTemporalSeedRunner(schedules, properties, workflows, governance);
         runner.reconcile();
 
-        int expectedAttemptCount = properties.getTenantIds().size() * registered.size();
+        int expectedAttemptCount = properties.getTenantIds().size() * dailyEligible.size();
         assertThat(attempts)
                 .hasSize(expectedAttemptCount)
                 .contains("162|" + failingSkillId,
@@ -126,7 +134,7 @@ class AiOperationsTemporalSeedRunnerTest {
         assertThat(attempts.indexOf("162|" + finalSkillId))
                 .isGreaterThan(attempts.indexOf("162|" + failingSkillId));
         verify(schedules, times(2)).pauseObsoleteManagedDaily(
-                registered.stream().map(ManagedSkillTaskWorkflowView::getSkillId)
+                dailyEligible.stream().map(ManagedSkillTaskWorkflowView::getSkillId)
                         .collect(Collectors.toSet()));
         assertThat(TenantContextHolder.getTenantId()).isNull();
     }

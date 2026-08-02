@@ -131,10 +131,12 @@ public interface ProcurementMapper {
 
     @Insert("""
             INSERT INTO cloudmold_purchase_requisition
-              (requisition_id,tenant_id,requisition_code,source_business_type,source_business_ref,status,
+              (requisition_id,tenant_id,requisition_code,source_business_type,source_business_ref,
+               legal_entity_id,tax_calculation_policy_code,rounding_policy_code,status,
                requested_by_principal_id,approved_by_principal_id,reason_code,remark,version,
                requested_at,approved_at,created_at,updated_at)
-            VALUES (#{requisitionId},#{tenantId},#{requisitionCode},#{sourceBusinessType},#{sourceBusinessRef},#{status},
+            VALUES (#{requisitionId},#{tenantId},#{requisitionCode},#{sourceBusinessType},#{sourceBusinessRef},
+                    #{legalEntityId},#{taxCalculationPolicyCode},#{roundingPolicyCode},#{status},
                     #{requestedByPrincipalId},#{approvedByPrincipalId},#{reasonCode},#{remark},#{version},
                     #{requestedAt},#{approvedAt},#{createdAt},#{updatedAt})
             """)
@@ -143,11 +145,13 @@ public interface ProcurementMapper {
     @Insert("""
             <script>
             INSERT INTO cloudmold_purchase_requisition_line
-              (line_id,tenant_id,requisition_id,line_number,canonical_sku_id,requested_quantity,uom_code,created_at,updated_at)
+              (line_id,tenant_id,requisition_id,line_number,canonical_sku_id,requested_quantity,uom_code,
+               valuation_policy_id,valuation_policy_version,valuation_policy_hash,created_at,updated_at)
             VALUES
             <foreach collection="values" item="value" separator=",">
               (#{value.lineId},#{value.tenantId},#{value.requisitionId},#{value.lineNumber},#{value.canonicalSkuId},
-               #{value.requestedQuantity},#{value.uomCode},#{value.createdAt},#{value.updatedAt})
+               #{value.requestedQuantity},#{value.uomCode},#{value.valuationPolicyId},#{value.valuationPolicyVersion},
+               #{value.valuationPolicyHash},#{value.createdAt},#{value.updatedAt})
             </foreach>
             </script>
             """)
@@ -178,7 +182,8 @@ public interface ProcurementMapper {
     int insertPurchaseRequisitionStatusHistory(PurchaseRequisitionStatusHistory value);
 
     @Select("""
-            SELECT requisition_id,tenant_id,requisition_code,source_business_type,source_business_ref,status,
+            SELECT requisition_id,tenant_id,requisition_code,source_business_type,source_business_ref,
+                   legal_entity_id,tax_calculation_policy_code,rounding_policy_code,status,
                    requested_by_principal_id,approved_by_principal_id,reason_code,remark,version,
                    requested_at,approved_at,created_at,updated_at
             FROM cloudmold_purchase_requisition
@@ -191,7 +196,8 @@ public interface ProcurementMapper {
             @Param("sourceBusinessRef") String sourceBusinessRef);
 
     @Select("""
-            SELECT requisition_id,tenant_id,requisition_code,source_business_type,source_business_ref,status,
+            SELECT requisition_id,tenant_id,requisition_code,source_business_type,source_business_ref,
+                   legal_entity_id,tax_calculation_policy_code,rounding_policy_code,status,
                    requested_by_principal_id,approved_by_principal_id,reason_code,remark,version,
                    requested_at,approved_at,created_at,updated_at
             FROM cloudmold_purchase_requisition
@@ -202,7 +208,7 @@ public interface ProcurementMapper {
 
     @Select("""
             SELECT line_id,tenant_id,requisition_id,line_number,canonical_sku_id,requested_quantity,uom_code,
-                   created_at,updated_at
+                   valuation_policy_id,valuation_policy_version,valuation_policy_hash,created_at,updated_at
             FROM cloudmold_purchase_requisition_line
             WHERE tenant_id=#{tenantId} AND requisition_id=#{requisitionId}
             ORDER BY line_number ASC,line_id ASC
@@ -264,6 +270,15 @@ public interface ProcurementMapper {
     ProcurementOrder selectCurrentHeaderBySourceBusiness(@Param("tenantId") Long tenantId,
                                                          @Param("sourceBusinessType") String sourceBusinessType,
                                                          @Param("sourceBusinessRef") String sourceBusinessRef);
+
+    @Select("""
+            SELECT COUNT(*)
+            FROM cloudmold_procurement_order_award_source
+            WHERE tenant_id=#{tenantId} AND award_id=#{awardId} AND award_version=#{awardVersion}
+            """)
+    long countAwardLineConsumptions(@Param("tenantId") Long tenantId,
+                                    @Param("awardId") String awardId,
+                                    @Param("awardVersion") Long awardVersion);
 
     @Select("""
             SELECT item_id,tenant_id,order_id,line_number,award_line_id,canonical_sku_id,ordered_quantity,uom_code,tax_code,

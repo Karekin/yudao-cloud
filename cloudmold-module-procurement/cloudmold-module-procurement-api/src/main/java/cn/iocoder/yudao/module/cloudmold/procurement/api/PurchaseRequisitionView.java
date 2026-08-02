@@ -18,6 +18,9 @@ public class PurchaseRequisitionView {
     private String requisitionCode;
     private String sourceBusinessType;
     private String sourceBusinessRef;
+    private String legalEntityId;
+    private String taxCalculationPolicyCode;
+    private String roundingPolicyCode;
     private String status;
     private Long version;
     private String reasonCode;
@@ -34,6 +37,9 @@ public class PurchaseRequisitionView {
         private String canonicalSkuId;
         private BigDecimal requestedQuantity;
         private String uomCode;
+        private String valuationPolicyId;
+        private String valuationPolicyVersion;
+        private String valuationPolicyHash;
         private List<DeliveryScheduleView> schedules;
     }
 

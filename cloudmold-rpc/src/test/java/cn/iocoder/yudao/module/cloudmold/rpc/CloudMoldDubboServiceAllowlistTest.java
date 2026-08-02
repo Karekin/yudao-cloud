@@ -43,6 +43,7 @@ class CloudMoldDubboServiceAllowlistTest {
                         "cn.iocoder.yudao.module.cloudmold.payment.api.PaymentWorkflowFactsApi",
                         "cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.skilltask.api.SkillTaskQueryApi",
+                        "cn.iocoder.yudao.module.cloudmold.procurement.api.AwardReleaseCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.procurement.api.PurchaseRequisitionCommandApi",
                         "cn.iocoder.yudao.module.cloudmold.procurement.api.PurchaseRequisitionQueryApi",

@@ -12,8 +12,6 @@ import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementR
 import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.PurchaseOrderItem;
 import cn.iocoder.yudao.module.cloudmold.procurement.dal.mysql.ProcurementMapper;
 import cn.iocoder.yudao.module.cloudmold.procurement.dal.mysql.ProcurementSourcingMapper;
-import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementSourcingRecords.Award;
-import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementSourcingRecords.AwardLine;
 import cn.iocoder.yudao.module.cloudmold.procurement.service.actor.ProcurementActorPrincipalPort;
 import cn.iocoder.yudao.module.cloudmold.procurement.service.reference.ProcurementReferenceValidationPort;
 import org.junit.jupiter.api.*;
@@ -54,74 +52,17 @@ class ProcurementServiceImplTest {
         when(mapper.selectOperationForUpdate(301L, 31L)).thenAnswer(invocation ->
                 new Operation().setOperationId(301L).setTenantId(31L)
                         .setRequestHash(requestHash.get()).setAttemptToken(attemptToken.get()).setStatus(0));
-        when(mapper.insertOrder(any())).thenReturn(1);
-        when(mapper.insertItems(anyList())).thenAnswer(invocation -> ((List<?>) invocation.getArgument(0)).size());
-        when(mapper.insertAwardSources(anyList())).thenAnswer(invocation -> ((List<?>) invocation.getArgument(0)).size());
-        when(mapper.insertSchedules(anyList())).thenAnswer(invocation -> ((List<?>) invocation.getArgument(0)).size());
         when(mapper.insertStatusHistory(any(OrderStatusHistory.class))).thenReturn(1);
         when(mapper.markOperationSucceeded(eq(301L), eq(31L), anyString(), anyString(), anyString(), any()))
                 .thenReturn(1);
         when(mapper.selectCurrentHeader(31L, "order-01")).thenReturn(baseOrder("DRAFT", 1L));
         when(mapper.selectItems(31L, "order-01")).thenReturn(List.of(baseItem()));
         when(mapper.selectSchedules(31L, "order-01")).thenReturn(List.of(baseSchedule()));
-        when(sourcingMapper.selectApprovedAward(31L, "award-01")).thenReturn(new Award()
-                .setAwardId("award-01").setTenantId(31L).setStatus("APPROVED").setVersion(3L));
-        when(sourcingMapper.selectAwardLines(31L, "award-01")).thenReturn(List.of(baseAwardLine()));
     }
 
     @AfterEach
     void tearDown() {
         TenantContextHolder.clear();
-    }
-
-    @Test
-    void createsCanonicalOrderWithoutLegacyProjectionArtifacts() {
-        ProcurementResult result = execute(base(ProcurementOperation.CREATE_PURCHASE_ORDER)
-                .purchaseOrder(ProcurementCommand.PurchaseOrderDefinition.builder()
-                        .orderCode("PO-CM-001")
-                        .sourceBusinessType("SOURCING_AWARD")
-                        .sourceBusinessRef("award-01")
-                        .awardId("award-01").awardVersion(3L)
-                        .legalEntityId("legal-entity-01")
-                        .supplierId("supplier/dewu-alpha")
-                        .currencyCode("CNY")
-                        .leadTimeDays(7)
-                        .headerNetAmountMinor(155880L)
-                        .headerTaxAmountMinor(0L)
-                        .headerGrossAmountMinor(155880L)
-                        .lines(List.of(ProcurementCommand.PurchaseOrderLineDefinition.builder()
-                                .lineNumber(10)
-                                .awardLineId("award-line-01")
-                                .canonicalSkuId("sku-01")
-                                .orderedQuantity(new BigDecimal("120"))
-                                .uomCode("EA")
-                                .taxCode("VAT13")
-                                .taxRateBps(0)
-                                .unitNetPriceMinor(new BigDecimal("1299.000000"))
-                                .valuationPolicyId("valuation-policy-01")
-                                .valuationPolicyVersion("v1")
-                                .valuationPolicyHash("a".repeat(64))
-                                .lineNetAmountMinor(155880L)
-                                .lineTaxAmountMinor(0L)
-                                .lineGrossAmountMinor(155880L)
-                                .schedules(List.of(ProcurementCommand.PurchaseOrderDeliveryScheduleDefinition.builder()
-                                        .scheduleNumber(1)
-                                        .requiredDeliveryDate(LocalDate.of(2026, 8, 3))
-                                        .canonicalWarehouseId("warehouse-01")
-                                        .scheduledQuantity(new BigDecimal("120"))
-                                        .build()))
-                                .build()))
-                        .build())
-                .build());
-
-        assertThat(result.getStatus()).isEqualTo("DRAFT");
-        verify(mapper).insertOrder(argThat(row ->
-                row.getStatus().equals("DRAFT")
-                        && row.getSupplierId().equals("supplier/dewu-alpha")
-                        && row.getHeaderGrossAmountMinor().equals(155880L)));
-        verify(outbox).append(argThat(event ->
-                event.getEventType().equals("procurement.order.created")
-                        && event.getAggregateType().equals("procurement_order")));
     }
 
     @Test
@@ -279,7 +220,7 @@ class ProcurementServiceImplTest {
     @Test
     void rejectsCommandsWithoutAttestedActor() {
         assertThatThrownBy(() -> service.execute(
-                base(ProcurementOperation.CREATE_PURCHASE_ORDER).build(), null))
+                base(ProcurementOperation.SUBMIT_PURCHASE_ORDER).build(), null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("actorPrincipalId");
         verifyNoInteractions(actorPrincipalPort);
@@ -341,15 +282,6 @@ class ProcurementServiceImplTest {
                 .setRequiredDeliveryDate(LocalDate.of(2026, 8, 3))
                 .setCanonicalWarehouseId("warehouse-01")
                 .setScheduledQuantity(new BigDecimal("120"));
-    }
-
-    private static AwardLine baseAwardLine() {
-        return new AwardLine().setAwardLineId("award-line-01").setAwardId("award-01").setTenantId(31L)
-                .setSupplierId("supplier/dewu-alpha").setCanonicalSkuId("sku-01").setCanonicalWarehouseId("warehouse-01")
-                .setAwardedQuantity(new BigDecimal("120")).setUomCode("EA").setCurrencyCode("CNY")
-                .setUnitNetPriceMinor(new BigDecimal("1299.000000")).setTaxCode("VAT13").setTaxRateBps(0)
-                .setPromisedDeliveryDate(LocalDate.of(2026, 8, 3)).setLineNetAmountMinor(155880L)
-                .setLineTaxAmountMinor(0L).setLineGrossAmountMinor(155880L);
     }
 
     private static ProcurementCommand transitionCommand(ProcurementOperation operation, long version) {

@@ -253,21 +253,24 @@ class SkillTaskDefinitionRegistryTest {
         assertThat(sourcingLifecycle.getSteps().get(14).getArguments().toString())
                 .contains("$input.sourcingCommands.13.actorPrincipalId");
         SkillTaskDefinition procurementOrder = workspaceRegistry.require(
-                "skill.cloudmold.procurement.order-lifecycle.v1", "1.0.0");
+                "skill.cloudmold.procurement.order-lifecycle.v1", "1.1.0");
         assertThat(procurementOrder.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
         assertThat(procurementOrder.getOwnerRole()).isEqualTo("procurement-order-operator");
-        assertThat(procurementOrder.getSteps()).hasSize(12)
+        assertThat(procurementOrder.getSteps()).hasSize(11)
                 .allSatisfy(step -> {
                     assertThat(step.getOperationType()).isEqualTo("WRITE");
                     assertThat(step.getApprovalRequired()).isTrue();
-                    assertThat(step.getCapabilityId()).isEqualTo(
-                            "capability.cloudmold.procurement.procurement-command.execute.v1");
                 });
+        assertThat(procurementOrder.getSteps().get(0).getCapabilityId()).isEqualTo(
+                "capability.cloudmold.procurement.award-release-command.release-approved-award.v1");
+        assertThat(procurementOrder.getSteps().subList(1, 11))
+                .allSatisfy(step -> assertThat(step.getCapabilityId()).isEqualTo(
+                        "capability.cloudmold.procurement.procurement-command.execute.v1"));
         assertThat(procurementOrder.getSteps()).extracting(SkillTaskDefinition.Step::getStepCode)
-                .containsExactly("purchase_order_a_create", "purchase_order_a_submit",
+                .containsExactly("award_release", "purchase_order_a_submit",
                         "purchase_order_a_approve", "purchase_order_a_release",
                         "purchase_order_a_dispatch", "purchase_order_a_supplier_confirm",
-                        "purchase_order_b_create", "purchase_order_b_submit",
+                        "purchase_order_b_submit",
                         "purchase_order_b_approve", "purchase_order_b_release",
                         "purchase_order_b_dispatch", "purchase_order_b_supplier_confirm");
         SkillTaskDefinition sourcingDecision = workspaceRegistry.require(

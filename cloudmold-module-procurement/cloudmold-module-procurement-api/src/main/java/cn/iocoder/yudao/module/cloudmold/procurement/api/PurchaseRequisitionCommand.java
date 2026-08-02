@@ -24,6 +24,9 @@ public class PurchaseRequisitionCommand {
     private String requisitionCode;
     private String sourceBusinessType;
     private String sourceBusinessRef;
+    private String legalEntityId;
+    private String taxCalculationPolicyCode;
+    private String roundingPolicyCode;
     private String reasonCode;
     private String remark;
     private List<LineDefinition> lines;
@@ -38,6 +41,9 @@ public class PurchaseRequisitionCommand {
         private String canonicalSkuId;
         private BigDecimal requestedQuantity;
         private String uomCode;
+        private String valuationPolicyId;
+        private String valuationPolicyVersion;
+        private String valuationPolicyHash;
         private List<DeliveryScheduleDefinition> schedules;
     }
 

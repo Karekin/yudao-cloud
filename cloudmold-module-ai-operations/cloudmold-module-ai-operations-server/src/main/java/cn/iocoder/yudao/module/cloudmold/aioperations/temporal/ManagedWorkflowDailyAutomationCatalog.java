@@ -68,7 +68,10 @@ final class ManagedWorkflowDailyAutomationCatalog {
             "skill.cloudmold.partner-marketing.kol-media-operations.v1",
             "skill.cloudmold.mes.production-execution-lifecycle.v1",
             "skill.cloudmold.catalog.assortment-planning-lifecycle.v1",
-            "skill.cloudmold.commerce.reuse-ready-master.v1",
+            "skill.cloudmold.commerce.reuse-ready-master.v1"
+    );
+
+    private static final Set<String> RETIRED_DAILY_WORKFLOWS = Set.of(
             "skill.cloudmold.commerce.legacy-projection-plan.v1"
     );
 
@@ -279,6 +282,10 @@ final class ManagedWorkflowDailyAutomationCatalog {
 
     static boolean isDomainBacklog(String skillId) {
         return DOMAIN_BACKLOG_WORKFLOWS.contains(skillId);
+    }
+
+    static boolean isDailyEligible(String skillId) {
+        return !RETIRED_DAILY_WORKFLOWS.contains(skillId);
     }
 
     static ApprovalRoute approvalRoute(String skillId) {

@@ -41,6 +41,7 @@ public class PurchaseRequisitionService implements PurchaseRequisitionCommandApi
     private static final String COMMAND_TYPE = "CREATE_APPROVED_PURCHASE_REQUISITION";
     private static final Pattern SAFE_REF = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}");
     private static final Pattern SAFE_CODE = Pattern.compile("[A-Z][A-Z0-9_-]{0,63}");
+    private static final Pattern SHA_256 = Pattern.compile("[0-9a-f]{64}");
 
     private final ProcurementMapper mapper;
     private final OutboxAppender outboxAppender;
@@ -82,6 +83,9 @@ public class PurchaseRequisitionService implements PurchaseRequisitionCommandApi
                     .setRequisitionId(command.getRequisitionId()).setLineNumber(inputLine.getLineNumber())
                     .setCanonicalSkuId(inputLine.getCanonicalSkuId())
                     .setRequestedQuantity(inputLine.getRequestedQuantity()).setUomCode(inputLine.getUomCode())
+                    .setValuationPolicyId(inputLine.getValuationPolicyId())
+                    .setValuationPolicyVersion(inputLine.getValuationPolicyVersion())
+                    .setValuationPolicyHash(inputLine.getValuationPolicyHash())
                     .setCreatedAt(now).setUpdatedAt(now));
             for (PurchaseRequisitionCommand.DeliveryScheduleDefinition inputSchedule : inputLine.getSchedules()) {
                 referenceValidationPort.requireActiveWarehouse(inputSchedule.getCanonicalWarehouseId());
@@ -99,7 +103,11 @@ public class PurchaseRequisitionService implements PurchaseRequisitionCommandApi
                 .setRequisitionId(command.getRequisitionId()).setTenantId(tenantId)
                 .setRequisitionCode(command.getRequisitionCode())
                 .setSourceBusinessType(command.getSourceBusinessType())
-                .setSourceBusinessRef(command.getSourceBusinessRef()).setStatus("APPROVED")
+                .setSourceBusinessRef(command.getSourceBusinessRef())
+                .setLegalEntityId(command.getLegalEntityId())
+                .setTaxCalculationPolicyCode(command.getTaxCalculationPolicyCode())
+                .setRoundingPolicyCode(command.getRoundingPolicyCode())
+                .setStatus("APPROVED")
                 .setRequestedByPrincipalId(actorPrincipalId).setApprovedByPrincipalId(actorPrincipalId)
                 .setReasonCode(command.getReasonCode()).setRemark(command.getRemark()).setVersion(1L)
                 .setRequestedAt(now).setApprovedAt(now).setCreatedAt(now).setUpdatedAt(now);
@@ -145,6 +153,9 @@ public class PurchaseRequisitionService implements PurchaseRequisitionCommandApi
                     "line_id", line.getLineId(), "line_number", line.getLineNumber(),
                     "canonical_sku_id", line.getCanonicalSkuId(),
                     "requested_quantity", line.getRequestedQuantity(), "uom_code", line.getUomCode(),
+                    "valuation_policy_id", line.getValuationPolicyId(),
+                    "valuation_policy_version", line.getValuationPolicyVersion(),
+                    "valuation_policy_hash", line.getValuationPolicyHash(),
                     "delivery_schedules", schedulePayloads));
         }
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -152,6 +163,9 @@ public class PurchaseRequisitionService implements PurchaseRequisitionCommandApi
         payload.put("requisition_code", header.getRequisitionCode());
         payload.put("source_business_type", header.getSourceBusinessType());
         payload.put("source_business_ref", header.getSourceBusinessRef());
+        payload.put("legal_entity_id", header.getLegalEntityId());
+        payload.put("tax_calculation_policy_code", header.getTaxCalculationPolicyCode());
+        payload.put("rounding_policy_code", header.getRoundingPolicyCode());
         payload.put("status", header.getStatus());
         payload.put("reason_code", header.getReasonCode());
         payload.put("lines", linePayloads);
@@ -177,6 +191,9 @@ public class PurchaseRequisitionService implements PurchaseRequisitionCommandApi
         requireRef(command.getRequisitionCode(), "requisitionCode", 64);
         requireRef(command.getSourceBusinessType(), "sourceBusinessType", 64);
         requireRef(command.getSourceBusinessRef(), "sourceBusinessRef", 128);
+        requireRef(command.getLegalEntityId(), "legalEntityId", 128);
+        requireCode(command.getTaxCalculationPolicyCode(), "taxCalculationPolicyCode");
+        requireCode(command.getRoundingPolicyCode(), "roundingPolicyCode");
         require(command.getOccurredAt() != null, "occurredAt is required");
         require(SAFE_CODE.matcher(command.getReasonCode()).matches(), "reasonCode must be an uppercase code");
         require(command.getLines() != null && !command.getLines().isEmpty() && command.getLines().size() <= 200,
@@ -192,6 +209,10 @@ public class PurchaseRequisitionService implements PurchaseRequisitionCommandApi
             requireQuantity(line.getRequestedQuantity(), "requestedQuantity");
             require(line.getUomCode() != null && SAFE_CODE.matcher(line.getUomCode()).matches(),
                     "uomCode must be an uppercase code");
+            requireRef(line.getValuationPolicyId(), "valuationPolicyId", 128);
+            requireRef(line.getValuationPolicyVersion(), "valuationPolicyVersion", 64);
+            require(line.getValuationPolicyHash() != null && SHA_256.matcher(line.getValuationPolicyHash()).matches(),
+                    "valuationPolicyHash must be a lowercase SHA-256");
             require(line.getSchedules() != null && !line.getSchedules().isEmpty()
                             && line.getSchedules().size() <= 50,
                     "each purchase requisition line must contain between 1 and 50 delivery schedules");
@@ -217,6 +238,11 @@ public class PurchaseRequisitionService implements PurchaseRequisitionCommandApi
     private static void requireQuantity(BigDecimal value, String field) {
         require(value != null && value.signum() > 0 && value.scale() <= 6 && value.precision() <= 24,
                 field + " must be a positive DECIMAL(24,6)");
+    }
+
+    private static void requireCode(String value, String field) {
+        require(value != null && SAFE_CODE.matcher(value).matches(),
+                field + " must be an uppercase code");
     }
 
     private static void requireRef(String value, String field, int maxLength) {

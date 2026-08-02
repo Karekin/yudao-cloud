@@ -109,6 +109,7 @@ cn.iocoder.yudao.module.cloudmold.partnermarketing.api.PartnerMarketingCommandAp
 cn.iocoder.yudao.module.cloudmold.partnermarketing.api.PartnerMarketingQueryApi
 cn.iocoder.yudao.module.cloudmold.promotion.api.PromotionCommandApi
 cn.iocoder.yudao.module.cloudmold.promotion.api.PromotionQueryApi
+cn.iocoder.yudao.module.cloudmold.procurement.api.AwardReleaseCommandApi
 cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommandApi
 cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementQueryApi
 cn.iocoder.yudao.module.cloudmold.procurement.api.PurchaseRequisitionCommandApi

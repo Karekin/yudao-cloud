@@ -72,10 +72,14 @@ public class AiOperationsTemporalSeedRunner implements ApplicationRunner {
                 seedProperties.getOperatorUserId(), seedProperties.getOperatorUserType());
         ManagedWorkflowAgentGovernanceSeeder.ReconcileResult governance =
                 governanceSeeder.reconcile(tenantId, registered);
+        List<ManagedSkillTaskWorkflowView> dailyEligible = registered.stream()
+                .filter(workflow -> ManagedWorkflowDailyAutomationCatalog
+                        .isDailyEligible(workflow.getSkillId()))
+                .toList();
         int created = 0;
         int existing = 0;
         int failed = 0;
-        for (ManagedSkillTaskWorkflowView workflow : registered) {
+        for (ManagedSkillTaskWorkflowView workflow : dailyEligible) {
             try {
                 if (scheduleService.reconcileManagedDaily(workflow, seedProperties)) {
                     created++;
@@ -88,14 +92,14 @@ public class AiOperationsTemporalSeedRunner implements ApplicationRunner {
                         tenantId, workflow.getSkillId(), workflow.getSkillVersion(), exception.getMessage());
             }
         }
-        Set<String> desiredSkillIds = registered.stream()
+        Set<String> desiredSkillIds = dailyEligible.stream()
                 .map(ManagedSkillTaskWorkflowView::getSkillId)
                 .collect(Collectors.toUnmodifiableSet());
         int pausedObsolete = scheduleService.pauseObsoleteManagedDaily(desiredSkillIds);
         log.info("AI Operations Temporal managed daily schedules reconciled for tenant {}: "
                         + "registered={}, created={}, existing={}, failed={}, pausedObsolete={}, "
                         + "governedRoles={}, createdRoles={}, createdPolicies={}, createdGrants={}",
-                tenantId, registered.size(), created, existing, failed, pausedObsolete,
+                tenantId, dailyEligible.size(), created, existing, failed, pausedObsolete,
                 governance.roleCount(), governance.createdRoles(),
                 governance.createdPolicies(), governance.createdGrants());
     }

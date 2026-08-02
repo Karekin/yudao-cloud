@@ -45,10 +45,16 @@ public class PurchaseRequisitionQueryService implements PurchaseRequisitionQuery
                         .lineId(line.getLineId()).lineNumber(line.getLineNumber())
                         .canonicalSkuId(line.getCanonicalSkuId()).requestedQuantity(line.getRequestedQuantity())
                         .uomCode(line.getUomCode())
+                        .valuationPolicyId(line.getValuationPolicyId())
+                        .valuationPolicyVersion(line.getValuationPolicyVersion())
+                        .valuationPolicyHash(line.getValuationPolicyHash())
                         .schedules(schedulesByLine.getOrDefault(line.getLineId(), List.of())).build()).toList();
         return PurchaseRequisitionView.builder()
                 .requisitionId(header.getRequisitionId()).requisitionCode(header.getRequisitionCode())
                 .sourceBusinessType(header.getSourceBusinessType()).sourceBusinessRef(header.getSourceBusinessRef())
+                .legalEntityId(header.getLegalEntityId())
+                .taxCalculationPolicyCode(header.getTaxCalculationPolicyCode())
+                .roundingPolicyCode(header.getRoundingPolicyCode())
                 .status(header.getStatus()).version(header.getVersion()).reasonCode(header.getReasonCode())
                 .remark(header.getRemark()).lines(lineViews).build();
     }

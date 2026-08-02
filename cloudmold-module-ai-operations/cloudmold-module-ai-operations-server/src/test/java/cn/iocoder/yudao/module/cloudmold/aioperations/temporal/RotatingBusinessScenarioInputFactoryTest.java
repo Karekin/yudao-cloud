@@ -227,8 +227,6 @@ class RotatingBusinessScenarioInputFactoryTest {
     void shouldRotateReusableChildBusinessScenariosInsteadOfLeavingDailySchedulesIdle() {
         mockReadyMaster();
         ObjectNode template = completeAfterSaleTemplate();
-        template.putObject("legacyProjection").putArray("plans")
-                .addObject().put("idempotencyKey", "base-projection");
         when(mapper.selectLatestSuccessfulSkillTaskInput(
                 162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL))
                 .thenReturn(JsonUtils.toJsonString(template));
@@ -236,7 +234,6 @@ class RotatingBusinessScenarioInputFactoryTest {
         JsonNode catalog = build(RotatingBusinessScenarioInputFactory.CATALOG_MATRIX_SKILL);
         JsonNode aftersale = build(RotatingBusinessScenarioInputFactory.AFTERSALE_SAGA_SKILL);
         JsonNode master = build(RotatingBusinessScenarioInputFactory.READY_MASTER_SKILL);
-        JsonNode projection = build(RotatingBusinessScenarioInputFactory.LEGACY_PROJECTION_SKILL);
 
         assertThat(catalog.path("definitions").get(0).path("styleCode").asText())
                 .doesNotContain("BASEABC1");
@@ -246,7 +243,6 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(master.path("merchantReference").path("merchantId").asText())
                 .isEqualTo("merchant-1");
         assertThat(master.path("eligibilityAt").asText()).isEqualTo("2026-07-29T00:00:00Z");
-        assertThat(projection.path("plans").get(0).has("idempotencyKey")).isFalse();
     }
 
     @Test
@@ -776,6 +772,12 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(sourcing.path("supplierCandidates")).hasSize(2);
         assertThat(sourcing.path("legalEntityId").asText()).isEqualTo("legal-entity-01");
         assertThat(sourcing.path("purchaseRequisition").path("command").path("lines")).hasSize(2);
+        assertThat(sourcing.path("purchaseRequisition").path("command")
+                .path("legalEntityId").asText()).isEqualTo("legal-entity-01");
+        assertThat(sourcing.path("purchaseRequisition").path("command")
+                .path("taxCalculationPolicyCode").asText()).isEqualTo("STANDARD_V1");
+        assertThat(sourcing.path("purchaseRequisition").path("command").path("lines").get(0)
+                .path("valuationPolicyId").asText()).isEqualTo("policy-1");
         assertThat(sourcing.path("purchaseRequisition").path("command").path("lines").get(0)
                 .path("schedules")).hasSize(2);
         assertThat(sourcing.path("sourcingCommands")).hasSize(15);
@@ -784,28 +786,21 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(sourcing.path("sourcingCommands").get(5).path("command")
                 .path("quotationRevision").path("lines").get(0).path("schedules")).hasSize(2);
         assertThat(sourcing.path("purchaseOrderPlans")).hasSize(2);
+        assertThat(sourcing.path("awardRelease").path("command").path("awardId").asText())
+                .isEqualTo(sourcing.path("awardId").asText());
+        assertThat(sourcing.path("awardRelease").path("command")
+                .path("expectedAwardVersion").asLong()).isEqualTo(3L);
         assertThat(sourcing.path("purchaseOrderPlans").get(0).path("commands").get(0)
-                .path("command").path("purchaseOrder").path("supplierId").asText())
-                .isEqualTo("supplier-a");
+                .path("command").path("operation").asText())
+                .isEqualTo("SUBMIT_PURCHASE_ORDER");
         assertThat(sourcing.path("purchaseOrderPlans").get(0).path("commands").get(0)
-                .path("command").path("purchaseOrder").path("legalEntityId").asText())
-                .isEqualTo("legal-entity-01");
+                .path("command").path("purchaseOrder").path("orderId").asText())
+                .isEqualTo("__AWARD_RELEASE_RESULT__");
         assertThat(sourcing.path("purchaseOrderPlans").get(1).path("commands").get(0)
-                .path("command").path("purchaseOrder").path("legalEntityId").asText())
-                .isEqualTo("legal-entity-01");
-        assertThat(sourcing.path("purchaseOrderPlans").get(0).path("commands").get(0)
-                .path("command").path("purchaseOrder").path("lines").get(0)
-                .path("valuationPolicyId").asText()).isEqualTo("policy-1");
-        assertThat(sourcing.path("purchaseOrderPlans").get(0).path("commands").get(0)
-                .path("command").path("purchaseOrder").path("lines").get(1)
-                .path("valuationPolicyId").asText()).isEqualTo("policy-2");
-        assertThat(sourcing.path("purchaseOrderPlans").get(1).path("commands").get(0)
-                .path("command").path("purchaseOrder").path("lines").get(0)
-                .path("valuationPolicyHash").asText())
-                .matches("[0-9a-f]{64}");
+                .path("command").path("purchaseOrder").has("lines")).isFalse();
         assertThat(procurement.path("purchaseOrders")).hasSize(2);
-        assertThat(procurement.path("purchaseOrders").get(0).path("commands").get(0)
-                .path("command").path("purchaseOrder").path("awardVersion").asLong()).isEqualTo(3L);
+        assertThat(procurement.path("awardRelease").path("command")
+                .path("expectedAwardVersion").asLong()).isEqualTo(3L);
         assertThat(warehouse.path("authority").path("operator").path("principalId").asText())
                 .isEqualTo("principal-owner");
         assertThat(warehouse.path("canonicalWarehouseId").asText()).isEqualTo("warehouse-1");
@@ -1380,9 +1375,11 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .isEqualTo("VERIFIED_ONLY");
         assertThat(input.path("merchant").path("draftCommand")
                 .path("ownerPrincipalId").asText()).isEqualTo("principal-product");
+        assertThat(input.path("replenishment").path("procurement").path("awardRelease")
+                .path("command").path("expectedAwardVersion").asLong()).isEqualTo(3L);
         assertThat(input.path("replenishment").path("procurement").path("purchaseOrders")
                 .get(0).path("commands").get(0).path("command").path("purchaseOrder")
-                .path("lines").get(0).path("canonicalSkuId").asText()).isEqualTo("sku-product");
+                .has("lines")).isFalse();
         assertThat(input.path("traffic").path("campaignCommand")
                 .path("sourceType").asText())
                 .isEqualTo("QUALITY_VERIFIED_WAREHOUSE_ADMISSION");

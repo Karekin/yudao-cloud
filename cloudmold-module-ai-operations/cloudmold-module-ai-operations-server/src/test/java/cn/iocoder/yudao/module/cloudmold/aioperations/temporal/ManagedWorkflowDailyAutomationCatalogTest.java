@@ -89,7 +89,7 @@ class ManagedWorkflowDailyAutomationCatalogTest {
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("ROTATING_BUSINESS_SCENARIO"::equals)
-                .hasSize(38);
+                .hasSize(37);
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("DOMAIN_BACKLOG"::equals)
@@ -97,7 +97,11 @@ class ManagedWorkflowDailyAutomationCatalogTest {
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("EVENT_BACKLOG"::equals)
-                .hasSize(25);
+                .hasSize(26);
+        assertThat(ManagedWorkflowDailyAutomationCatalog.isDailyEligible(
+                "skill.cloudmold.commerce.legacy-projection-plan.v1")).isFalse();
+        assertThat(ManagedWorkflowDailyAutomationCatalog.isDailyEligible(
+                "skill.cloudmold.procurement.order-lifecycle.v1")).isTrue();
         assertThat(ManagedWorkflowDailyAutomationCatalog.inputStrategy(
                 "skill.cloudmold.supply-planning.prepare.v1"))
                 .isEqualTo("DOMAIN_BACKLOG");

@@ -49,7 +49,7 @@ class YudaoCommandOperationServiceTest {
         when(mapper.selectForUpdate(7L, 1L)).thenAnswer(ignored -> row(requestHash.get(), attemptToken.get(), 0, null));
         when(mapper.markSucceeded(anyLong(), anyLong(), anyString(), any())).thenReturn(1);
 
-        assertThat(service.executeLong("CREATE_PURCHASE_ORDER", "purchase-run-001",
+        assertThat(service.executeLong("CREATE_ERP_CUSTOMER", "customer-run-001",
                 new TestCommand("A"), () -> 41L)).isEqualTo(41L);
 
         verify(mapper).markSucceeded(anyLong(), anyLong(), anyString(), any());
@@ -67,7 +67,7 @@ class YudaoCommandOperationServiceTest {
         when(mapper.selectForUpdate(8L, 1L)).thenAnswer(ignored -> row(requestHash.get(), "previous-attempt", 10, "41"));
         @SuppressWarnings("unchecked") Supplier<Long> action = mock(Supplier.class);
 
-        assertThat(service.executeLong("CREATE_PURCHASE_ORDER", "purchase-run-001",
+        assertThat(service.executeLong("CREATE_ERP_CUSTOMER", "customer-run-001",
                 new TestCommand("A"), action)).isEqualTo(41L);
 
         verify(action, never()).get();
@@ -80,7 +80,7 @@ class YudaoCommandOperationServiceTest {
         when(mapper.selectLastInsertId()).thenReturn(9L);
         when(mapper.selectForUpdate(9L, 1L)).thenReturn(row("different-hash", "previous-attempt", 10, "41"));
 
-        assertThatThrownBy(() -> service.executeLong("CREATE_PURCHASE_ORDER", "purchase-run-001",
+        assertThatThrownBy(() -> service.executeLong("CREATE_ERP_CUSTOMER", "customer-run-001",
                 new TestCommand("B"), () -> 42L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("different yudao command payload");
@@ -90,8 +90,8 @@ class YudaoCommandOperationServiceTest {
         YudaoCommandOperationRow row = new YudaoCommandOperationRow();
         row.setOperationId(1L);
         row.setTenantId(1L);
-        row.setOperationType("CREATE_PURCHASE_ORDER");
-        row.setIdempotencyKey("purchase-run-001");
+        row.setOperationType("CREATE_ERP_CUSTOMER");
+        row.setIdempotencyKey("customer-run-001");
         row.setRequestHash(hash);
         row.setAttemptToken(attemptToken);
         row.setStatus(status);

@@ -165,6 +165,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.commerce.catalog-matrix.v1", "1.2.0",
             "skill.cloudmold.commerce.full-chain-hsf.v1", "1.3.0",
             "skill.cloudmold.commerce.legacy-projection-plan.v1", "1.2.0",
+            "skill.cloudmold.procurement.order-lifecycle.v1", "1.1.0",
             "skill.cloudmold.commerce.reuse-ready-master.v1", "1.2.1",
             "skill.cloudmold.commerce.terminal-readback.v1", "1.2.0"
             ,"skill.cloudmold.commerce.order-cancellation-operational.v1", "1.1.0"

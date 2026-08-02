@@ -10,7 +10,6 @@ import cn.iocoder.yudao.module.cloudmold.integration.yudao.wms.LegacyWmsMasterDa
 import cn.iocoder.yudao.module.cloudmold.integration.yudao.wms.LegacyWmsPhysicalOperationsPort;
 import cn.iocoder.yudao.module.erp.controller.admin.finance.vo.payment.ErpFinancePaymentSaveReqVO;
 import cn.iocoder.yudao.module.erp.controller.admin.finance.vo.receipt.ErpFinanceReceiptSaveReqVO;
-import cn.iocoder.yudao.module.erp.controller.admin.purchase.vo.order.ErpPurchaseOrderSaveReqVO;
 import cn.iocoder.yudao.module.erp.controller.admin.purchase.vo.in.ErpPurchaseInSaveReqVO;
 import cn.iocoder.yudao.module.erp.controller.admin.sale.vo.customer.ErpCustomerSaveReqVO;
 import cn.iocoder.yudao.module.erp.controller.admin.sale.vo.order.ErpSaleOrderSaveReqVO;
@@ -164,29 +163,6 @@ public class YudaoLegacyOperationsAdapter implements YudaoErpCommandApi,
         request.setStatus(command.status());
         return operationService.executeLong("CREATE_ERP_WAREHOUSE", command.idempotencyKey(), command,
                 () -> erpWarehouseService.createWarehouse(request));
-    }
-
-    @Override
-    public Long createPurchaseOrder(PurchaseOrderCommand command) {
-        ErpPurchaseOrderSaveReqVO request = new ErpPurchaseOrderSaveReqVO();
-        request.setSupplierId(command.supplierId());
-        request.setAccountId(command.accountId());
-        request.setOrderTime(parseBusinessTime(command.orderTime(), "orderTime"));
-        request.setDiscountPercent(command.discountPercent());
-        request.setDepositPrice(command.depositPrice());
-        request.setRemark(command.remark());
-        request.setItems(command.items().stream().map(line -> {
-            ErpPurchaseOrderSaveReqVO.Item item = new ErpPurchaseOrderSaveReqVO.Item();
-            item.setProductId(line.productId());
-            item.setProductUnitId(line.productUnitId());
-            item.setProductPrice(line.productPrice());
-            item.setCount(line.count());
-            item.setTaxPercent(line.taxPercent());
-            item.setRemark(line.remark());
-            return item;
-        }).toList());
-        return operationService.executeLong("CREATE_PURCHASE_ORDER", command.idempotencyKey(), command,
-                () -> purchaseOrderService.createPurchaseOrder(request));
     }
 
     @Override
