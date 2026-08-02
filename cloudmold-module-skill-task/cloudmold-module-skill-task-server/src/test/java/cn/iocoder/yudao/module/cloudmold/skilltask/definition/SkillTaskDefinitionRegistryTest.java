@@ -359,6 +359,33 @@ class SkillTaskDefinitionRegistryTest {
                 "capability.cloudmold.merchant.merchant-reference-validation.require-active-reference.v1");
         assertThat(merchantRectification.getSteps().get(12).getWaitSuccess()
                 .path("/ticketStatus").asText()).isEqualTo("CLOSED");
+        SkillTaskDefinition managedGrowth = workspaceRegistry.require(
+                "skill.cloudmold.merchant.managed-growth-lifecycle.v1", "1.0.0");
+        assertThat(managedGrowth.getWorkflowLevel()).isEqualTo("BUSINESS_ROLE");
+        assertThat(managedGrowth.getOwnerRole()).isEqualTo("merchant-managed-growth-operator");
+        assertThat(managedGrowth.getRiskLevel()).isEqualTo("R3");
+        assertThat(managedGrowth.getSteps()).hasSize(14);
+        assertThat(managedGrowth.getSteps())
+                .filteredOn(step -> "WRITE".equals(step.getOperationType()))
+                .hasSize(13)
+                .allSatisfy(step -> assertThat(step.getCapabilityId()).isEqualTo(
+                        "capability.cloudmold.merchant.merchant-command.execute.v1"));
+        assertThat(managedGrowth.getSteps().get(4)).satisfies(step -> {
+            assertThat(step.getStepCode()).isEqualTo("accept_ai_diagnostic");
+            assertThat(step.getArguments().toString()).contains("ACCEPT_AI_DIAGNOSTIC");
+        });
+        assertThat(managedGrowth.getSteps().get(12)).satisfies(step -> {
+            assertThat(step.getStepCode()).isEqualTo("record_managed_final_review");
+            assertThat(step.getArguments().toString()).contains("RECORD_MANAGED_FINAL_REVIEW");
+        });
+        assertThat(managedGrowth.getSteps().get(13)).satisfies(step -> {
+            assertThat(step.getStepCode()).isEqualTo("verify_managed_growth_terminal");
+            assertThat(step.getStepKind()).isEqualTo("WAIT_CAPABILITY");
+            assertThat(step.getCapabilityId()).isEqualTo(
+                    "capability.cloudmold.merchant.merchant-managed-admission-workflow-query.inspect.v1");
+            assertThat(step.getWaitSuccess().path("/status").asText()).isEqualTo("SUCCEEDED");
+            assertThat(step.getWaitFailure().path("/status")).hasSize(1);
+        });
         SkillTaskDefinition inTransitScenario = workspaceRegistry.require(
                 "skill.cloudmold.consumer.in-transit-order-scenario.v1", "1.0.0");
         assertThat(inTransitScenario.getWorkflowLevel()).isEqualTo("INTERNAL_SUBFLOW");

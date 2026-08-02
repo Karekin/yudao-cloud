@@ -227,6 +227,48 @@ class ManagedSkillTaskQueryServiceTest {
     }
 
     @Test
+    void shouldDescribeManagedGrowthAsHumanGovernedEvidenceWorkflow() {
+        SkillTaskDefinition definition = SkillTaskDefinition.builder()
+                .skillId("skill.cloudmold.merchant.managed-growth-lifecycle.v1")
+                .skillVersion("1.0.0")
+                .workflowLevel("BUSINESS_ROLE")
+                .ownerRole("merchant-managed-growth-operator")
+                .riskLevel("R3")
+                .maxAttempts(3)
+                .definitionSha256("d".repeat(64))
+                .definitionClosureSha256("c".repeat(64))
+                .steps(List.of(
+                        SkillTaskDefinition.Step.builder()
+                                .stepCode("open_managed_growth_case")
+                                .stepOrder(1)
+                                .operationType("WRITE")
+                                .arguments(JsonNodeFactory.instance.arrayNode())
+                                .build(),
+                        SkillTaskDefinition.Step.builder()
+                                .stepCode("verify_managed_growth_case_resolved")
+                                .stepOrder(2)
+                                .stepKind("WAIT_CAPABILITY")
+                                .operationType("READ")
+                                .arguments(JsonNodeFactory.instance.arrayNode())
+                                .build()))
+                .build();
+        when(registry.all()).thenReturn(List.of(definition));
+
+        List<ManagedSkillTaskWorkflowView> workflows = service.listManagedWorkflows();
+
+        assertThat(workflows).singleElement().satisfies(item -> {
+            assertThat(item.getDisplayName()).isEqualTo("托管商家入驻与成材");
+            assertThat(item.getDescription()).contains("来源归因", "验厂状态机", "Merchant red-zone 命令链")
+                    .contains("不自动授予权益")
+                    .contains("变更等级或执行清退");
+            assertThat(item.getOwnerRole()).isEqualTo("merchant-managed-growth-operator");
+            assertThat(item.getRiskLevel()).isEqualTo("R3");
+            assertThat(item.getWriteStepCount()).isEqualTo(1);
+            assertThat(item.getApprovalRequired()).isTrue();
+        });
+    }
+
+    @Test
     void shouldDescribeOperationalOrderCancellationWithHonestPspBoundary() {
         SkillTaskDefinition definition = SkillTaskDefinition.builder()
                 .skillId("skill.cloudmold.commerce.order-cancellation-operational.v1")

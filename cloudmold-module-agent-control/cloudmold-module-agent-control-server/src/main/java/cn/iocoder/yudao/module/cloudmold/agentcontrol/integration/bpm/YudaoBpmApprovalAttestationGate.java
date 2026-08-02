@@ -19,16 +19,24 @@ public class YudaoBpmApprovalAttestationGate implements AgentApprovalWorkflowAtt
 
     private final AgentControlStoreMapper mapper;
     private final AgentApprovalResponsibilityResolver responsibilityResolver;
+    private final AgentApprovalWorkflowProperties properties;
 
     @Autowired
     public YudaoBpmApprovalAttestationGate(AgentControlStoreMapper mapper,
-                                           AgentApprovalResponsibilityResolver responsibilityResolver) {
+                                           AgentApprovalResponsibilityResolver responsibilityResolver,
+                                           AgentApprovalWorkflowProperties properties) {
         this.mapper = mapper;
         this.responsibilityResolver = responsibilityResolver;
+        this.properties = properties;
     }
 
     YudaoBpmApprovalAttestationGate(AgentControlStoreMapper mapper) {
-        this(mapper, new AgentApprovalResponsibilityResolver(mapper));
+        this(mapper, new AgentApprovalResponsibilityResolver(mapper), new AgentApprovalWorkflowProperties());
+    }
+
+    YudaoBpmApprovalAttestationGate(AgentControlStoreMapper mapper,
+                                    AgentApprovalResponsibilityResolver responsibilityResolver) {
+        this(mapper, responsibilityResolver, new AgentApprovalWorkflowProperties());
     }
 
     @Override
@@ -67,21 +75,66 @@ public class YudaoBpmApprovalAttestationGate implements AgentApprovalWorkflowAtt
                 "BPM operating-principal approval authority violates separation of duties");
         require(binding.getTerminalTaskId() != null && !binding.getTerminalTaskId().isBlank(),
                 "BPM terminal evidence does not identify the governed approval task");
+        boolean aiTerminal = isAiTerminal(binding, workOrder);
         if ("R3".equals(binding.getRiskLevel())) {
-            responsibilityResolver.assertCurrent(binding, workOrder, binding.getTerminalOperatorUserId(),
-                    binding.getTerminalTaskDefinitionKey(), decision,
-                    LocalDateTime.now(ZoneOffset.UTC));
+            if (aiTerminal) {
+                responsibilityResolver.assertSnapshotCurrent(binding, workOrder,
+                        LocalDateTime.now(ZoneOffset.UTC));
+            } else {
+                responsibilityResolver.assertCurrent(binding, workOrder, binding.getTerminalOperatorUserId(),
+                        binding.getTerminalTaskDefinitionKey(), decision,
+                        LocalDateTime.now(ZoneOffset.UTC));
+            }
         } else {
-            require(Objects.equals(binding.getTerminalOperatorUserId(), operatorUserId),
-                    "BPM terminal task completer does not match the authenticated approver");
-            require(Objects.equals(binding.getTerminalTaskDefinitionKey(),
-                            YudaoBpmApprovalWorkflowAdapter.APPROVAL_TASK_KEY),
-                    "BPM terminal evidence does not identify the governed approval task");
+            if (!aiTerminal) {
+                require(Objects.equals(binding.getTerminalOperatorUserId(), operatorUserId),
+                        "BPM terminal task completer does not match the authenticated approver");
+                require(Objects.equals(binding.getTerminalTaskDefinitionKey(),
+                                YudaoBpmApprovalWorkflowAdapter.APPROVAL_TASK_KEY),
+                        "BPM terminal evidence does not identify the governed approval task");
+            }
         }
     }
 
     @Override
     public boolean supportsR3MultiPartyApproval() {
+        return true;
+    }
+
+    @Override
+    public boolean permitsAiPolicyVersionDrift(Long tenantId, Long operatorUserId, Approval approval) {
+        ApprovalWorkflowBinding binding = mapper.selectApprovalWorkflowBinding(tenantId, approval.getApprovalId());
+        if (binding == null
+                || !"BPM_APPROVED_PENDING_ATTESTATION".equals(binding.getStatus())
+                || !Objects.equals(binding.getApproverUserId(), operatorUserId)
+                || !Objects.equals(binding.getTenantId(), tenantId)
+                || !Objects.equals(binding.getWorkOrderId(), approval.getWorkOrderId())
+                || !Objects.equals(binding.getActionCode(), approval.getActionCode())
+                || !Objects.equals(binding.getScopeHash(), approval.getScopeHash())) {
+            return false;
+        }
+        WorkOrder workOrder = mapper.selectWorkOrder(tenantId, approval.getWorkOrderId());
+        return workOrder != null && isAiTerminal(binding, workOrder);
+    }
+
+    private boolean isAiTerminal(ApprovalWorkflowBinding binding, WorkOrder workOrder) {
+        Long terminalUserId = binding.getTerminalOperatorUserId();
+        if (!properties.isAiReviewerOrSignEnabled()
+                || !properties.getAiReviewerUserIds().contains(terminalUserId)
+                || !properties.getAiReviewAllowedRiskLevels().contains(binding.getRiskLevel())) {
+            return false;
+        }
+        require(!Objects.equals(terminalUserId, binding.getRequesterUserId())
+                        && !Objects.equals(terminalUserId, workOrder.getAssigneeUserId())
+                        && !Objects.equals(terminalUserId, binding.getApproverUserId()),
+                "AI OR-sign reviewer violates separation of duties");
+        require(Objects.equals(binding.getTerminalTaskDefinitionKey(),
+                        YudaoBpmApprovalWorkflowAdapter.AI_APPROVAL_TASK_KEY)
+                        || Objects.equals(binding.getTerminalTaskDefinitionKey(),
+                        YudaoBpmApprovalWorkflowAdapter.APPROVAL_TASK_KEY)
+                        || Objects.equals(binding.getTerminalTaskDefinitionKey(),
+                        YudaoBpmApprovalWorkflowAdapter.RESPONSIBILITY_TASK_KEY),
+                "AI terminal evidence does not identify a governed approval task");
         return true;
     }
 

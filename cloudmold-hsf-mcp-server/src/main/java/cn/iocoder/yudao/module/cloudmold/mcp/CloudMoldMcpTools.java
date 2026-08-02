@@ -25,6 +25,9 @@ public class CloudMoldMcpTools {
     static final String LIST_TOOL_NAME = "cloudmold_capability_list";
     static final String DESCRIBE_TOOL_NAME = "cloudmold_capability_describe";
     static final String INVOKE_READ_TOOL_NAME = "cloudmold_capability_read_invoke";
+    static final String AI_APPROVAL_TOOL_NAME = "cloudmold_agent_approval_submit_decision";
+    private static final String AI_APPROVAL_CAPABILITY =
+            "capability.cloudmold.agentcontrol.agent-approval-review.submit-decision.v1";
 
     private final CloudMoldCapabilityCatalog catalog;
     private final CapabilityContractDescriber contractDescriber;
@@ -67,6 +70,25 @@ public class CloudMoldMcpTools {
                         "operatorType", "skillId", "runId")));
     }
 
+    McpSchema.Tool aiApprovalTool() {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("tenantId", Map.of("type", "integer", "minimum", 1));
+        properties.put("operatorId", Map.of("type", "integer", "minimum", 1));
+        properties.put("operatorType", Map.of("type", "integer", "minimum", 1));
+        properties.put("skillId", Map.of("type", "string", "minLength", 1));
+        properties.put("runId", Map.of("type", "string", "minLength", 1));
+        properties.put("idempotencyKey", Map.of("type", "string", "minLength", 1));
+        properties.put("approvalId", Map.of("type", "string", "minLength", 1));
+        properties.put("decision", Map.of("type", "string", "enum", List.of("APPROVE", "REJECT")));
+        properties.put("reason", Map.of("type", "string", "minLength", 1));
+        properties.put("modelId", Map.of("type", "string", "minLength", 1));
+        properties.put("modelRunId", Map.of("type", "string", "minLength", 1));
+        properties.put("evidenceSha256", Map.of("type", "string", "pattern", "^[0-9a-f]{64}$"));
+        return writeTool(AI_APPROVAL_TOOL_NAME,
+                "Submit one audited Agent approval decision through the fixed HSF capability; the provider enforces the dedicated AI identity, tenant, risk allowlist, BPM task and separation of duties",
+                objectSchema(properties, List.copyOf(properties.keySet())));
+    }
+
     McpSchema.CallToolResult list(McpSyncServerExchange exchange, McpSchema.CallToolRequest request) {
         return guarded(() -> {
             String requestedType = optionalString(request.arguments(), "operationType");
@@ -104,6 +126,28 @@ public class CloudMoldMcpTools {
             JsonNode result = executor.execute(capabilityId, argumentArray, context, false);
             return Map.of("capabilityId", capabilityId, "runId", context.runId(), "status", "SUCCEEDED",
                     "result", asStructured(result));
+        });
+    }
+
+    McpSchema.CallToolResult aiApproval(McpSyncServerExchange exchange, McpSchema.CallToolRequest request) {
+        return guarded(() -> {
+            Map<String, Object> values = request.arguments();
+            CloudMoldRpcCallContext context = new CloudMoldRpcCallContext(
+                    positiveLong(values, "tenantId"), positiveLong(values, "operatorId"),
+                    Math.toIntExact(positiveLong(values, "operatorType")),
+                    requiredString(values, "skillId"), requiredString(values, "runId"));
+            Map<String, Object> command = new LinkedHashMap<>();
+            command.put("idempotencyKey", requiredString(values, "idempotencyKey"));
+            command.put("approvalId", requiredString(values, "approvalId"));
+            command.put("decision", requiredString(values, "decision"));
+            command.put("reason", requiredString(values, "reason"));
+            command.put("modelId", requiredString(values, "modelId"));
+            command.put("modelRunId", requiredString(values, "modelRunId"));
+            command.put("evidenceSha256", requiredString(values, "evidenceSha256"));
+            JsonNode result = executor.execute(AI_APPROVAL_CAPABILITY,
+                    objectMapper.valueToTree(List.of(command)), context, true);
+            return Map.of("capabilityId", AI_APPROVAL_CAPABILITY, "runId", context.runId(),
+                    "status", "SUCCEEDED", "result", asStructured(result));
         });
     }
 
@@ -167,6 +211,18 @@ public class CloudMoldMcpTools {
                 .annotations(McpSchema.ToolAnnotations.builder()
                         .readOnlyHint(true)
                         .destructiveHint(false)
+                        .idempotentHint(true)
+                        .openWorldHint(false)
+                        .build())
+                .build();
+    }
+
+    private static McpSchema.Tool writeTool(String name, String description, Map<String, Object> schema) {
+        return McpSchema.Tool.builder(name, schema)
+                .description(description)
+                .annotations(McpSchema.ToolAnnotations.builder()
+                        .readOnlyHint(false)
+                        .destructiveHint(true)
                         .idempotentHint(true)
                         .openWorldHint(false)
                         .build())

@@ -1,4 +1,5 @@
 cn.iocoder.yudao.module.cloudmold.agentcontrol.api.workflow
+cn.iocoder.yudao.module.cloudmold.agentcontrol.api.review
 cn.iocoder.yudao.module.cloudmold.aftersale.api
 cn.iocoder.yudao.module.cloudmold.aioperations.api
 cn.iocoder.yudao.module.cloudmold.catalog.api

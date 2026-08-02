@@ -8,8 +8,10 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -129,6 +131,77 @@ class YudaoBpmApprovalAttestationGateTest {
         when(mapper.selectApprovalWorkflowBinding(17L, "approval-1")).thenReturn(rejected);
         assertThatCode(() -> r3Gate.assertDecisionAllowed(17L, 200L, approval, "REJECT"))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void allowsTheDedicatedAiReviewerToCompleteTheR2OrSignBranch() {
+        allowIndependentApprover();
+        AgentApprovalWorkflowProperties properties = aiOrSignProperties("R2");
+        YudaoBpmApprovalAttestationGate aiGate = new YudaoBpmApprovalAttestationGate(
+                mapper, mock(AgentApprovalResponsibilityResolver.class), properties);
+        when(mapper.selectApprovalWorkflowBinding(17L, "approval-1"))
+                .thenReturn(binding("BPM_APPROVED_PENDING_ATTESTATION")
+                        .setTerminalOperatorUserId(229L)
+                        .setTerminalTaskDefinitionKey(YudaoBpmApprovalWorkflowAdapter.AI_APPROVAL_TASK_KEY));
+
+        assertThatCode(() -> aiGate.assertDecisionAllowed(17L, 200L, approval(), "APPROVE"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void onlyDedicatedAiTerminalEvidencePermitsPolicyVersionDrift() {
+        allowIndependentApprover();
+        AgentApprovalWorkflowProperties properties = aiOrSignProperties("R2");
+        YudaoBpmApprovalAttestationGate aiGate = new YudaoBpmApprovalAttestationGate(
+                mapper, mock(AgentApprovalResponsibilityResolver.class), properties);
+        when(mapper.selectApprovalWorkflowBinding(17L, "approval-1"))
+                .thenReturn(binding("BPM_APPROVED_PENDING_ATTESTATION")
+                        .setTerminalOperatorUserId(229L)
+                        .setTerminalTaskDefinitionKey(YudaoBpmApprovalWorkflowAdapter.AI_APPROVAL_TASK_KEY));
+
+        assertThat(aiGate.permitsAiPolicyVersionDrift(17L, 200L, approval())).isTrue();
+        assertThat(aiGate.permitsAiPolicyVersionDrift(17L, 201L, approval())).isFalse();
+    }
+
+    @Test
+    void allowsAiLegacyTakeoverForR3OnlyAfterRevalidatingTheFrozenResponsibilitySnapshot() {
+        AgentApprovalResponsibilityResolver resolver = mock(AgentApprovalResponsibilityResolver.class);
+        AgentApprovalWorkflowProperties properties = aiOrSignProperties("R3");
+        YudaoBpmApprovalAttestationGate aiGate =
+                new YudaoBpmApprovalAttestationGate(mapper, resolver, properties);
+        WorkOrder workOrder = new WorkOrder().setTenantId(17L).setWorkOrderId("work-1")
+                .setRoleCode("buyer").setActionCode("purchase.commit")
+                .setRiskLevel("R3").setAssigneeUserId(300L);
+        when(mapper.selectWorkOrder(17L, "work-1")).thenReturn(workOrder);
+        when(mapper.selectApprovalWorkflowBinding(17L, "approval-1"))
+                .thenReturn(binding("BPM_APPROVED_PENDING_ATTESTATION")
+                        .setRiskLevel("R3").setTerminalOperatorUserId(229L)
+                        .setTerminalTaskDefinitionKey(YudaoBpmApprovalWorkflowAdapter.RESPONSIBILITY_TASK_KEY));
+
+        assertThatCode(() -> aiGate.assertDecisionAllowed(17L, 200L, approval(), "APPROVE"))
+                .doesNotThrowAnyException();
+        org.mockito.Mockito.verify(resolver).assertSnapshotCurrent(
+                any(), any(), any(LocalDateTime.class));
+    }
+
+    @Test
+    void rejectsAnAiTerminalWhenOrSignIsNotEnabled() {
+        allowIndependentApprover();
+        when(mapper.selectApprovalWorkflowBinding(17L, "approval-1"))
+                .thenReturn(binding("BPM_APPROVED_PENDING_ATTESTATION")
+                        .setTerminalOperatorUserId(229L)
+                        .setTerminalTaskDefinitionKey(YudaoBpmApprovalWorkflowAdapter.AI_APPROVAL_TASK_KEY));
+
+        assertThatThrownBy(() -> gate.assertDecisionAllowed(17L, 200L, approval(), "APPROVE"))
+                .hasMessage("BPM terminal task completer does not match the authenticated approver");
+    }
+
+    private static AgentApprovalWorkflowProperties aiOrSignProperties(String riskLevel) {
+        AgentApprovalWorkflowProperties properties = new AgentApprovalWorkflowProperties();
+        properties.setAiReviewerOrSignEnabled(true);
+        properties.setAiReviewerUserIds(Set.of(229L));
+        properties.setAiReviewAllowedRiskLevels(Set.of(riskLevel));
+        return properties;
     }
 
     private static Approval approval() {

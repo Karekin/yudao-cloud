@@ -19,6 +19,7 @@ final class AgentApprovalR3Policy {
         String action = actionCode == null ? "" : actionCode.trim().toLowerCase(Locale.ROOT);
         if (action.equals("commerce.autonomous-day")
                 || action.equals("commerce.full-chain")
+                || action.equals("commerce-full-chain")
                 || action.equals("consumer.journey")) {
             return List.of("customer-service", "finance");
         }
@@ -31,8 +32,8 @@ final class AgentApprovalR3Policy {
         if (action.equals("merchant-experience.rectification")) {
             return List.of("customer-service", "operations-lead");
         }
-        if (startsWithAny(action, "buyer.", "purchase.", "procurement.", "replenishment.",
-                "supply-planning.", "supplier.")) {
+        if (startsWithAny(action, "buyer.", "purchase.", "purchase-order.", "procurement.",
+                "replenishment.", "supply-planning.", "supplier.")) {
             return List.of("buyer", "finance");
         }
         if (startsWithAny(action, "warehouse.", "wms.")) {
@@ -41,10 +42,14 @@ final class AgentApprovalR3Policy {
         if (action.startsWith("finance.")) {
             return List.of("risk", "operations-control");
         }
+        if (action.startsWith("risk.")) {
+            return List.of("risk", "legal");
+        }
         if (startsWithAny(action, "mission.stockout", "inventory.stockout")) {
             return List.of("risk", "finance");
         }
-        if (startsWithAny(action, "catalog.", "product.", "listing.", "pricing.", "merchandising.")) {
+        if (startsWithAny(action, "assortment.", "catalog.", "product.", "listing.",
+                "pricing.", "merchandising.")) {
             return List.of("risk", "finance");
         }
         if (startsWithAny(action, "merchant.", "merchant-operations.", "merchant-experience.",

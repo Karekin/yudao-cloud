@@ -6,8 +6,8 @@ import cn.iocoder.yudao.module.bpm.api.definition.dto.BpmSystemModelRegisterReqD
 import cn.iocoder.yudao.module.bpm.api.task.BpmProcessInstanceApi;
 import cn.iocoder.yudao.module.bpm.api.task.dto.BpmProcessInstanceCreateReqDTO;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.dal.dataobject.AgentControlRecords.ApprovalWorkflowStartCandidate;
-import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -19,19 +19,34 @@ import java.util.List;
 import java.util.Map;
 
 @Component
-@RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "cloudmold.agent-control.approval-workflow",
         name = "enabled", havingValue = "true")
 public class YudaoBpmApprovalWorkflowAdapter implements AgentApprovalWorkflowAdapter {
 
     static final String APPROVAL_TASK_KEY = "approval_review";
     static final String RESPONSIBILITY_TASK_KEY = "domain_responsibility_countersign";
+    static final String AI_APPROVAL_TASK_KEY = "ai_approval_review";
     private static final String MODEL_CATEGORY = "cloudmold-agent-control";
     private static final String MODEL_RESOURCE =
             "approval-workflow/cloudmold-agent-approval-v1.bpmn20.xml";
 
     private final BpmProcessInstanceApi bpmProcessInstances;
     private final BpmSystemModelApi bpmSystemModels;
+    private final AgentApprovalWorkflowProperties properties;
+
+    @Autowired
+    public YudaoBpmApprovalWorkflowAdapter(BpmProcessInstanceApi bpmProcessInstances,
+                                            BpmSystemModelApi bpmSystemModels,
+                                            AgentApprovalWorkflowProperties properties) {
+        this.bpmProcessInstances = bpmProcessInstances;
+        this.bpmSystemModels = bpmSystemModels;
+        this.properties = properties;
+    }
+
+    YudaoBpmApprovalWorkflowAdapter(BpmProcessInstanceApi bpmProcessInstances,
+                                     BpmSystemModelApi bpmSystemModels) {
+        this(bpmProcessInstances, bpmSystemModels, new AgentApprovalWorkflowProperties());
+    }
 
     @Override
     public String start(ApprovalWorkflowStartCandidate candidate) {
@@ -44,6 +59,7 @@ public class YudaoBpmApprovalWorkflowAdapter implements AgentApprovalWorkflowAda
         if (candidate.getApproverUserId().equals(candidate.getExecutorUserId())) {
             throw new IllegalStateException("BPM approval approver must differ from work-order executor");
         }
+        Long aiReviewerUserId = resolveAiReviewer(candidate);
         List<Long> responsibilityApprovers =
                 candidate.getResponsibilityApproverUserIds() == null
                         ? List.of() : candidate.getResponsibilityApproverUserIds();
@@ -86,6 +102,7 @@ public class YudaoBpmApprovalWorkflowAdapter implements AgentApprovalWorkflowAda
         variables.put("countersign_strategy", "R3".equals(candidate.getRiskLevel())
                 ? "SERIAL_STAGE_THEN_PARALLEL_UNANIMOUS"
                 : "NOT_REQUIRED");
+        variables.put("ai_or_sign_enabled", aiReviewerUserId != null);
         variables.put("business_action", presentation.businessAction());
         variables.put("impact_objects", presentation.impactObjects());
         variables.put("impact_metrics", presentation.impactMetrics());
@@ -95,6 +112,9 @@ public class YudaoBpmApprovalWorkflowAdapter implements AgentApprovalWorkflowAda
         variables.put("execution_steps", presentation.executionSteps());
         Map<String, List<Long>> assignees = new LinkedHashMap<>();
         assignees.put(APPROVAL_TASK_KEY, List.of(candidate.getApproverUserId()));
+        if (aiReviewerUserId != null) {
+            assignees.put(AI_APPROVAL_TASK_KEY, List.of(aiReviewerUserId));
+        }
         if ("R3".equals(candidate.getRiskLevel())) {
             assignees.put(RESPONSIBILITY_TASK_KEY, responsibilityApprovers);
         }
@@ -111,11 +131,31 @@ public class YudaoBpmApprovalWorkflowAdapter implements AgentApprovalWorkflowAda
         return processInstanceId;
     }
 
+    private Long resolveAiReviewer(ApprovalWorkflowStartCandidate candidate) {
+        if (!properties.isAiReviewerOrSignEnabled()
+                || !properties.getAiReviewAllowedRiskLevels().contains(candidate.getRiskLevel())) {
+            return null;
+        }
+        if (properties.getAiReviewerUserIds().size() != 1) {
+            throw new IllegalStateException("AI OR-sign requires exactly one dedicated AI reviewer");
+        }
+        Long aiReviewerUserId = properties.getAiReviewerUserIds().iterator().next();
+        if (aiReviewerUserId == null || aiReviewerUserId <= 0
+                || aiReviewerUserId.equals(candidate.getRequesterUserId())
+                || aiReviewerUserId.equals(candidate.getExecutorUserId())
+                || aiReviewerUserId.equals(candidate.getApproverUserId())
+                || (candidate.getResponsibilityApproverUserIds() != null
+                    && candidate.getResponsibilityApproverUserIds().contains(aiReviewerUserId))) {
+            throw new IllegalStateException("AI OR-sign reviewer violates separation of duties");
+        }
+        return aiReviewerUserId;
+    }
+
     private void ensureWorkflowModel(ApprovalWorkflowStartCandidate candidate) {
         BpmSystemModelRegisterReqDTO request = new BpmSystemModelRegisterReqDTO()
                 .setKey(candidate.getProcessDefinitionKey())
                 .setName("Agent 高风险动作审批")
-                .setDescription("CloudMold Agent 在执行 R2/R3 写操作前发起，由人工审批后自动回调并恢复运行。")
+                .setDescription("CloudMold Agent 在执行 R2/R3 写操作前发起，由人工审批路径或独立 AI 审批人任一通过后自动回调并恢复运行。")
                 .setCategoryCode(MODEL_CATEGORY)
                 .setCategoryName("AI 运营审批")
                 .setBpmnXml(readModel())

@@ -142,9 +142,13 @@ class AgentApprovalResponsibilityResolverTest {
     void mapsEveryGovernedR3ActionDomain() {
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("purchase.commit"))
                 .containsExactly("buyer", "finance");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("purchase-order.dispatch"))
+                .containsExactly("buyer", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("buyer.execute-replenishment"))
                 .containsExactly("buyer", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("listing.batch-publish"))
+                .containsExactly("risk", "finance");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("assortment.plan-release"))
                 .containsExactly("risk", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("merchant.penalty"))
                 .containsExactly("risk", "legal");
@@ -171,6 +175,8 @@ class AgentApprovalResponsibilityResolverTest {
                 .containsExactly("risk", "legal");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("commerce.autonomous-day"))
                 .containsExactly("customer-service", "finance");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("commerce-full-chain"))
+                .containsExactly("customer-service", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("category.daily-operations"))
                 .containsExactly("risk", "operations-lead");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("consumer.journey"))
@@ -183,6 +189,8 @@ class AgentApprovalResponsibilityResolverTest {
                 .containsExactly("inventory-control", "operations-control");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("finance.period-close"))
                 .containsExactly("risk", "operations-control");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("risk.dispute-resolve"))
+                .containsExactly("risk", "legal");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("mission.stockout.start"))
                 .containsExactly("risk", "finance");
         assertThatThrownBy(() -> AgentApprovalR3Policy.requiredRoleCodes("unknown.write"))

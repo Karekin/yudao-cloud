@@ -1,5 +1,8 @@
 package cn.iocoder.yudao.module.cloudmold.agentcontrol.api;
 
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.review.AgentApprovalReviewCommand;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.review.AgentApprovalReviewContext;
+import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.review.AgentApprovalReviewResult;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.workflow.MissionLifecycleGoalView;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.workflow.MissionLifecycleWorkOrderView;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.workflow.MissionLifecycleWorkflowCommand;
@@ -19,7 +22,8 @@ class AgentControlSerializationContractTest {
         Stream.concat(Stream.of(AgentControlCommand.class, AgentAuthorityCommand.class, AgentControlResult.class,
                                 MissionLifecycleWorkflowCommand.class, MissionLifecycleWorkflowCommandResult.class,
                                 MissionLifecycleWorkflowView.class, MissionLifecycleGoalView.class,
-                                MissionLifecycleWorkOrderView.class),
+                                MissionLifecycleWorkOrderView.class, AgentApprovalReviewCommand.class,
+                                AgentApprovalReviewContext.class, AgentApprovalReviewResult.class),
                         Stream.concat(Arrays.stream(AgentControlCommand.class.getDeclaredClasses()),
                                 Arrays.stream(AgentAuthorityCommand.class.getDeclaredClasses()))
                                 .filter(type -> !type.getSimpleName().endsWith("Builder")))

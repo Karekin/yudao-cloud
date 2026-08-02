@@ -75,19 +75,7 @@ public class AgentApprovalResponsibilityResolver {
     public Resolution assertCurrent(ApprovalWorkflowBinding binding, WorkOrder workOrder,
                                     Long terminalOperatorUserId, String terminalTaskDefinitionKey,
                                     String decision, LocalDateTime now) {
-        ApprovalWorkflowStartCandidate frozen = new ApprovalWorkflowStartCandidate()
-                .setTenantId(binding.getTenantId()).setApprovalId(binding.getApprovalId())
-                .setWorkOrderId(binding.getWorkOrderId()).setActionCode(binding.getActionCode())
-                .setRoleCode(binding.getRoleCode()).setRiskLevel(binding.getRiskLevel())
-                .setRequesterUserId(binding.getRequesterUserId()).setExecutorUserId(workOrder.getAssigneeUserId())
-                .setApproverUserId(binding.getApproverUserId()).setScopeHash(binding.getScopeHash());
-        Resolution current = resolve(frozen, now);
-        require(Objects.equals(binding.getResponsibilityAuthoritySha256(), current.authoritySha256()),
-                "R3 responsibility authorization snapshot is stale or drifted");
-        require(Objects.equals(parseStrings(binding.getResponsibilityRoleCodesJson()), current.roleCodes()),
-                "R3 responsibility role snapshot drifted");
-        require(Objects.equals(parseLongs(binding.getResponsibilityApproverUserIdsJson()), current.approverUserIds()),
-                "R3 responsibility approver snapshot drifted");
+        Resolution current = assertSnapshotCurrent(binding, workOrder, now);
 
         boolean operatingPrincipalTask =
                 YudaoBpmApprovalWorkflowAdapter.APPROVAL_TASK_KEY.equals(terminalTaskDefinitionKey);
@@ -101,6 +89,24 @@ public class AgentApprovalResponsibilityResolver {
                             || (responsibilityTask && current.approverUserIds().contains(terminalOperatorUserId)),
                     "R3 rejection must come from an authorized operating or responsibility approver");
         }
+        return current;
+    }
+
+    public Resolution assertSnapshotCurrent(ApprovalWorkflowBinding binding, WorkOrder workOrder,
+                                            LocalDateTime now) {
+        ApprovalWorkflowStartCandidate frozen = new ApprovalWorkflowStartCandidate()
+                .setTenantId(binding.getTenantId()).setApprovalId(binding.getApprovalId())
+                .setWorkOrderId(binding.getWorkOrderId()).setActionCode(binding.getActionCode())
+                .setRoleCode(binding.getRoleCode()).setRiskLevel(binding.getRiskLevel())
+                .setRequesterUserId(binding.getRequesterUserId()).setExecutorUserId(workOrder.getAssigneeUserId())
+                .setApproverUserId(binding.getApproverUserId()).setScopeHash(binding.getScopeHash());
+        Resolution current = resolve(frozen, now);
+        require(Objects.equals(binding.getResponsibilityAuthoritySha256(), current.authoritySha256()),
+                "R3 responsibility authorization snapshot is stale or drifted");
+        require(Objects.equals(parseStrings(binding.getResponsibilityRoleCodesJson()), current.roleCodes()),
+                "R3 responsibility role snapshot drifted");
+        require(Objects.equals(parseLongs(binding.getResponsibilityApproverUserIdsJson()), current.approverUserIds()),
+                "R3 responsibility approver snapshot drifted");
         return current;
     }
 

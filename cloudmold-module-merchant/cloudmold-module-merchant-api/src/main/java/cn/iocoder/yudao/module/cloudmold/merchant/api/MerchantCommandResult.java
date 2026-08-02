@@ -3,6 +3,8 @@ package cn.iocoder.yudao.module.cloudmold.merchant.api;
 import lombok.Data;
 import lombok.experimental.Accessors;
 
+import java.util.List;
+
 @Data
 @Accessors(chain = true)
 public class MerchantCommandResult {
@@ -35,5 +37,54 @@ public class MerchantCommandResult {
     private Long sourceMappingVersion;
     private String listingUnpublishSagaId;
     private Integer affectedListingCount;
+    private String admissionId;
+    private String admissionStatus;
+    private Long admissionVersion;
+    private String evidencePackageId;
+    private String evidencePackageStatus;
+    private Long evidencePackageVersion;
+    private String evidencePackageRef;
+    private List<MerchantManagedEvidenceItem> evidenceItems;
+    private String diagnosticId;
+    private String diagnosticStatus;
+    private Long diagnosticVersion;
+    private String recommendationCode;
+    private String recommendationSummary;
+    private String inspectionTaskId;
+    private String inspectionTaskStatus;
+    private Long inspectionTaskVersion;
+    private String inspectionOutcomeEvidenceRef;
+    private String invitationId;
+    private String invitationCode;
+    private String invitationStatus;
+    private Long invitationVersion;
+    private String buyerAssignmentId;
+    private String buyerAssignmentStatus;
+    private Long buyerAssignmentVersion;
+    private String buyerTlPrincipalId;
+    private String buyerPrincipalId;
+    private String gradeDecisionId;
+    private String gradeCode;
+    private String gradeTransitionDecision;
+    private String gradeDecisionStatus;
+    private Long gradeDecisionVersion;
+    private List<MerchantBenefitEntitlementItem> benefitEntitlements;
+    private String probationAssessmentId;
+    private String probationAssessmentStatus;
+    private Long probationAssessmentVersion;
+    private List<MerchantProbationGateItem> probationGates;
+    private String scorecardId;
+    private String scorecardMonth;
+    private String scorecardStatus;
+    private Long scorecardVersion;
+    private List<MerchantScorecardItem> scorecardItems;
+    private String exitDecisionId;
+    private String exitReasonType;
+    private String exitDecisionStatus;
+    private Long exitDecisionVersion;
+    private String finalReviewId;
+    private String finalReviewStatus;
+    private Long finalReviewVersion;
+    private String reviewDecision;
     private boolean duplicate;
 }

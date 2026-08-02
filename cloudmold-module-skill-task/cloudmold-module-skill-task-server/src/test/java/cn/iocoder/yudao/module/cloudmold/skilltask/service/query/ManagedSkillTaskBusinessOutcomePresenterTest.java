@@ -410,6 +410,43 @@ class ManagedSkillTaskBusinessOutcomePresenterTest {
     }
 
     @Test
+    void shouldExposeReplenishmentSkuQuantityAndBusinessDocuments() {
+        ManagedSkillTaskBusinessOutcomeView outcome = presenter.present(
+                task("skill.cloudmold.supply.replenishment-lifecycle.v1", """
+                        {"procurement":{"purchaseOrder":{"canonicalSkuId":"sku-id","orderId":"po-id",
+                          "orderCode":"AI-PO-100","orderedQuantity":500,"uomCode":"EA",
+                          "totalAmountMinor":1050000,"currencyCode":"CNY"}},
+                         "sourcing":{"sourcingCase":{"id":"rfq-id","rfqCode":"AI-RFQ-100"}},
+                         "warehouse":{"item":{"skus":[{"code":"DEWU-DUNK-PANDA-38"}]},
+                           "receipt":{"id":"receipt-id","no":"AI-RK-100"},
+                           "movement":{"id":"movement-id","no":"AI-DB-100"},
+                           "shipment":{"id":"shipment-id","no":"AI-CK-100"}}}
+                        """),
+                List.of(step("open_replenishment_day", "{\"status\":\"OPEN\"}"),
+                        step("claim_replenishment_day", "{\"status\":\"CLAIMED\"}")));
+
+        assertThat(outcome.getHeadline()).isEqualTo("补货 SKU DEWU-DUNK-PANDA-38 已完成采购与仓储闭环");
+        assertThat(outcome.getSummary()).contains("500 件", "AI-PO-100", "收货、调拨、出库");
+        assertThat(outcome.getMetrics()).extracting("label", "value")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("补货 SKU", "DEWU-DUNK-PANDA-38"),
+                        org.assertj.core.groups.Tuple.tuple("计划补货量", "500 件"),
+                        org.assertj.core.groups.Tuple.tuple("补货采购单", "AI-PO-100"),
+                        org.assertj.core.groups.Tuple.tuple("采购金额", "10500.00 CNY"),
+                        org.assertj.core.groups.Tuple.tuple("采购收货单", "AI-RK-100"));
+        assertThat(outcome.getBusinessObjects()).extracting("objectType", "businessCode")
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("PROCUREMENT_ORDER", "AI-PO-100"),
+                        org.assertj.core.groups.Tuple.tuple("WAREHOUSE_RECEIPT", "AI-RK-100"),
+                        org.assertj.core.groups.Tuple.tuple("WAREHOUSE_MOVEMENT", "AI-DB-100"),
+                        org.assertj.core.groups.Tuple.tuple("WAREHOUSE_SHIPMENT", "AI-CK-100"));
+        assertThat(presenter.stepDisplayName(step("notice_replenishment_day", "{}")))
+                .isEqualTo("通知补货运营负责人");
+        assertThat(presenter.stepResultSummary(step("claim_replenishment_day", "{\"status\":\"CLAIMED\"}")))
+                .isEqualTo("业务状态：已认领");
+    }
+
+    @Test
     void shouldDescribeCatalogLifecycleStepsInBusinessLanguage() {
         Step submitSpu = step("submit_spu", """
                 {"entityType":"SPU","businessCode":"SPU-100","currentStatus":"SUBMITTED"}

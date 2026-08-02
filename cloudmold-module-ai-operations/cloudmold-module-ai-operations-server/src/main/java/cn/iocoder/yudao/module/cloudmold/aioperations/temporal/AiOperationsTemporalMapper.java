@@ -165,9 +165,18 @@ public interface AiOperationsTemporalMapper {
     @Select("""
             SELECT * FROM cloudmold_ai_ops_temporal_run_binding
             WHERE tenant_id=#{tenantId} AND work_order_id=#{workOrderId}
+            ORDER BY created_at DESC
+            LIMIT 1
             """)
     TemporalRunBindingRecord selectRunBindingByWorkOrder(@Param("tenantId") Long tenantId,
                                                          @Param("workOrderId") String workOrderId);
+
+    @Select("""
+            SELECT * FROM cloudmold_ai_ops_temporal_run_binding
+            WHERE tenant_id=#{tenantId} AND approval_id=#{approvalId}
+            """)
+    TemporalRunBindingRecord selectRunBindingByApproval(@Param("tenantId") Long tenantId,
+                                                        @Param("approvalId") String approvalId);
 
     @TenantIgnore
     @Select("""
@@ -187,6 +196,37 @@ public interface AiOperationsTemporalMapper {
     int markApprovalSignaled(@Param("tenantId") Long tenantId,
                              @Param("temporalRunId") String temporalRunId,
                              @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE cloudmold_ai_ops_temporal_run_binding
+            SET status='RECOVERY_STARTING',error_code='APPROVED_AFTER_TIMEOUT',updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND temporal_run_id=#{temporalRunId}
+              AND status='WAITING_APPROVAL'
+            """)
+    int claimApprovedTimeoutRecovery(@Param("tenantId") Long tenantId,
+                                     @Param("temporalRunId") String temporalRunId,
+                                     @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE cloudmold_ai_ops_temporal_run_binding
+            SET status='RECOVERY_DISPATCHED',error_code='APPROVED_AFTER_TIMEOUT',updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND temporal_run_id=#{temporalRunId}
+              AND status='RECOVERY_STARTING'
+            """)
+    int markApprovedTimeoutRecoveryDispatched(@Param("tenantId") Long tenantId,
+                                              @Param("temporalRunId") String temporalRunId,
+                                              @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE cloudmold_ai_ops_temporal_run_binding
+            SET status='WAITING_APPROVAL',error_code=#{errorCode},updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND temporal_run_id=#{temporalRunId}
+              AND status='RECOVERY_STARTING'
+            """)
+    int releaseApprovedTimeoutRecovery(@Param("tenantId") Long tenantId,
+                                       @Param("temporalRunId") String temporalRunId,
+                                       @Param("errorCode") String errorCode,
+                                       @Param("now") LocalDateTime now);
 
     @Update("""
             UPDATE cloudmold_ai_ops_temporal_run_binding
@@ -293,7 +333,17 @@ public interface AiOperationsTemporalMapper {
     @Select("""
             SELECT source_inventory.warehouse_id AS source_warehouse_id,
                    target_warehouse.id AS target_warehouse_id,
-                   source_inventory.sku_id AS wms_sku_id
+                   source_inventory.sku_id AS wms_sku_id,
+                   item.id AS item_id,
+                   sku.code AS wms_sku_code,
+                   sku.bar_code AS wms_barcode,
+                   item.unit AS item_unit,
+                   target_mapping.mapping_id AS target_warehouse_mapping_id,
+                   target_mapping.warehouse_id AS canonical_warehouse_id,
+                   projection.canonical_id AS canonical_sku_id,
+                   JSON_UNQUOTE(JSON_EXTRACT(projection.payload, '$.sku_code')) AS catalog_sku_code,
+                   JSON_UNQUOTE(JSON_EXTRACT(projection.payload, '$.primary_barcode')) AS catalog_barcode,
+                   JSON_UNQUOTE(JSON_EXTRACT(projection.payload, '$.base_uom_code')) AS base_uom_code
             FROM wms_inventory source_inventory
             JOIN wms_warehouse source_warehouse
               ON source_warehouse.tenant_id=source_inventory.tenant_id
@@ -303,10 +353,30 @@ public interface AiOperationsTemporalMapper {
               ON sku.tenant_id=source_inventory.tenant_id
              AND sku.id=source_inventory.sku_id
              AND sku.deleted=0
+            JOIN wms_item item
+              ON item.tenant_id=sku.tenant_id
+             AND item.id=sku.item_id
+             AND item.deleted=0
+            JOIN cloudmold_catalog_legacy_projection projection
+              ON projection.tenant_id=sku.tenant_id
+             AND projection.target_system='WMS'
+             AND projection.target_entity='ITEM_SKU'
+             AND projection.canonical_type='SKU'
+             AND projection.status=0
+             AND BINARY JSON_UNQUOTE(JSON_EXTRACT(projection.payload, '$.sku_code'))=BINARY sku.code
+             AND BINARY JSON_UNQUOTE(JSON_EXTRACT(projection.payload, '$.primary_barcode'))=BINARY sku.bar_code
             JOIN wms_warehouse target_warehouse
               ON target_warehouse.tenant_id=source_inventory.tenant_id
              AND target_warehouse.id<>source_inventory.warehouse_id
              AND target_warehouse.deleted=0
+            JOIN cloudmold_warehouse_source_mapping target_mapping
+              ON target_mapping.tenant_id=target_warehouse.tenant_id
+             AND target_mapping.source_system='WMS'
+             AND target_mapping.source_type='WAREHOUSE'
+             AND BINARY target_mapping.source_id=BINARY CAST(target_warehouse.id AS CHAR)
+             AND target_mapping.canonical_type='WAREHOUSE'
+             AND target_mapping.status='ACTIVE'
+             AND target_mapping.active_guard=1
             LEFT JOIN wms_inventory target_inventory
               ON target_inventory.tenant_id=source_inventory.tenant_id
              AND target_inventory.warehouse_id=target_warehouse.id
@@ -322,6 +392,46 @@ public interface AiOperationsTemporalMapper {
             LIMIT 1
             """)
     WmsTransferSeedRecord selectWmsTransferSeed(@Param("tenantId") Long tenantId);
+
+    @Select("""
+            SELECT canonical_id AS canonicalSkuId,
+                   JSON_UNQUOTE(JSON_EXTRACT(payload, '$.sku_code')) AS skuCode,
+                   JSON_UNQUOTE(JSON_EXTRACT(payload, '$.primary_barcode')) AS primaryBarcode,
+                   JSON_UNQUOTE(JSON_EXTRACT(payload, '$.base_uom_code')) AS baseUomCode
+            FROM cloudmold_catalog_legacy_projection
+            WHERE tenant_id=#{tenantId} AND target_system='WMS' AND target_entity='ITEM_SKU'
+              AND canonical_type='SKU' AND status=0
+              AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.sku_code')) IS NOT NULL
+              AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.primary_barcode')) IS NOT NULL
+              AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.base_uom_code')) IS NOT NULL
+            ORDER BY updated_at DESC,projection_id DESC
+            LIMIT 1
+            """)
+    WmsCatalogProjectionSeedRecord selectLatestWmsCatalogProjectionSeed(
+            @Param("tenantId") Long tenantId);
+
+    @Select("""
+            SELECT favorite.favorite_id AS favoriteId,
+                   favorite.status AS status,
+                   favorite.version AS version
+            FROM cloudmold_identity_source_identity source_identity
+            JOIN cloudmold_engagement_favorite favorite
+              ON favorite.tenant_id=source_identity.tenant_id
+             AND favorite.principal_id=source_identity.principal_id
+             AND favorite.canonical_spu_id=#{canonicalSpuId}
+            WHERE source_identity.tenant_id=#{tenantId}
+              AND source_identity.source_system=#{sourceSystem}
+              AND source_identity.source_type=#{sourceType}
+              AND source_identity.source_id=#{sourceId}
+              AND source_identity.status='ACTIVE'
+            LIMIT 1
+            """)
+    ConsumerFavoriteSeedRecord selectConsumerFavorite(
+            @Param("tenantId") Long tenantId,
+            @Param("sourceSystem") String sourceSystem,
+            @Param("sourceType") String sourceType,
+            @Param("sourceId") String sourceId,
+            @Param("canonicalSpuId") String canonicalSpuId);
 
     @InterceptorIgnore(tenantLine = "true") // Every table is tenant-scoped explicitly; JSqlParser cannot parse BINARY NOT EXISTS.
     @Select("""

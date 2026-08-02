@@ -342,9 +342,13 @@ public class AgentControlServiceImpl implements AgentControlCommandApi, AgentCon
             require(Boolean.TRUE.equals(policy.getEnabled()) && "ALLOW".equals(policy.getPermissionMode())
                             && Boolean.TRUE.equals(policy.getApprovalRequired()),
                     "work order action policy is not approval-enabled");
-            require(Objects.equals(workOrder.getActionPolicyId(), policy.getPolicyId())
-                            && Objects.equals(workOrder.getActionPolicyVersion(), policy.getVersion())
-                            && Objects.equals(workOrder.getRiskLevel(), policy.getRiskLevel()),
+            boolean samePolicyAndRisk = Objects.equals(workOrder.getActionPolicyId(), policy.getPolicyId())
+                    && Objects.equals(workOrder.getRiskLevel(), policy.getRiskLevel());
+            boolean currentSnapshot = samePolicyAndRisk
+                    && Objects.equals(workOrder.getActionPolicyVersion(), policy.getVersion());
+            boolean aiReattestedVersionDrift = samePolicyAndRisk
+                    && approvalAttestations.permitsAiPolicyVersionDrift(tenantId, operatorUserId, approval);
+            require(currentSnapshot || aiReattestedVersionDrift,
                     "work order action policy snapshot no longer matches the configured policy");
         }
         // A rejection only cancels the frozen work order; it never enables the governed action.

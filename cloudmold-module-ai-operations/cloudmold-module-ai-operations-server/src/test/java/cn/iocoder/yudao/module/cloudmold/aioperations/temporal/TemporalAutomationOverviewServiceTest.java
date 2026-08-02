@@ -116,6 +116,38 @@ class TemporalAutomationOverviewServiceTest {
                 });
     }
 
+    @Test
+    void classifiesManagedGrowthAsGovernedManualInsteadOfAutonomousSource() {
+        AiOperationsManagedRunQueryServiceFacade workflows =
+                mock(AiOperationsManagedRunQueryServiceFacade.class);
+        AiOperationsTemporalScheduleService schedules =
+                mock(AiOperationsTemporalScheduleService.class);
+        AiOperationsTemporalMapper mapper = mock(AiOperationsTemporalMapper.class);
+        TenantContextHolder.setTenantId(162L);
+        ManagedSkillTaskWorkflowView managedGrowth = workflow(
+                "skill.cloudmold.merchant.managed-growth-lifecycle.v1",
+                "托管商家入驻与成材", 4);
+        when(workflows.listWorkflowsAs(
+                nullable(Long.class), nullable(Integer.class)))
+                .thenReturn(List.of(managedGrowth));
+        when(schedules.list()).thenReturn(List.of());
+
+        TemporalAutomationOverviewView result =
+                new TemporalAutomationOverviewService(
+                        workflows, schedules, mapper).get();
+
+        assertThat(result.getRegisteredCount()).isEqualTo(1);
+        assertThat(result.getCandidateSourceConnectedCount()).isZero();
+        assertThat(result.getWorkflows()).singleElement().satisfies(item -> {
+            assertThat(item.getDiscoverySource()).isEqualTo("GOVERNED_MANUAL");
+            assertThat(item.getBusinessAutonomyState()).isEqualTo("BLOCKED");
+            assertThat(item.getGapCodes()).containsExactly(
+                    "SCHEDULE_MISSING",
+                    "GOVERNED_WRITE_INPUT_REQUIRED",
+                    "AUTONOMY_PROOF_MISSING");
+        });
+    }
+
     private static ManagedSkillTaskWorkflowView workflow(
             String skillId, String displayName, int writeStepCount) {
         return ManagedSkillTaskWorkflowView.builder()

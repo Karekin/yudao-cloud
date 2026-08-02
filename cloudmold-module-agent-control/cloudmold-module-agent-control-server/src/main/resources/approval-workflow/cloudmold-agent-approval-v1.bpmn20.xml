@@ -9,13 +9,32 @@
   <process id="cloudmold-agent-approval-v1"
            name="Agent 高风险动作审批"
            isExecutable="true">
-    <documentation>R2 默认由租户运营主体首审；R3 在运营主体通过后，由同租户领域责任人并行全员会签。所有审批人均由有效治理授权动态注入，不绑定固定用户。</documentation>
+    <documentation>人工审批路径与独立 AI 审批人形成或签。任一路径通过即以终止结束事件完成流程并取消另一条路径；AI 或签关闭时保持原人工审批路径。R3 人工路径仍要求领域责任人并行全员会签。</documentation>
 
     <startEvent id="start_event" name="提交审批"/>
-
-    <sequenceFlow id="flow_start_to_review"
+    <sequenceFlow id="flow_start_to_ai_switch"
                   sourceRef="start_event"
+                  targetRef="ai_or_sign_switch"/>
+
+    <exclusiveGateway id="ai_or_sign_switch"
+                      name="启用 AI 或签"
+                      default="flow_ai_disabled_to_review"/>
+    <sequenceFlow id="flow_ai_enabled_to_split"
+                  sourceRef="ai_or_sign_switch"
+                  targetRef="or_sign_split">
+      <conditionExpression xsi:type="tFormalExpression"><![CDATA[${ai_or_sign_enabled == true}]]></conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="flow_ai_disabled_to_review"
+                  sourceRef="ai_or_sign_switch"
                   targetRef="approval_review"/>
+
+    <parallelGateway id="or_sign_split" name="人工 / AI 或签"/>
+    <sequenceFlow id="flow_split_to_review"
+                  sourceRef="or_sign_split"
+                  targetRef="approval_review"/>
+    <sequenceFlow id="flow_split_to_ai_review"
+                  sourceRef="or_sign_split"
+                  targetRef="ai_approval_review"/>
 
     <userTask id="approval_review"
               name="运营主体首审"
@@ -31,11 +50,9 @@
     <sequenceFlow id="flow_review_to_risk_gateway"
                   sourceRef="approval_review"
                   targetRef="risk_gateway"/>
-
     <exclusiveGateway id="risk_gateway"
                       name="是否 R3"
                       default="flow_r2_to_end"/>
-
     <sequenceFlow id="flow_r3_to_countersign"
                   sourceRef="risk_gateway"
                   targetRef="domain_responsibility_countersign">
@@ -60,76 +77,86 @@
     <sequenceFlow id="flow_countersign_to_end"
                   sourceRef="domain_responsibility_countersign"
                   targetRef="approved_end"/>
-
     <sequenceFlow id="flow_r2_to_end"
                   sourceRef="risk_gateway"
                   targetRef="approved_end"/>
 
-    <endEvent id="approved_end" name="审批结束"/>
+    <userTask id="ai_approval_review"
+              name="AI 审批人审核"
+              flowable:candidateStrategy="35"
+              flowable:approveType="1">
+      <extensionElements>
+        <flowable:approveType>1</flowable:approveType>
+        <flowable:approveMethod>1</flowable:approveMethod>
+      </extensionElements>
+      <documentation>仅分配给租户配置的独立 AI 审批身份。AI 通过后终止人工审批分支并完成整个审批流程。</documentation>
+    </userTask>
+    <sequenceFlow id="flow_ai_review_to_end"
+                  sourceRef="ai_approval_review"
+                  targetRef="approved_end"/>
+
+    <endEvent id="approved_end" name="任一分支通过">
+      <terminateEventDefinition/>
+    </endEvent>
   </process>
 
   <bpmndi:BPMNDiagram id="BPMNDiagram_cloudmold_agent_approval_v1">
     <bpmndi:BPMNPlane id="BPMNPlane_cloudmold_agent_approval_v1"
                       bpmnElement="cloudmold-agent-approval-v1">
-      <bpmndi:BPMNShape id="BPMNShape_start_event"
-                        bpmnElement="start_event">
-        <dc:Bounds x="160" y="182" width="36" height="36"/>
-        <bpmndi:BPMNLabel>
-          <dc:Bounds x="142" y="225" width="72" height="22"/>
-        </bpmndi:BPMNLabel>
+      <bpmndi:BPMNShape id="BPMNShape_start_event" bpmnElement="start_event">
+        <dc:Bounds x="80" y="232" width="36" height="36"/>
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="BPMNShape_approval_review"
-                        bpmnElement="approval_review">
-        <dc:Bounds x="280" y="160" width="140" height="80"/>
+      <bpmndi:BPMNShape id="BPMNShape_ai_or_sign_switch" bpmnElement="ai_or_sign_switch" isMarkerVisible="true">
+        <dc:Bounds x="160" y="225" width="50" height="50"/>
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="BPMNShape_risk_gateway"
-                        bpmnElement="risk_gateway"
-                        isMarkerVisible="true">
-        <dc:Bounds x="470" y="175" width="50" height="50"/>
-        <bpmndi:BPMNLabel>
-          <dc:Bounds x="463" y="232" width="64" height="22"/>
-        </bpmndi:BPMNLabel>
+      <bpmndi:BPMNShape id="BPMNShape_or_sign_split" bpmnElement="or_sign_split" isMarkerVisible="true">
+        <dc:Bounds x="260" y="225" width="50" height="50"/>
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="BPMNShape_domain_responsibility_countersign"
-                        bpmnElement="domain_responsibility_countersign">
-        <dc:Bounds x="580" y="130" width="160" height="80"/>
+      <bpmndi:BPMNShape id="BPMNShape_approval_review" bpmnElement="approval_review">
+        <dc:Bounds x="360" y="110" width="140" height="80"/>
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="BPMNShape_approved_end"
-                        bpmnElement="approved_end">
-        <dc:Bounds x="820" y="182" width="36" height="36"/>
-        <bpmndi:BPMNLabel>
-          <dc:Bounds x="802" y="225" width="72" height="22"/>
-        </bpmndi:BPMNLabel>
+      <bpmndi:BPMNShape id="BPMNShape_risk_gateway" bpmnElement="risk_gateway" isMarkerVisible="true">
+        <dc:Bounds x="550" y="125" width="50" height="50"/>
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNEdge id="BPMNEdge_flow_start_to_review"
-                       bpmnElement="flow_start_to_review">
-        <di:waypoint x="196" y="200"/>
-        <di:waypoint x="280" y="200"/>
+      <bpmndi:BPMNShape id="BPMNShape_domain_responsibility_countersign" bpmnElement="domain_responsibility_countersign">
+        <dc:Bounds x="650" y="70" width="160" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BPMNShape_ai_approval_review" bpmnElement="ai_approval_review">
+        <dc:Bounds x="360" y="320" width="140" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BPMNShape_approved_end" bpmnElement="approved_end">
+        <dc:Bounds x="880" y="232" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_start_to_ai_switch" bpmnElement="flow_start_to_ai_switch">
+        <di:waypoint x="116" y="250"/><di:waypoint x="160" y="250"/>
       </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="BPMNEdge_flow_review_to_risk_gateway"
-                       bpmnElement="flow_review_to_risk_gateway">
-        <di:waypoint x="420" y="200"/>
-        <di:waypoint x="470" y="200"/>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_ai_enabled_to_split" bpmnElement="flow_ai_enabled_to_split">
+        <di:waypoint x="210" y="250"/><di:waypoint x="260" y="250"/>
       </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="BPMNEdge_flow_r3_to_countersign"
-                       bpmnElement="flow_r3_to_countersign">
-        <di:waypoint x="495" y="175"/>
-        <di:waypoint x="495" y="170"/>
-        <di:waypoint x="580" y="170"/>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_ai_disabled_to_review" bpmnElement="flow_ai_disabled_to_review">
+        <di:waypoint x="185" y="225"/><di:waypoint x="185" y="150"/><di:waypoint x="360" y="150"/>
       </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="BPMNEdge_flow_countersign_to_end"
-                       bpmnElement="flow_countersign_to_end">
-        <di:waypoint x="740" y="170"/>
-        <di:waypoint x="780" y="170"/>
-        <di:waypoint x="780" y="200"/>
-        <di:waypoint x="820" y="200"/>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_split_to_review" bpmnElement="flow_split_to_review">
+        <di:waypoint x="285" y="225"/><di:waypoint x="285" y="150"/><di:waypoint x="360" y="150"/>
       </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="BPMNEdge_flow_r2_to_end"
-                       bpmnElement="flow_r2_to_end">
-        <di:waypoint x="495" y="225"/>
-        <di:waypoint x="495" y="280"/>
-        <di:waypoint x="838" y="280"/>
-        <di:waypoint x="838" y="218"/>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_split_to_ai_review" bpmnElement="flow_split_to_ai_review">
+        <di:waypoint x="285" y="275"/><di:waypoint x="285" y="360"/><di:waypoint x="360" y="360"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_review_to_risk_gateway" bpmnElement="flow_review_to_risk_gateway">
+        <di:waypoint x="500" y="150"/><di:waypoint x="550" y="150"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_r3_to_countersign" bpmnElement="flow_r3_to_countersign">
+        <di:waypoint x="575" y="125"/><di:waypoint x="575" y="110"/><di:waypoint x="650" y="110"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_countersign_to_end" bpmnElement="flow_countersign_to_end">
+        <di:waypoint x="810" y="110"/><di:waypoint x="898" y="110"/><di:waypoint x="898" y="232"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_r2_to_end" bpmnElement="flow_r2_to_end">
+        <di:waypoint x="575" y="175"/><di:waypoint x="575" y="250"/><di:waypoint x="880" y="250"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="BPMNEdge_flow_ai_review_to_end" bpmnElement="flow_ai_review_to_end">
+        <di:waypoint x="500" y="360"/><di:waypoint x="898" y="360"/><di:waypoint x="898" y="268"/>
       </bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>

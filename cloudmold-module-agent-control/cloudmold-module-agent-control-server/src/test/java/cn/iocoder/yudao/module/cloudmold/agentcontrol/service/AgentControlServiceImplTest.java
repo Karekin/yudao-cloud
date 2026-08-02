@@ -312,6 +312,39 @@ class AgentControlServiceImplTest {
     }
 
     @Test
+    void dedicatedAiBpmAttestationMayAcceptPurePolicyVersionDrift() {
+        WorkOrder row = new WorkOrder().setWorkOrderId("wo-ai-policy-drift").setTenantId(17L)
+                .setRoleCode("buyer").setActionCode("purchase.commit")
+                .setRequesterUserId(100L).setApprovalId("approval-ai-policy-drift")
+                .setStatus("WAITING_APPROVAL").setVersion(2L);
+        RoleActionPolicy approvalPolicy = policy("buyer", "purchase.commit", true);
+        freeze(row, approvalPolicy, "{}");
+        workOrder.set(row);
+        Approval approvalRow = new Approval().setApprovalId("approval-ai-policy-drift").setTenantId(17L)
+                .setWorkOrderId("wo-ai-policy-drift").setActionCode("purchase.commit").setRequesterUserId(100L)
+                .setScopeHash(scopeHash(row)).setStatus("PENDING").setVersion(1L);
+        approval.set(approvalRow);
+        approvalPolicy.setVersion(2L);
+        when(mapper.selectActionPolicy(17L, "buyer", "purchase.commit")).thenReturn(approvalPolicy);
+        when(approvalAttestations.permitsAiPolicyVersionDrift(17L, 200L, approvalRow)).thenReturn(true);
+        when(mapper.decideApproval(eq(17L), eq("approval-ai-policy-drift"), eq(1L), eq("APPROVED"),
+                eq(200L), eq("AI_POLICY_REVIEW"), any())).thenReturn(1);
+        when(mapper.transitionWorkOrder(eq(17L), eq("wo-ai-policy-drift"), eq(2L),
+                eq("WAITING_APPROVAL"), eq("READY"), isNull(), isNull(), any())).thenReturn(1);
+
+        AgentControlResult result = service.execute(base(AgentControlOperation.DECIDE_APPROVAL,
+                        "approval-ai-policy-drift")
+                .approval(AgentControlCommand.ApprovalDefinition.builder()
+                        .approvalId("approval-ai-policy-drift").decision("APPROVE")
+                        .reasonCode("AI_POLICY_REVIEW").approvalExpectedVersion(1L)
+                        .workOrderExpectedVersion(2L).build())
+                .build(), 200L);
+
+        assertThat(result.getStatus()).isEqualTo("APPROVED");
+        verify(approvalAttestations).assertDecisionAllowed(17L, 200L, approvalRow, "APPROVE");
+    }
+
+    @Test
     void registersBpmBindingInTheApprovalRequestTransaction() {
         AgentApprovalWorkflowRegistrar workflows = mock(AgentApprovalWorkflowRegistrar.class);
         AgentControlServiceImpl integratedService = new AgentControlServiceImpl(

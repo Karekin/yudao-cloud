@@ -31,6 +31,13 @@
             <artifactId>yudao-module-bpm-api</artifactId>
             <version>${revision}</version>
         </dependency>
+        <!-- Keep the upstream-internal BPM call isolated in integration/bpm until an upstream task-decision API exists. -->
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>yudao-module-bpm-server</artifactId>
+            <version>${revision}</version>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
             <artifactId>yudao-spring-boot-starter-mybatis</artifactId>

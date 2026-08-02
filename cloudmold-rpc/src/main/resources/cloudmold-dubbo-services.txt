@@ -9,6 +9,7 @@ cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoWarehouseInboundQue
 cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoWmsCommandApi
 cn.iocoder.yudao.module.cloudmold.agentcontrol.api.workflow.MissionLifecycleWorkflowCommandApi
 cn.iocoder.yudao.module.cloudmold.agentcontrol.api.workflow.MissionLifecycleWorkflowQueryApi
+cn.iocoder.yudao.module.cloudmold.agentcontrol.api.review.AgentApprovalReviewApi
 cn.iocoder.yudao.module.cloudmold.aftersale.api.AfterSaleCommandApi
 cn.iocoder.yudao.module.cloudmold.aftersale.api.AfterSaleQueryApi
 cn.iocoder.yudao.module.cloudmold.aioperations.api.AiOperationsCommandApi
@@ -73,6 +74,7 @@ cn.iocoder.yudao.module.cloudmold.merchant.api.MerchantReferenceValidationApi
 cn.iocoder.yudao.module.cloudmold.merchant.api.SourceMappingQueryApi
 cn.iocoder.yudao.module.cloudmold.merchant.api.deposit.MerchantDepositCommandApi
 cn.iocoder.yudao.module.cloudmold.merchant.api.deposit.MerchantDepositQueryApi
+cn.iocoder.yudao.module.cloudmold.merchant.api.workflow.MerchantManagedAdmissionWorkflowQueryApi
 cn.iocoder.yudao.module.cloudmold.merchant.api.workflow.MerchantOnboardingWorkflowQueryApi
 cn.iocoder.yudao.module.cloudmold.metadata.api.MetadataCommandApi
 cn.iocoder.yudao.module.cloudmold.metadata.api.MetadataQueryApi

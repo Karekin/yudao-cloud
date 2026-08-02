@@ -79,7 +79,7 @@ class AgentExecutionTicketServiceTest {
         when(mapper.selectEffectiveApprovalAuthorityGrant(eq(17L), eq(200L), eq("approval-r3-1"),
                 eq("buyer"), eq("buyer.execute-replenishment"), eq("R3"), eq(approval.getScopeHash()), any()))
                 .thenReturn(grant);
-        when(mapper.insertAuditEvent(any())).thenReturn(1);
+        when(mapper.insertExecutionTicketAuditIfAbsent(any())).thenReturn(1);
 
         AgentExecutionTicketResult result = service.issue(AgentExecutionTicketCommand.builder()
                 .workOrderId("wo-r3-1").approvalId("approval-r3-1").workOrderExpectedVersion(3L)
@@ -97,7 +97,7 @@ class AgentExecutionTicketServiceTest {
                         workOrder.getSkillId(), workOrder.getSkillVersion(),
                         workOrder.getExecutionInputSha256(), workOrder.getRiskLevel()),
                 parsed.approvalId(), parsed.expiresAt().getEpochSecond()))).isEqualTo(parsed.signature());
-        verify(mapper).insertAuditEvent(argThat(event -> {
+        verify(mapper).insertExecutionTicketAuditIfAbsent(argThat(event -> {
             String detail = event.getDetailJson();
             return event.getTenantId().equals(17L)
                     && event.getAggregateType().equals("role_approval")
@@ -137,7 +137,7 @@ class AgentExecutionTicketServiceTest {
                         workOrder.getExecutionInputSha256(), workOrder.getRiskLevel()),
                 parsed.keyId(), parsed.approvalId(), parsed.issuedAt().getEpochSecond(),
                 parsed.expiresAt().getEpochSecond()))).isEqualTo(parsed.signature());
-        verify(mapper).insertAuditEvent(argThat(event -> event.getDetailJson().contains(
+        verify(mapper).insertExecutionTicketAuditIfAbsent(argThat(event -> event.getDetailJson().contains(
                         "\"approvalRefVersion\":\"cma2\"")
                 && event.getDetailJson().contains("\"signingKeyId\":\"risk-2026-07\"")
                 && !event.getDetailJson().contains(result.getApprovalRef())
@@ -193,7 +193,7 @@ class AgentExecutionTicketServiceTest {
                 "17", "wo-r3-1", "approval-r3-1", workOrder.getSkillId(), workOrder.getSkillVersion(),
                 workOrder.getSkillDefinitionClosureSha256(), workOrder.getExecutionInputSha256(),
                 workOrder.getRiskLevel(), "2:101", "run-2", "3", "worker-2", "4")));
-        verify(mapper).insertAuditEvent(argThat(event -> event.getDetailJson().contains("\"missionRunId\":\"run-2\"")
+        verify(mapper).insertExecutionTicketAuditIfAbsent(argThat(event -> event.getDetailJson().contains("\"missionRunId\":\"run-2\"")
                 && event.getDetailJson().contains("\"fencingToken\":3")
                 && event.getDetailJson().contains("\"leaseOwner\":\"worker-2\"")
                 && event.getDetailJson().contains("\"leaseEpoch\":4")));
@@ -210,7 +210,7 @@ class AgentExecutionTicketServiceTest {
                 missionCommand("run-1", "worker-1", "lease-token-1", 2L), 101L))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("mission execution ticket lease identity is stale");
-        verify(mapper, never()).insertAuditEvent(argThat(event ->
+        verify(mapper, never()).insertExecutionTicketAuditIfAbsent(argThat(event ->
                 event.getEventType().equals("agent_control.execution_ticket.issued")));
     }
 
@@ -307,7 +307,7 @@ class AgentExecutionTicketServiceTest {
         when(mapper.selectEffectiveApprovalAuthorityGrant(eq(17L), eq(200L), eq("approval-r3-1"),
                 eq("buyer"), eq("buyer.execute-replenishment"), eq("R3"), eq(approval.getScopeHash()), any()))
                 .thenReturn(activeApprovalGrant(workOrder, approval, 180));
-        when(mapper.insertAuditEvent(any())).thenReturn(1);
+        when(mapper.insertExecutionTicketAuditIfAbsent(any())).thenReturn(1);
 
         AgentExecutionTicketResult result = service.issue(command(), 101L);
 
@@ -395,7 +395,7 @@ class AgentExecutionTicketServiceTest {
 
         assertThatThrownBy(() -> service.issue(command(), 101L))
                 .hasMessage("execution ticket has no remaining authority validity window");
-        verify(mapper, never()).insertAuditEvent(any());
+        verify(mapper, never()).insertExecutionTicketAuditIfAbsent(any());
     }
 
     @Test
@@ -436,10 +436,27 @@ class AgentExecutionTicketServiceTest {
         when(mapper.selectEffectiveApprovalAuthorityGrant(eq(17L), eq(200L), eq("approval-r3-1"),
                 eq("buyer"), eq("buyer.execute-replenishment"), eq("R3"), eq(approval.getScopeHash()), any()))
                 .thenReturn(activeApprovalGrant(workOrder, approval, 600));
-        when(mapper.insertAuditEvent(any())).thenReturn(0);
+        when(mapper.insertExecutionTicketAuditIfAbsent(any())).thenReturn(0);
 
         assertThatThrownBy(() -> service.issue(command(), 101L))
-                .hasMessage("failed to append execution-ticket audit event");
+                .hasMessage("existing execution-ticket audit does not match the deterministic permit");
+    }
+
+    @Test
+    void returnsTheSamePermitWhenTemporalRetriesAfterTheAuditWasAlreadyAppended() {
+        TenantContextHolder.setTenantId(17L);
+        properties.setHmacSecret(SECRET);
+        stubSuccessfulIssuance();
+
+        AgentExecutionTicketResult first = service.issue(command(), 101L);
+        when(mapper.insertExecutionTicketAuditIfAbsent(any())).thenReturn(0);
+        when(mapper.selectExecutionTicketAuditApprovalRefSha256(17L, "approval-r3-1", 2L))
+                .thenReturn(first.getApprovalRefSha256());
+
+        AgentExecutionTicketResult replay = service.issue(command(), 101L);
+
+        assertThat(replay.getApprovalRef()).isEqualTo(first.getApprovalRef());
+        assertThat(replay.getApprovalRefSha256()).isEqualTo(first.getApprovalRefSha256());
     }
 
     private static AgentExecutionTicketCommand command() {
@@ -459,7 +476,7 @@ class AgentExecutionTicketServiceTest {
         when(mapper.selectEffectiveApprovalAuthorityGrant(eq(17L), eq(200L), eq("approval-r3-1"),
                 eq("buyer"), eq("buyer.execute-replenishment"), eq("R3"), eq(approval.getScopeHash()), any()))
                 .thenReturn(activeApprovalGrant(workOrder, approval, 600));
-        when(mapper.insertAuditEvent(any())).thenReturn(1);
+        when(mapper.insertExecutionTicketAuditIfAbsent(any())).thenReturn(1);
         return workOrder;
     }
 
@@ -477,7 +494,7 @@ class AgentExecutionTicketServiceTest {
         when(mapper.selectEffectiveApprovalAuthorityGrant(eq(17L), eq(200L), eq("approval-r3-1"),
                 eq("buyer"), eq("buyer.execute-replenishment"), eq("R3"), eq(approval.getScopeHash()), any()))
                 .thenReturn(activeApprovalGrant(workOrder, approval, 600));
-        when(mapper.insertAuditEvent(any())).thenReturn(1);
+        when(mapper.insertExecutionTicketAuditIfAbsent(any())).thenReturn(1);
         return workOrder;
     }
 
@@ -512,7 +529,8 @@ class AgentExecutionTicketServiceTest {
     private static Approval approvedApproval(WorkOrder workOrder) {
         return new Approval().setApprovalId("approval-r3-1").setTenantId(17L).setWorkOrderId(workOrder.getWorkOrderId())
                 .setActionCode(workOrder.getActionCode()).setRequesterUserId(workOrder.getRequesterUserId())
-                .setApproverUserId(200L).setScopeHash(scopeHash(workOrder)).setStatus("APPROVED").setVersion(2L);
+                .setApproverUserId(200L).setScopeHash(scopeHash(workOrder)).setStatus("APPROVED").setVersion(2L)
+                .setDecidedAt(java.time.LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
     }
 
     private static ApprovalAuthorityGrant exactApprovalGrant(WorkOrder workOrder, Approval approval) {

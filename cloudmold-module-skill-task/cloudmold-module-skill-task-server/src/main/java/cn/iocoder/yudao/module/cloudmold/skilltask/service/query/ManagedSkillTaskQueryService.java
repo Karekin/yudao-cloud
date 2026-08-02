@@ -8,6 +8,9 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskR
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskRunView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskStepView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowView;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowDetailView;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowIdempotencyBindingView;
+import cn.iocoder.yudao.module.cloudmold.skilltask.api.managed.ManagedSkillTaskWorkflowStepView;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskMapper;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Step;
 import cn.iocoder.yudao.module.cloudmold.skilltask.dal.SkillTaskRecords.Task;
@@ -116,6 +119,11 @@ public class ManagedSkillTaskQueryService {
             Map.entry("skill.cloudmold.merchant.onboarding-lifecycle.v1",
                     new WorkflowPresentation("商家入驻经营闭环",
                             "模拟招商运营完成资料建档、提交、审核、批准、商家激活、店铺激活与终态验收；每天创建全新的测试商家。")),
+            Map.entry("skill.cloudmold.merchant.managed-growth-lifecycle.v1",
+                    new WorkflowPresentation("托管商家入驻与成材",
+                            "围绕托管商家准入、来源归因、证据包、AI 货盘建议、验厂状态机与人工终审，"
+                                    + "执行受审批保护的 Merchant red-zone 命令链并形成终审结果；"
+                                    + "买手分配、等级权益和清退仍保留人工边界，AI 不自动授予权益、变更等级或执行清退。")),
             Map.entry("skill.cloudmold.merchant-experience.rectification-lifecycle.v1",
                     new WorkflowPresentation("商家触发整改与体验恢复",
                             "仅在商家责任判定生效且服务补偿已支付后触发，校验责任商家、重开原工单、"
@@ -257,6 +265,41 @@ public class ManagedSkillTaskQueryService {
                         .thenComparing(SkillTaskDefinition::getSkillVersion))
                 .map(this::toWorkflowItem)
                 .toList();
+    }
+
+    public ManagedSkillTaskWorkflowDetailView getManagedWorkflow(String skillId) {
+        String normalizedSkillId = normalizeRequired(skillId, "skillId");
+        SkillTaskDefinition definition = definitionRegistry.all().stream()
+                .filter(item -> normalizedSkillId.equals(item.getSkillId()))
+                .filter(item -> "BUSINESS_ROLE".equals(item.getWorkflowLevel()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Managed workflow is not registered: " + normalizedSkillId));
+        return ManagedSkillTaskWorkflowDetailView.builder()
+                .workflow(toWorkflowItem(definition))
+                .steps(definition.getSteps().stream()
+                        .map(step -> ManagedSkillTaskWorkflowStepView.builder()
+                                .stepOrder(step.getStepOrder())
+                                .stepCode(step.getStepCode())
+                                .displayName(outcomePresenter.stepDisplayName(
+                                        step.getStepCode(), step.getChildSkillId()))
+                                .stepKind(step.getStepKind())
+                                .operationType(step.getOperationType())
+                                .approvalRequired(step.getApprovalRequired())
+                                .capabilityId(step.getCapabilityId())
+                                .childSkillId(step.getChildSkillId())
+                                .childSkillVersion(step.getChildSkillVersion())
+                                .pollIntervalSeconds(step.getPollIntervalSeconds())
+                                .idempotencyBinding(step.getIdempotencyBinding() == null ? null
+                                        : ManagedSkillTaskWorkflowIdempotencyBindingView.builder()
+                                        .argumentIndex(step.getIdempotencyBinding().getArgumentIndex())
+                                        .jsonPointer(step.getIdempotencyBinding().getJsonPointer())
+                                        .build())
+                                .waitSuccessJson(step.getWaitSuccess() == null ? null : step.getWaitSuccess().toString())
+                                .waitFailureJson(step.getWaitFailure() == null ? null : step.getWaitFailure().toString())
+                                .argumentsJson(step.getArguments() == null ? null : step.getArguments().toString())
+                                .build())
+                        .toList())
+                .build();
     }
 
     public PageResult<ManagedSkillTaskRunView> getManagedRunPage(ManagedSkillTaskRunPageRequest request) {

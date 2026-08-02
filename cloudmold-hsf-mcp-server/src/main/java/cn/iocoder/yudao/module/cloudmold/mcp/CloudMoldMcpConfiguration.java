@@ -52,6 +52,7 @@ public class CloudMoldMcpConfiguration {
                 .toolCall(tools.listTool(), tools::list)
                 .toolCall(tools.describeTool(), tools::describe)
                 .toolCall(tools.invokeReadTool(), tools::invokeRead)
+                .toolCall(tools.aiApprovalTool(), tools::aiApproval)
                 .toolCall(skillTaskTools.submitTool(), skillTaskTools::submit)
                 .toolCall(skillTaskTools.getTool(), skillTaskTools::get)
                 .toolCall(skillTaskTools.getByRequestKeyTool(), skillTaskTools::getByRequestKey)

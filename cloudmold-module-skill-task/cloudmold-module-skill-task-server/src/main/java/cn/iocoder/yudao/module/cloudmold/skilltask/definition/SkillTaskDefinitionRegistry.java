@@ -7,6 +7,7 @@ import cn.iocoder.yudao.module.cloudmold.skilltask.definition.dynamic.DynamicSki
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -44,6 +45,7 @@ public class SkillTaskDefinitionRegistry {
         this(objectMapper, properties, capabilityCatalog, Optional.empty());
     }
 
+    @Autowired
     public SkillTaskDefinitionRegistry(ObjectMapper objectMapper, SkillTaskProperties properties,
                                        CloudMoldCapabilityCatalog capabilityCatalog,
                                        Optional<DynamicSkillTaskDefinitionSource> dynamicDefinitionSource) {

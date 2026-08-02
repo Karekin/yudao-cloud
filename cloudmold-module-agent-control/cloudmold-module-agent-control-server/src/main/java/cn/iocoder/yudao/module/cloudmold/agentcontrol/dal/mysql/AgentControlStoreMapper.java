@@ -610,6 +610,54 @@ public interface AgentControlStoreMapper {
 
     @TenantIgnore
     @Select("""
+            SELECT b.approval_id,b.tenant_id,b.work_order_id,b.action_code,b.role_code,b.risk_level,
+                   b.requester_user_id,b.approver_user_id,b.scope_hash,b.process_definition_key,
+                   b.process_instance_id,b.business_key,b.status,b.last_bpm_status,b.last_reason_sha256,
+                   b.terminal_operator_user_id,b.terminal_task_id,b.terminal_task_definition_key,
+                   b.responsibility_role_codes_json,b.responsibility_approver_user_ids_json,
+                   b.responsibility_authority_sha256,b.start_attempt_token,b.start_attempt_count,b.version,
+                   b.requested_at,b.start_attempted_at,b.started_at,b.terminal_at,b.last_error_code,b.updated_at
+            FROM cloudmold_agent_approval_workflow_binding b
+            JOIN cloudmold_agent_approval a
+              ON a.tenant_id=b.tenant_id AND a.approval_id=b.approval_id
+            WHERE b.status IN ('RUNNING','START_UNCERTAIN') AND a.status='PENDING'
+              AND b.updated_at<=#{cutoff}
+            ORDER BY b.updated_at,b.tenant_id,b.approval_id
+            LIMIT #{limit}
+            """)
+    List<ApprovalWorkflowBinding> selectApprovalWorkflowRecoveryCandidates(
+            @Param("cutoff") LocalDateTime cutoff, @Param("limit") int limit);
+
+    @Update("""
+            UPDATE cloudmold_agent_approval_workflow_binding
+            SET status='START_REQUESTED',approver_user_id=NULL,process_instance_id=NULL,
+                responsibility_role_codes_json=NULL,responsibility_approver_user_ids_json=NULL,
+                responsibility_authority_sha256=NULL,start_attempt_token=NULL,start_attempt_count=0,
+                start_attempted_at=NULL,last_error_code='RECONCILED_ABSENT_BPM_INSTANCE',
+                version=version+1,updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND approval_id=#{approvalId}
+              AND status='START_UNCERTAIN' AND version=#{expectedVersion}
+            """)
+    int resetAbsentUncertainApprovalWorkflowStart(@Param("tenantId") Long tenantId,
+                                                   @Param("approvalId") String approvalId,
+                                                   @Param("expectedVersion") Long expectedVersion,
+                                                   @Param("now") LocalDateTime now);
+
+    @Update("""
+            UPDATE cloudmold_agent_approval_workflow_binding
+            SET status='RUNNING',process_instance_id=#{processInstanceId},started_at=COALESCE(started_at,#{now}),
+                last_error_code='RECONCILED_EXISTING_BPM_INSTANCE',version=version+1,updated_at=#{now}
+            WHERE tenant_id=#{tenantId} AND approval_id=#{approvalId}
+              AND status='START_UNCERTAIN' AND version=#{expectedVersion}
+            """)
+    int recoverExistingApprovalWorkflowStart(@Param("tenantId") Long tenantId,
+                                              @Param("approvalId") String approvalId,
+                                              @Param("expectedVersion") Long expectedVersion,
+                                              @Param("processInstanceId") String processInstanceId,
+                                              @Param("now") LocalDateTime now);
+
+    @TenantIgnore
+    @Select("""
             SELECT b.approval_id,b.tenant_id,b.work_order_id,b.status AS observed_status,
                    b.approver_user_id,b.terminal_operator_user_id,
                    a.version AS approval_version,w.version AS work_order_version
@@ -1232,4 +1280,23 @@ public interface AgentControlStoreMapper {
                     #{actorUserId},CAST(#{detailJson} AS JSON),#{occurredAt},#{createdAt})
             """)
     int insertAuditEvent(AuditEvent value);
+
+    @Insert("""
+            INSERT IGNORE INTO cloudmold_agent_audit_event
+              (audit_event_id,tenant_id,aggregate_type,aggregate_id,aggregate_version,event_type,actor_user_id,
+               detail_json,occurred_at,created_at)
+            VALUES (#{auditEventId},#{tenantId},#{aggregateType},#{aggregateId},#{aggregateVersion},#{eventType},
+                    #{actorUserId},CAST(#{detailJson} AS JSON),#{occurredAt},#{createdAt})
+            """)
+    int insertExecutionTicketAuditIfAbsent(AuditEvent value);
+
+    @Select("""
+            SELECT JSON_UNQUOTE(JSON_EXTRACT(detail_json, '$.approvalRefSha256'))
+            FROM cloudmold_agent_audit_event
+            WHERE tenant_id=#{tenantId} AND aggregate_type='role_approval' AND aggregate_id=#{approvalId}
+              AND aggregate_version=#{approvalVersion} AND event_type='agent_control.execution_ticket.issued'
+            """)
+    String selectExecutionTicketAuditApprovalRefSha256(@Param("tenantId") Long tenantId,
+                                                        @Param("approvalId") String approvalId,
+                                                        @Param("approvalVersion") Long approvalVersion);
 }

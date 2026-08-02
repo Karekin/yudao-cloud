@@ -5,6 +5,7 @@ import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentControlQueryApi;
 import cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentControlResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import io.temporal.client.WorkflowNotFoundException;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
@@ -27,6 +28,7 @@ public class TemporalApprovalContinuationReconciler implements ApplicationListen
     private final AiOperationsTemporalMapper mapper;
     private final AgentControlQueryApi agentQueries;
     private final TemporalApprovalContinuationAdapter continuation;
+    private final TemporalApprovedTimeoutRecoveryService timeoutRecovery;
 
     @Override
     public void onApplicationEvent(ApplicationReadyEvent event) {
@@ -53,6 +55,8 @@ public class TemporalApprovalContinuationReconciler implements ApplicationListen
                 continuation.onApprovalDecision(binding.getTenantId(), binding.getWorkOrderId(),
                         binding.getApprovalId(), decision);
             }
+        } catch (WorkflowNotFoundException exception) {
+            timeoutRecovery.recover(binding);
         } catch (RuntimeException exception) {
             log.warn("Temporal approval continuation remains retryable tenant={} approval={} run={}",
                     binding.getTenantId(), binding.getApprovalId(), binding.getTemporalRunId(), exception);

@@ -71,6 +71,16 @@ class CloudMoldCapabilityCatalogTest {
             assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.READ);
         });
         assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.agentcontrol.agent-approval-review.get-review-context.v1");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.READ);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.agentcontrol.agent-approval-review.submit-decision.v1");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.WRITE);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
             assertThat(capability.interfaceName()).isEqualTo(
                     "cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoProcurementPromiseApi");
             assertThat(capability.methodName()).isEqualTo("getPurchasePromise");

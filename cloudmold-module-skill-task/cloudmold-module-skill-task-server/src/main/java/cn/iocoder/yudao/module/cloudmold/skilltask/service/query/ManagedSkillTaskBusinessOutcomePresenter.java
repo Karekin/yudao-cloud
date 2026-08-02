@@ -320,6 +320,11 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             Map.entry("wait_bd_merchant_onboarding", "等待商家与店铺激活"),
             Map.entry("submit_platform_warehouse_fulfillment", "启动平台仓采购与履约"),
             Map.entry("wait_platform_warehouse_fulfillment", "等待收货调拨与履约验收"),
+            Map.entry("open_replenishment_day", "创建智能补货行动单"),
+            Map.entry("notice_replenishment_day", "通知补货运营负责人"),
+            Map.entry("claim_replenishment_day", "认领智能补货行动单"),
+            Map.entry("resolve_replenishment_day", "关闭智能补货行动单"),
+            Map.entry("verify_replenishment_day_resolved", "验收智能补货闭环"),
             Map.entry("submit_quality_traffic_activation", "启动质检通过商品流量承接"),
             Map.entry("wait_quality_traffic_activation", "等待站内活动验收"),
             Map.entry("resolve_warehouse_admission_case", "关闭入仓决策行动单"),
@@ -700,6 +705,8 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                     partnerMarketingLifecycle(task, steps);
             case "skill.cloudmold.mes.production-execution-lifecycle.v1" ->
                     mesProductionLifecycle(task, steps);
+            case "skill.cloudmold.supply.replenishment-lifecycle.v1" ->
+                    replenishmentLifecycle(task, steps);
             default -> genericSuccess(task, steps);
         };
     }
@@ -729,32 +736,36 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
     }
 
     public String stepDisplayName(Step step) {
-        String explicit = STEP_NAMES.get(step.getStepCode());
+        return stepDisplayName(step.getStepCode(), childWorkflowSkillId(step));
+    }
+
+    public String stepDisplayName(String stepCode, String childSkillId) {
+        String explicit = STEP_NAMES.get(stepCode);
         if (explicit != null) {
             return explicit;
         }
-        if (step.getStepCode().startsWith("define_")) {
-            return "创建第 " + numericSuffix(step.getStepCode()) + " 个 SKU";
+        if (stepCode.startsWith("define_")) {
+            return "创建第 " + numericSuffix(stepCode) + " 个 SKU";
         }
-        if (step.getStepCode().startsWith("activate_sku_")) {
-            return "启用第 " + numericSuffix(step.getStepCode()) + " 个 SKU";
+        if (stepCode.startsWith("activate_sku_")) {
+            return "启用第 " + numericSuffix(stepCode) + " 个 SKU";
         }
-        if (step.getStepCode().startsWith("activate_size_")) {
-            return "启用尺码 " + step.getStepCode().substring("activate_size_".length()).toUpperCase(Locale.ROOT);
+        if (stepCode.startsWith("activate_size_")) {
+            return "启用尺码 " + stepCode.substring("activate_size_".length()).toUpperCase(Locale.ROOT);
         }
-        if (step.getStepCode().startsWith("activate_color_")) {
-            return "启用颜色 " + step.getStepCode().substring("activate_color_".length());
+        if (stepCode.startsWith("activate_color_")) {
+            return "启用颜色 " + stepCode.substring("activate_color_".length());
         }
-        if (step.getStepCode().startsWith("plan_")) {
-            return "生成第 " + numericSuffix(step.getStepCode()) + " 个 SKU 投影方案";
+        if (stepCode.startsWith("plan_")) {
+            return "生成第 " + numericSuffix(stepCode) + " 个 SKU 投影方案";
         }
-        if (step.getStepCode().startsWith("submit_")) {
-            return "启动子流程：" + childSkillName(step);
+        if (stepCode.startsWith("submit_")) {
+            return "启动子流程：" + skillDisplayName(childSkillId);
         }
-        if (step.getStepCode().startsWith("wait_")) {
-            return "等待子流程完成：" + childSkillName(step);
+        if (stepCode.startsWith("wait_")) {
+            return "等待子流程完成：" + skillDisplayName(childSkillId);
         }
-        return step.getStepCode();
+        return stepCode;
     }
 
     public String stepResultSummary(Step step) {
@@ -1299,6 +1310,47 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                 List.of(metric("成功步骤", Integer.toString(succeededCount(steps)))), List.of(), task);
     }
 
+    private ManagedSkillTaskBusinessOutcomeView replenishmentLifecycle(Task task, List<Step> steps) {
+        JsonNode input = json(task.getInputJson());
+        JsonNode purchaseOrder = input.path("procurement").path("purchaseOrder");
+        JsonNode sourcingCase = input.path("sourcing").path("sourcingCase");
+        JsonNode warehouse = input.path("warehouse");
+        JsonNode sku = warehouse.path("item").path("skus").path(0);
+        JsonNode receipt = warehouse.path("receipt");
+        JsonNode movement = warehouse.path("movement");
+        JsonNode shipment = warehouse.path("shipment");
+
+        String skuCode = valueOr(text(sku, "code"), text(purchaseOrder, "skuCode"));
+        String orderedQuantity = valueOr(text(purchaseOrder, "orderedQuantity"), "-");
+        String quantityWithUnit = orderedQuantity + " " + unitLabel(text(purchaseOrder, "uomCode"));
+        String purchaseOrderCode = valueOr(text(purchaseOrder, "orderCode"), text(purchaseOrder, "orderId"));
+        String sourcingCode = valueOr(text(sourcingCase, "rfqCode"), text(sourcingCase, "id"));
+        String receiptNo = valueOr(text(receipt, "no"), text(receipt, "bizOrderNo"));
+        String movementNo = text(movement, "no");
+        String shipmentNo = text(shipment, "no");
+
+        return outcome("REPLENISHMENT_LIFECYCLE",
+                "补货 SKU " + valueOr(skuCode, "-") + " 已完成采购与仓储闭环",
+                "计划补货 " + quantityWithUnit + "；采购单 " + valueOr(purchaseOrderCode, "-")
+                        + " 已下发，并已完成收货、调拨、出库与库存验收。",
+                List.of(
+                        metric("补货 SKU", skuCode),
+                        metric("计划补货量", quantityWithUnit),
+                        metric("补货采购单", purchaseOrderCode),
+                        metric("采购金额", money(purchaseOrder.path("totalAmountMinor"), text(purchaseOrder, "currencyCode"))),
+                        metric("采购收货单", receiptNo),
+                        metric("仓间调拨单", movementNo),
+                        metric("销售出库单", shipmentNo)),
+                List.of(
+                        object("SKU", "补货 SKU", text(purchaseOrder, "canonicalSkuId"), skuCode, "SUCCEEDED"),
+                        object("SUPPLIER_SOURCING", "供应商寻源单", text(sourcingCase, "id"), sourcingCode, "SUCCEEDED"),
+                        object("PROCUREMENT_ORDER", "补货采购单", text(purchaseOrder, "orderId"), purchaseOrderCode, "SUCCEEDED"),
+                        object("WAREHOUSE_RECEIPT", "采购收货单", text(receipt, "id"), receiptNo, "SUCCEEDED"),
+                        object("WAREHOUSE_MOVEMENT", "仓间调拨单", text(movement, "id"), movementNo, "SUCCEEDED"),
+                        object("WAREHOUSE_SHIPMENT", "销售出库单", text(shipment, "id"), shipmentNo, "SUCCEEDED")),
+                task);
+    }
+
     private static String listingPublicationStatusLabel(String status) {
         if (!StringUtils.hasText(status)) {
             return "待核验";
@@ -1527,6 +1579,11 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
             case "FULFILLMENT" -> "履约单";
             case "AFTERSALE" -> "售后单";
             case "CANCELLATION_SAGA" -> "取消补偿 Saga";
+            case "SUPPLIER_SOURCING" -> "供应商寻源单";
+            case "PROCUREMENT_ORDER" -> "补货采购单";
+            case "WAREHOUSE_RECEIPT" -> "采购收货单";
+            case "WAREHOUSE_MOVEMENT" -> "仓间调拨单";
+            case "WAREHOUSE_SHIPMENT" -> "销售出库单";
             default -> type;
         };
     }
@@ -1537,6 +1594,9 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
         }
         return switch (status) {
             case "ACTIVE" -> "已启用";
+            case "OPEN" -> "已创建";
+            case "NOTICED" -> "已通知";
+            case "CLAIMED" -> "已认领";
             case "SUBMITTED" -> "已提交";
             case "PUBLISHED" -> "已发布";
             case "SUCCEEDED" -> "成功";
@@ -1568,6 +1628,14 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
         BigDecimal amount = BigDecimal.valueOf(amountMinor.asLong())
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
         return amount.toPlainString() + " " + valueOr(currencyCode, "CNY");
+    }
+
+    private static String unitLabel(String unit) {
+        return switch (valueOr(unit, "")) {
+            case "EA" -> "件";
+            case "BOX" -> "箱";
+            default -> valueOr(unit, "件");
+        };
     }
 
     private static String valueOr(String value, String fallback) {

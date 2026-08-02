@@ -2,6 +2,8 @@ package cn.iocoder.yudao.module.cloudmold.merchant.controller.admin;
 
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
+import cn.iocoder.yudao.module.cloudmold.merchant.api.workflow.MerchantManagedAdmissionWorkflowQueryApi;
+import cn.iocoder.yudao.module.cloudmold.merchant.api.workflow.MerchantManagedAdmissionWorkflowResult;
 import cn.iocoder.yudao.module.cloudmold.merchant.controller.admin.vo.MerchantPageReqVO;
 import cn.iocoder.yudao.module.cloudmold.merchant.controller.admin.vo.MerchantShopPageReqVO;
 import cn.iocoder.yudao.module.cloudmold.merchant.service.query.MerchantPageItem;
@@ -30,6 +32,8 @@ public class MerchantQueryController {
 
     @Resource
     private MerchantQueryService merchantQueryService;
+    @Resource
+    private MerchantManagedAdmissionWorkflowQueryApi merchantManagedAdmissionWorkflowQueryApi;
 
     @GetMapping("/merchants/page")
     @Operation(summary = "分页查询规范商家，只返回当前租户 CloudMold 权威数据")
@@ -45,5 +49,12 @@ public class MerchantQueryController {
     public CommonResult<PageResult<MerchantShopPageItem>> getShopPage(
             @Valid MerchantShopPageReqVO request) {
         return success(merchantQueryService.getShopPage(request));
+    }
+
+    @GetMapping("/managed-admission/workflow")
+    @Operation(summary = "读取托管商家准入/验厂只读回传")
+    @PreAuthorize("@ss.hasPermission('cloudmold:merchant:query')")
+    public CommonResult<MerchantManagedAdmissionWorkflowResult> inspectManagedAdmissionWorkflow(String applicationId) {
+        return success(merchantManagedAdmissionWorkflowQueryApi.inspect(applicationId));
     }
 }

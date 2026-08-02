@@ -285,4 +285,36 @@ class ManagedWorkflowAgentGovernanceSeederTest {
         assertThat(command.getAllValues().get(1).getActionPolicy().getActionCode())
                 .isEqualTo("supply-planning.sop-release");
     }
+
+    @Test
+    void shouldSeedManagedMerchantGrowthWithIndependentRiskAndQualityResponsibility() {
+        AgentControlCommandApi commands = mock(AgentControlCommandApi.class);
+        AgentAuthorityGovernanceApi authority = mock(AgentAuthorityGovernanceApi.class);
+        AiOperationsTemporalMapper mapper = mock(AiOperationsTemporalMapper.class);
+        when(mapper.selectApprovalPolicy(162L)).thenReturn(new TemporalApprovalPolicyRecord()
+                .setTenantId(162L).setRequesterUserId(226L)
+                .setApproverUserId(225L).setGovernanceUserId(227L).setStatus("ACTIVE"));
+        ManagedSkillTaskWorkflowView workflow = ManagedSkillTaskWorkflowView.builder()
+                .skillId("skill.cloudmold.merchant.managed-growth-lifecycle.v1")
+                .skillVersion("1.0.0").riskLevel("R3").approvalRequired(true)
+                .definitionClosureSha256("a".repeat(64)).build();
+
+        ManagedWorkflowAgentGovernanceSeeder.ReconcileResult result =
+                new ManagedWorkflowAgentGovernanceSeeder(commands, authority, mapper)
+                        .reconcile(162L, List.of(workflow));
+
+        assertThat(result).isEqualTo(
+                new ManagedWorkflowAgentGovernanceSeeder.ReconcileResult(1, 3, 1, 3));
+        ArgumentCaptor<cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentControlCommand> command =
+                ArgumentCaptor.forClass(
+                        cn.iocoder.yudao.module.cloudmold.agentcontrol.api.AgentControlCommand.class);
+        verify(commands, org.mockito.Mockito.times(4)).execute(command.capture(), eq(227L));
+        assertThat(command.getAllValues().get(0).getRole().getRoleCode())
+                .isEqualTo("merchant-managed-growth-operator");
+        assertThat(command.getAllValues().get(1).getActionPolicy().getActionCode())
+                .isEqualTo("merchant.managed-growth.lifecycle");
+        verify(authority).executeAuthorityGovernance(any(), eq(227L));
+        verify(authority, org.mockito.Mockito.times(2))
+                .executeAuthorityGovernance(any(), eq(225L));
+    }
 }

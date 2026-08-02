@@ -137,16 +137,22 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
                         && Objects.equals(grant.getScopeHash(), scopeHash),
                 "approved execution approver grant drifted from the frozen work order");
 
-        Instant issuedAt = clock.instant();
-        Instant expiresAt = effectiveExpiry(now, issuedAt.plus(requireRequestedValidity(command.getValidForSeconds())),
+        require(approval.getDecidedAt() != null, "approved execution is missing its decision time");
+        Instant issuedAt = approval.getDecidedAt().toInstant(ZoneOffset.UTC);
+        Duration requestedValidity = requireRequestedValidity(command.getValidForSeconds());
+        Instant expiresAt = effectiveExpiry(now, issuedAt.plus(requestedValidity),
                 actorGrant, grant);
         String subject = permitSubject(UserTypeEnum.ADMIN.getValue(), operatorUserId);
+        String rootRequestIdentity = rootRequestIdentity(workOrder, subject, missionLease);
+        String permitId = DigestUtil.sha256Hex(String.join("\n", "execution-ticket-v1",
+                rootRequestIdentity, approval.getApprovalId(), String.valueOf(approval.getVersion()),
+                String.valueOf(command.getValidForSeconds())));
         SignedAgentExecutionPermit signed = permitSigner.sign(new SkillTaskApprovalPermitClaims(
                 SkillTaskApprovalRefCodec.CLAIMS_VERSION, SkillTaskApprovalRefCodec.LOCAL_HMAC_KEY_ID,
                 requireNonBlank(properties.getIssuer(), "issuer"),
                 requireNonBlank(properties.getAudience(), "audience"),
-                UUID.randomUUID().toString().replace("-", ""), workOrder.getWorkOrderId(), approval.getApprovalId(),
-                rootRequestIdentity(workOrder, subject, missionLease), workOrder.getSkillId(), workOrder.getSkillVersion(),
+                permitId, workOrder.getWorkOrderId(), approval.getApprovalId(),
+                rootRequestIdentity, workOrder.getSkillId(), workOrder.getSkillVersion(),
                 workOrder.getSkillDefinitionClosureSha256(), workOrder.getExecutionInputSha256(),
                 workOrder.getRiskLevel(), subject, tenantId, issuedAt, issuedAt, expiresAt,
                 missionLease == null ? null : missionLease.getRunId(),
@@ -246,7 +252,15 @@ public class AgentExecutionTicketService implements AgentExecutionTicketApi {
                 .setAggregateType("role_approval").setAggregateId(approval.getApprovalId())
                 .setAggregateVersion(approval.getVersion()).setEventType("agent_control.execution_ticket.issued")
                 .setActorUserId(operatorUserId).setDetailJson(detailJson).setOccurredAt(now).setCreatedAt(now);
-        require(mapper.insertAuditEvent(event) == 1, "failed to append execution-ticket audit event");
+        int inserted = mapper.insertExecutionTicketAuditIfAbsent(event);
+        if (inserted == 0) {
+            String existingSha256 = mapper.selectExecutionTicketAuditApprovalRefSha256(
+                    tenantId, approval.getApprovalId(), approval.getVersion());
+            require(Objects.equals(existingSha256, signed.approvalRefSha256()),
+                    "existing execution-ticket audit does not match the deterministic permit");
+        } else {
+            require(inserted == 1, "failed to append execution-ticket audit event");
+        }
     }
 
     private String rootRequestIdentity(WorkOrder workOrder, String subject, AgentRunLease missionLease) {

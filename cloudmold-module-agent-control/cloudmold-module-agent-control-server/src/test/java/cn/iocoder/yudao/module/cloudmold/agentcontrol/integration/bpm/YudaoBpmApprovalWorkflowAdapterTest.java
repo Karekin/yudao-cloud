@@ -12,6 +12,7 @@ import org.mockito.ArgumentCaptor;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.InputStream;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -131,9 +132,31 @@ class YudaoBpmApprovalWorkflowAdapterTest {
 
             String bpmnDiNamespace = "http://www.omg.org/spec/BPMN/20100524/DI";
             assertThat(document.getElementsByTagNameNS(bpmnDiNamespace, "BPMNDiagram").getLength()).isEqualTo(1);
-            assertThat(document.getElementsByTagNameNS(bpmnDiNamespace, "BPMNShape").getLength()).isEqualTo(5);
-            assertThat(document.getElementsByTagNameNS(bpmnDiNamespace, "BPMNEdge").getLength()).isEqualTo(5);
+            assertThat(document.getElementsByTagNameNS(bpmnDiNamespace, "BPMNShape").getLength()).isEqualTo(8);
+            assertThat(document.getElementsByTagNameNS(bpmnDiNamespace, "BPMNEdge").getLength()).isEqualTo(10);
+            assertThat(document.getElementsByTagNameNS("http://www.omg.org/spec/BPMN/20100524/MODEL",
+                    "terminateEventDefinition").getLength()).isEqualTo(1);
         }
+    }
+
+    @Test
+    void addsTheDedicatedAiReviewerAsAnOrSignPeer() {
+        AgentApprovalWorkflowProperties properties = new AgentApprovalWorkflowProperties();
+        properties.setAiReviewerOrSignEnabled(true);
+        properties.setAiReviewerUserIds(Set.of(229L));
+        properties.setAiReviewAllowedRiskLevels(Set.of("R2", "R3"));
+        YudaoBpmApprovalWorkflowAdapter orSignAdapter =
+                new YudaoBpmApprovalWorkflowAdapter(bpm, models, properties);
+        when(bpm.createProcessInstance(eq(100L), any())).thenReturn(CommonResult.success("process-18"));
+
+        orSignAdapter.start(candidate());
+
+        ArgumentCaptor<BpmProcessInstanceCreateReqDTO> request =
+                ArgumentCaptor.forClass(BpmProcessInstanceCreateReqDTO.class);
+        verify(bpm).createProcessInstance(eq(100L), request.capture());
+        assertThat(request.getValue().getVariables()).containsEntry("ai_or_sign_enabled", true);
+        assertThat(request.getValue().getStartUserSelectAssignees()
+                .get(YudaoBpmApprovalWorkflowAdapter.AI_APPROVAL_TASK_KEY)).containsExactly(229L);
     }
 
     private static ApprovalWorkflowStartCandidate candidate() {

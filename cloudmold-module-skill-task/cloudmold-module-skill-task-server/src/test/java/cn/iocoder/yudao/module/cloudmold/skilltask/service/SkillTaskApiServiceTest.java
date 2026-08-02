@@ -102,7 +102,7 @@ class SkillTaskApiServiceTest {
         verify(mapper).insertTask(anyLong(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(), any(), anyLong(), any(), any(), any(), any());
         verify(mapper).insertStep(8L, result.getTaskId(), "read", 1, "cap.read", "READ", "[]",
-                result.getTaskId() + ":read", LocalDateTime.of(2026, 7, 18, 12, 0));
+                result.getTaskId() + "-read", LocalDateTime.of(2026, 7, 18, 12, 0));
         verify(mapper).insertHistory(8L, result.getTaskId(), 0L, null, "QUEUED", "read",
                 "TASK_SUBMITTED", "Skill task accepted", 42L, 2,
                 LocalDateTime.of(2026, 7, 18, 12, 0));

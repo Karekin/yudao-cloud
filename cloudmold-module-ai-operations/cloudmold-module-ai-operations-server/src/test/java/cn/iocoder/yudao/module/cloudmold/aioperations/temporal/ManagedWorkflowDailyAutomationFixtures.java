@@ -51,6 +51,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.inventory.stockout-diagnosis.v1",
             "skill.cloudmold.listing.lifecycle-readback.v1",
             "skill.cloudmold.merchant.onboarding-lifecycle.v1",
+            "skill.cloudmold.merchant.managed-growth-lifecycle.v1",
             "skill.cloudmold.merchant-experience.rectification-lifecycle.v1",
             "skill.cloudmold.merchant.onboarding-readback.v1",
             "skill.cloudmold.growth.experiment-lifecycle.v1",
@@ -93,6 +94,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.engagement.promotion-campaign-operations.v1",
             "skill.cloudmold.growth.experiment-lifecycle.v1",
             "skill.cloudmold.merchant.onboarding-lifecycle.v1",
+            "skill.cloudmold.merchant.managed-growth-lifecycle.v1",
             "skill.cloudmold.merchant-experience.rectification-lifecycle.v1",
             "skill.cloudmold.procurement.order-lifecycle.v1",
             "skill.cloudmold.supplier.sourcing-lifecycle.v1",
@@ -133,6 +135,7 @@ final class ManagedWorkflowDailyAutomationFixtures {
             "skill.cloudmold.commerce.product-to-listing.v1",
             "skill.cloudmold.consumer.shopping-journey.v1",
             "skill.cloudmold.merchant.onboarding-lifecycle.v1",
+            "skill.cloudmold.merchant.managed-growth-lifecycle.v1",
             "skill.cloudmold.merchant-experience.rectification-lifecycle.v1",
             "skill.cloudmold.procurement.order-lifecycle.v1",
             "skill.cloudmold.supplier.sourcing-lifecycle.v1"

@@ -64,7 +64,7 @@ public class SkillTaskTemplateResolver {
                 JsonNode resolved = resolveNode(entry.getValue(), input, stepResults, taskId, runId,
                         stepIdempotencyKey, approvalRef);
                 if (entry.getKey().startsWith("/")) {
-                    replaceAtPointer(result, entry.getKey(), resolved);
+                    replaceAtPointer(result, entry.getKey(), resolved, entry.getValue());
                 } else {
                     result.set(entry.getKey(), resolved);
                 }
@@ -137,7 +137,8 @@ public class SkillTaskTemplateResolver {
         return current.deepCopy();
     }
 
-    private static void replaceAtPointer(ObjectNode root, String pointer, JsonNode value) {
+    private static void replaceAtPointer(ObjectNode root, String pointer, JsonNode value,
+                                         JsonNode overrideTemplate) {
         String[] rawSegments = pointer.substring(1).split("/", -1);
         if (rawSegments.length == 0) {
             throw new IllegalArgumentException("$overrides JSON Pointer cannot replace the root object");
@@ -152,7 +153,7 @@ public class SkillTaskTemplateResolver {
         }
         String leaf = decodePointerSegment(rawSegments[rawSegments.length - 1]);
         if (parent.isObject()) {
-            if (!parent.has(leaf)) {
+            if (!parent.has(leaf) && !isTrustedTechnicalInjection(leaf, overrideTemplate)) {
                 throw new IllegalArgumentException("$overrides path is missing: " + pointer);
             }
             ((ObjectNode) parent).set(leaf, value);
@@ -165,6 +166,18 @@ public class SkillTaskTemplateResolver {
         } else {
             throw new IllegalArgumentException("$overrides path is not replaceable: " + pointer);
         }
+    }
+
+    private static boolean isTrustedTechnicalInjection(String leaf, JsonNode overrideTemplate) {
+        if (!overrideTemplate.isTextual()) {
+            return false;
+        }
+        return switch (leaf) {
+            case "approvalRef" -> "$task.approvalEvidenceRef".equals(overrideTemplate.asText());
+            case "idempotencyKey" -> "$task.stepIdempotencyKey".equals(overrideTemplate.asText());
+            case "runId" -> "$task.runId".equals(overrideTemplate.asText());
+            default -> false;
+        };
     }
 
     private static JsonNode arrayIndex(JsonNode parent, String segment, String pointer) {

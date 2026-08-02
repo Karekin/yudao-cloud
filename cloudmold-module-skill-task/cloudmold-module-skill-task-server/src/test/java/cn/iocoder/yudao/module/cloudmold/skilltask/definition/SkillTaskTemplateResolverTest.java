@@ -81,6 +81,26 @@ class SkillTaskTemplateResolverTest {
     }
 
     @Test
+    void injectsOnlyTrustedTechnicalLeavesThatAreForbiddenInApprovedBusinessInput() throws Exception {
+        JsonNode template = objectMapper.readTree("""
+                [{"$object":"$input.command","$overrides":{
+                  "/approvalRef":"$task.approvalEvidenceRef",
+                  "/idempotencyKey":"$task.stepIdempotencyKey",
+                  "/runId":"$task.runId"}}]
+                """);
+        JsonNode input = objectMapper.readTree("{\"command\":{\"operation\":\"APPROVE\"}}");
+
+        JsonNode result = resolver.resolveValue(template, input, Map.of(),
+                "task-1", "run-1", "task-1-approve", "signed-permit");
+
+        assertThat(result.at("/0/approvalRef").asText())
+                .startsWith("agent-control://approval-ref/sha256/");
+        assertThat(result.at("/0/idempotencyKey").asText()).isEqualTo("task-1-approve");
+        assertThat(result.at("/0/runId").asText()).isEqualTo("run-1");
+        assertThat(input.at("/command/approvalRef").isMissingNode()).isTrue();
+    }
+
+    @Test
     void resolvesTaskApprovalAsOpaqueDeterministicEvidenceWithoutLeakingPermit() throws Exception {
         JsonNode template = objectMapper.readTree("""
                 [{"approvalRef":"$task.approvalEvidenceRef"}]

@@ -4,6 +4,7 @@ import lombok.Data;
 import lombok.experimental.Accessors;
 
 import java.time.Instant;
+import java.util.List;
 
 @Data
 @Accessors(chain = true)
@@ -38,4 +39,49 @@ public class MerchantCommand {
     private String correlationId;
     private String causationId;
     private Instant occurredAt;
+    private String admissionId;
+    private String attributionChannelCode;
+    private String attributionReference;
+    private String attributionEvidenceRef;
+    private String evidencePackageId;
+    private String evidencePackageRef;
+    private List<MerchantManagedEvidenceItem> evidenceItems;
+    private String diagnosticId;
+    private String recommendationCode;
+    private String recommendationSummary;
+    private String diagnosticEvidenceRef;
+    private String inspectionTaskId;
+    private String actorPrincipalId;
+    private Instant scheduledAt;
+    private String inspectionOutcomeEvidenceRef;
+    private String invitationId;
+    private String invitationCode;
+    private String recruiterPrincipalId;
+    private String invitationEvidenceRef;
+    private String buyerAssignmentId;
+    private String buyerTlPrincipalId;
+    private String buyerPrincipalId;
+    private String assignmentEvidenceRef;
+    private String gradeDecisionId;
+    private String gradeCode;
+    private String gradeDecisionStatus;
+    private String gradeTransitionDecision;
+    private List<MerchantBenefitEntitlementItem> benefitEntitlements;
+    private String benefitDecisionEvidenceRef;
+    private String thresholdsConfigRef;
+    private String probationAssessmentId;
+    private List<MerchantProbationGateItem> probationGates;
+    private String probationAssessmentStatus;
+    private String assessmentEvidenceRef;
+    private String scorecardId;
+    private String scorecardMonth;
+    private List<MerchantScorecardItem> scorecardItems;
+    private String scorecardStatus;
+    private String scorecardEvidenceRef;
+    private String exitDecisionId;
+    private String exitReasonType;
+    private String exitEvidenceRef;
+    private String reviewDecision;
+    private String reviewNote;
+    private String finalReviewEvidenceRef;
 }

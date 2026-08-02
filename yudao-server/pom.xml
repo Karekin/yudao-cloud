@@ -40,6 +40,12 @@
             <artifactId>cloudmold-module-agent-control-server</artifactId>
             <version>${revision}</version>
         </dependency>
+        <!-- Agent 审批适配器通过公开 BPM API 创建并跟踪审批实例。 -->
+        <dependency>
+            <groupId>cn.iocoder.cloud</groupId>
+            <artifactId>yudao-module-bpm-server</artifactId>
+            <version>${revision}</version>
+        </dependency>
         <!-- CloudMold 领域事件契约与事务 Outbox（红区模块） -->
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>

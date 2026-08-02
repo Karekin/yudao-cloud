@@ -2,6 +2,8 @@ package cn.iocoder.yudao.module.cloudmold.aioperations.temporal;
 
 import cn.hutool.crypto.digest.DigestUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
+import cn.iocoder.yudao.module.cloudmold.identity.api.IdentityQueryApi;
+import cn.iocoder.yudao.module.cloudmold.identity.api.SourceIdentityReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -18,9 +20,11 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -35,6 +39,11 @@ import java.util.UUID;
 @ConditionalOnProperty(prefix = "cloudmold.ai-operations.temporal", name = "enabled", havingValue = "true")
 class RotatingBusinessScenarioInputFactory {
 
+    private static final Set<String> TECHNICAL_EXECUTION_KEYS = Set.of(
+            "tenantid", "operatorid", "operatortype", "approvalref", "approvalscope",
+            "clientrequestkey", "skilltaskid", "skillid", "skillversion", "runid",
+            "idempotencykey");
+
     static final String FULL_CHAIN_SKILL = "skill.cloudmold.commerce.full-chain-hsf.v1";
     static final String PRODUCT_TO_LISTING_SKILL = "skill.cloudmold.commerce.product-to-listing.v1";
     static final String AUTONOMOUS_DAY_SKILL = "skill.cloudmold.commerce.autonomous-day.v1";
@@ -46,6 +55,8 @@ class RotatingBusinessScenarioInputFactory {
             "skill.cloudmold.commerce.order-cancellation-operational.v1";
     static final String CONSUMER_JOURNEY_SKILL = "skill.cloudmold.consumer.shopping-journey.v1";
     static final String MERCHANT_ONBOARDING_SKILL = "skill.cloudmold.merchant.onboarding-lifecycle.v1";
+    static final String MERCHANT_MANAGED_GROWTH_LIFECYCLE_SKILL =
+            "skill.cloudmold.merchant.managed-growth-lifecycle.v1";
     static final String PROMOTION_CAMPAIGN_SKILL =
             "skill.cloudmold.engagement.promotion-campaign-operations.v1";
     static final String GROWTH_EXPERIMENT_SKILL =
@@ -108,6 +119,7 @@ class RotatingBusinessScenarioInputFactory {
 
     private final AiOperationsTemporalMapper mapper;
     private final AiOperationsTemporalSeedProperties seedProperties;
+    private final IdentityQueryApi identityQueries;
 
     Optional<String> build(Long tenantId, String targetSkillId, String businessDate,
                            String occurrenceKey) {
@@ -199,6 +211,17 @@ class RotatingBusinessScenarioInputFactory {
                 return Optional.empty();
             }
             output = merchantOnboarding(newPrefix, occurredAt, principal.path("principalId").asText());
+        } else if (MERCHANT_MANAGED_GROWTH_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            JsonNode onboarding = result(tenantId, MERCHANT_ONBOARDING_SKILL, "merchant_approve");
+            JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
+            String applicationId = onboarding.path("applicationId").asText();
+            String merchantId = onboarding.path("merchantId").asText();
+            if (applicationId.isBlank() || merchantId.isBlank()
+                    || principal.path("principalId").asText().isBlank()) {
+                return Optional.empty();
+            }
+            output = merchantManagedGrowthLifecycle(newPrefix, occurredAt, applicationId, merchantId,
+                    principal.path("principalId").asText());
         } else if (PROMOTION_CAMPAIGN_SKILL.equals(targetSkillId)) {
             JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
             if (principal.path("principalId").asText().isBlank()) {
@@ -238,25 +261,36 @@ class RotatingBusinessScenarioInputFactory {
         } else if (WMS_OPERATIONS_SKILL.equals(targetSkillId)) {
             JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
             JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
+            JsonNode warehouse = result(tenantId, READY_MASTER_SKILL, "warehouse_network");
+            WmsCatalogProjectionSeedRecord catalogProjection =
+                    mapper.selectLatestWmsCatalogProjectionSeed(tenantId);
             if (merchant.path("merchantId").asText().isBlank()
                     || merchant.path("shopId").asText().isBlank()
-                    || principal.path("principalId").asText().isBlank()) {
+                    || principal.path("principalId").asText().isBlank()
+                    || warehouse.path("warehouseId").asText().isBlank()
+                    || !usable(catalogProjection)) {
                 return Optional.empty();
             }
             output = wmsOperations(newPrefix, occurredAt,
                     merchant.path("merchantId").asText(),
                     merchant.path("shopId").asText(),
-                    principal.path("principalId").asText());
+                    principal.path("principalId").asText(),
+                    warehouse.path("warehouseId").asText(),
+                    catalogProjection.getSkuCode(), catalogProjection.getPrimaryBarcode(),
+                    catalogProjection.getBaseUomCode());
         } else if (REPLENISHMENT_LIFECYCLE_SKILL.equals(targetSkillId)) {
             JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
             JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
             JsonNode catalog = result(tenantId, CATALOG_MATRIX_SKILL, "define_1");
+            WmsCatalogProjectionSeedRecord catalogProjection =
+                    mapper.selectLatestWmsCatalogProjectionSeed(tenantId);
             JsonNode warehouse = result(tenantId, READY_MASTER_SKILL, "warehouse_network");
             if (merchant.path("merchantId").asText().isBlank()
                     || merchant.path("shopId").asText().isBlank()
                     || principal.path("principalId").asText().isBlank()
                     || catalog.path("canonicalSkuId").asText().isBlank()
-                    || warehouse.path("warehouseId").asText().isBlank()) {
+                    || warehouse.path("warehouseId").asText().isBlank()
+                    || !usable(catalogProjection)) {
                 return Optional.empty();
             }
             output = replenishmentLifecycle(newPrefix, occurredAt,
@@ -264,44 +298,22 @@ class RotatingBusinessScenarioInputFactory {
                     merchant.path("shopId").asText(),
                     principal.path("principalId").asText(),
                     catalog.path("canonicalSkuId").asText(),
-                    warehouse.path("warehouseId").asText());
+                    warehouse.path("warehouseId").asText(),
+                    catalogProjection.getSkuCode(), catalogProjection.getPrimaryBarcode(),
+                    catalogProjection.getBaseUomCode());
         } else if (SUPPLY_PLANNING_SOP_LIFECYCLE_SKILL.equals(targetSkillId)) {
-            JsonNode catalog = result(tenantId, CATALOG_MATRIX_SKILL, "define_1");
-            JsonNode canonicalWarehouse = result(
-                    tenantId, READY_MASTER_SKILL, "warehouse_network");
             JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
-            JsonNode sourceWarehouse = result(
-                    tenantId, WMS_OPERATIONS_SKILL, "create_source_warehouse");
-            JsonNode targetWarehouse = result(
-                    tenantId, WMS_OPERATIONS_SKILL, "create_target_warehouse");
-            JsonNode wmsSku = result(tenantId, WMS_OPERATIONS_SKILL, "resolve_sku");
-            long sourceWarehouseId = sourceWarehouse.asLong(0);
-            long targetWarehouseId = targetWarehouse.asLong(0);
-            long wmsSkuId = wmsSku.path("skuId").asLong(0);
-            if (sourceWarehouseId <= 0 || targetWarehouseId <= 0 || wmsSkuId <= 0
-                    || sourceWarehouseId == targetWarehouseId) {
-                WmsTransferSeedRecord seed = mapper.selectWmsTransferSeed(tenantId);
-                if (seed != null) {
-                    sourceWarehouseId = seed.getSourceWarehouseId() == null
-                            ? 0 : seed.getSourceWarehouseId();
-                    targetWarehouseId = seed.getTargetWarehouseId() == null
-                            ? 0 : seed.getTargetWarehouseId();
-                    wmsSkuId = seed.getWmsSkuId() == null ? 0 : seed.getWmsSkuId();
-                }
-            }
-            if (catalog.path("canonicalSkuId").asText().isBlank()
-                    || canonicalWarehouse.path("warehouseId").asText().isBlank()
-                    || principal.path("principalId").asText().isBlank()
-                    || sourceWarehouseId <= 0 || targetWarehouseId <= 0 || wmsSkuId <= 0
-                    || sourceWarehouseId == targetWarehouseId) {
+            WmsTransferSeedRecord seed = mapper.selectWmsTransferSeed(tenantId);
+            if (principal.path("principalId").asText().isBlank() || !usable(seed)) {
                 return Optional.empty();
             }
+            String mappingEvidenceSha256 = wmsTransferEvidence(seed);
             output = supplyPlanningSopLifecycle(
                     newPrefix, occurredAt,
-                    catalog.path("canonicalSkuId").asText(),
-                    canonicalWarehouse.path("warehouseId").asText(),
+                    seed.getCanonicalSkuId(), seed.getCanonicalWarehouseId(),
                     principal.path("principalId").asText(),
-                    sourceWarehouseId, targetWarehouseId, wmsSkuId);
+                    seed.getSourceWarehouseId(), seed.getTargetWarehouseId(), seed.getWmsSkuId(),
+                    seed.getBaseUomCode(), mappingEvidenceSha256);
         } else if (CUSTOMER_SERVICE_LIFECYCLE_SKILL.equals(targetSkillId)) {
             JsonNode customer = result(tenantId, CONSUMER_JOURNEY_SKILL, "consumer_principal");
             JsonNode order = result(tenantId, CONSUMER_JOURNEY_SKILL, "order_place");
@@ -436,10 +448,14 @@ class RotatingBusinessScenarioInputFactory {
                     mapper.selectFirstEffectiveAgentRoleActor(tenantId, "finance");
             Long reviewerUserId = approvalPolicy == null
                     ? null : approvalPolicy.getGovernanceUserId();
+            String reviewerPrincipalId = resolveSystemPrincipal(reviewerUserId);
+            String financePrincipalId = resolveSystemPrincipal(financeActorUserId);
             if (operator.path("principalId").asText().isBlank()
                     || reviewerUserId == null || reviewerUserId <= 0
                     || financeActorUserId == null || financeActorUserId <= 0
-                    || reviewerUserId.equals(financeActorUserId)) {
+                    || reviewerUserId.equals(financeActorUserId)
+                    || reviewerPrincipalId == null || financePrincipalId == null
+                    || reviewerPrincipalId.equals(financePrincipalId)) {
                 return Optional.empty();
             }
             ObjectNode consumer = consumerJourney(rotated, newPrefix, occurredAt,
@@ -447,8 +463,7 @@ class RotatingBusinessScenarioInputFactory {
             output = partnerMarketingKolMediaOperations(
                     rotated, newPrefix, occurredAt, consumer,
                     operator.path("principalId").asText(),
-                    "governance-user:" + reviewerUserId,
-                    "finance-user:" + financeActorUserId);
+                    reviewerPrincipalId, financePrincipalId);
         } else if (ASSORTMENT_PLANNING_LIFECYCLE_SKILL.equals(targetSkillId)) {
             JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
             if (operator.path("principalId").asText().isBlank()) {
@@ -501,14 +516,19 @@ class RotatingBusinessScenarioInputFactory {
                     .path("warehouse_network").path("warehouseId").asText();
             String listingId = listing.path("outputs").path("listing_create")
                     .path("listingId").asText();
+            WmsCatalogProjectionSeedRecord catalogProjection =
+                    mapper.selectLatestWmsCatalogProjectionSeed(tenantId);
             if (!"VERIFIED".equals(qualityStatus)
                     || canonicalSkuId.isBlank() || merchantId.isBlank() || shopId.isBlank()
-                    || principalId.isBlank() || warehouseId.isBlank() || listingId.isBlank()) {
+                    || principalId.isBlank() || warehouseId.isBlank() || listingId.isBlank()
+                    || !usable(catalogProjection)) {
                 return Optional.empty();
             }
             output = warehouseAdmissionLifecycle(
                     newPrefix, occurredAt, canonicalSkuId, listingId,
-                    merchantId, shopId, principalId, warehouseId);
+                    merchantId, shopId, principalId, warehouseId,
+                    catalogProjection.getSkuCode(), catalogProjection.getPrimaryBarcode(),
+                    catalogProjection.getBaseUomCode());
         } else if (CUSTOMER_EXPERIENCE_TICKET_RESPONSIBILITY_LIFECYCLE_SKILL
                 .equals(targetSkillId)) {
             if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
@@ -658,7 +678,26 @@ class RotatingBusinessScenarioInputFactory {
                         operator.path("principalId").asText());
             }
         }
+        removeTechnicalExecutionParameters(output);
         return Optional.of(JsonUtils.toJsonString(output));
+    }
+
+    private static void removeTechnicalExecutionParameters(JsonNode value) {
+        if (value.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = value.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                String normalized = field.getKey().replace("_", "").replace("-", "")
+                        .toLowerCase(Locale.ROOT);
+                if (TECHNICAL_EXECUTION_KEYS.contains(normalized)) {
+                    fields.remove();
+                } else {
+                    removeTechnicalExecutionParameters(field.getValue());
+                }
+            }
+        } else if (value.isArray()) {
+            value.forEach(RotatingBusinessScenarioInputFactory::removeTechnicalExecutionParameters);
+        }
     }
 
     private static String scenarioCode(String skillId) {
@@ -673,6 +712,7 @@ class RotatingBusinessScenarioInputFactory {
             case ORDER_CANCELLATION_OPERATIONS_SKILL -> "i";
             case CONSUMER_JOURNEY_SKILL -> "u";
             case MERCHANT_ONBOARDING_SKILL -> "h";
+            case MERCHANT_MANAGED_GROWTH_LIFECYCLE_SKILL -> "mg";
             case PROMOTION_CAMPAIGN_SKILL -> "e";
             case GROWTH_EXPERIMENT_SKILL -> "g";
             case SUPPLIER_SOURCING_SKILL -> "s";
@@ -778,7 +818,6 @@ class RotatingBusinessScenarioInputFactory {
         approve.putObject("approval")
                 .put("waveId", waveId)
                 .put("expectedWaveVersion", 8)
-                .put("approvalRef", "pending-temporal-approval")
                 .put("approvalNote", "独立审批确认组合符合毛利、退货率和价格带策略")
                 .put("reasonCode", "ASSORTMENT_APPROVED");
 
@@ -1029,7 +1068,20 @@ class RotatingBusinessScenarioInputFactory {
                     .put("listingId", listingId)
                     .put("listingOfferId", listingOfferId);
         }
-        objectAt(consumer.path("favoriteCommand"), -1).put("canonicalSpuId", canonicalSpuId);
+        ObjectNode favoriteCommand = objectAt(consumer.path("favoriteCommand"), -1);
+        favoriteCommand.put("canonicalSpuId", canonicalSpuId);
+        JsonNode identityReference = consumer.path("identityReference");
+        ConsumerFavoriteSeedRecord existingFavorite = mapper.selectConsumerFavorite(
+                tenantId,
+                identityReference.path("sourceSystem").asText(),
+                identityReference.path("sourceType").asText(),
+                identityReference.path("sourceId").asText(),
+                canonicalSpuId);
+        if (existingFavorite != null) {
+            favoriteCommand.put("favoriteId", existingFavorite.getFavoriteId())
+                    .put("expectedVersion", existingFavorite.getVersion())
+                    .put("desiredStatus", "ACTIVE".equals(existingFavorite.getStatus()) ? "REMOVED" : "ACTIVE");
+        }
         ObjectNode receive = objectAt(consumer.path("commands"), 0);
         receive.put("ownerId", merchantId).put("canonicalSkuId", canonicalSkuId)
                 .put("warehouseId", warehouseId);
@@ -1052,6 +1104,18 @@ class RotatingBusinessScenarioInputFactory {
                 .put("listingId", listingId).put("listingOfferId", listingOfferId);
         objectAt(consumer.path("communityCommands"), 2).put("actorPrincipalId", principalId);
         return true;
+    }
+
+    private String resolveSystemPrincipal(Long userId) {
+        if (userId == null || userId <= 0) {
+            return null;
+        }
+        try {
+            return identityQueries.resolveActiveSource(new SourceIdentityReference(
+                    "SYSTEM", "SYSTEM_ADMIN_USER", Long.toString(userId))).getPrincipalId();
+        } catch (RuntimeException exception) {
+            return null;
+        }
     }
 
     private boolean hydrateAfterSaleScenario(Long tenantId, ObjectNode aftersale) {
@@ -1176,6 +1240,44 @@ class RotatingBusinessScenarioInputFactory {
         String result = mapper.selectLatestSuccessfulSkillTaskStepResult(tenantId, skillId, stepCode);
         return result == null || result.isBlank()
                 ? JsonNodeFactory.instance.missingNode() : JsonUtils.parseTree(result);
+    }
+
+    private static boolean usable(WmsCatalogProjectionSeedRecord projection) {
+        return projection != null && projection.getSkuCode() != null
+                && !projection.getSkuCode().isBlank() && projection.getPrimaryBarcode() != null
+                && !projection.getPrimaryBarcode().isBlank() && projection.getBaseUomCode() != null
+                && !projection.getBaseUomCode().isBlank();
+    }
+
+    private static boolean usable(WmsTransferSeedRecord seed) {
+        return seed != null && seed.getSourceWarehouseId() != null && seed.getSourceWarehouseId() > 0
+                && seed.getTargetWarehouseId() != null && seed.getTargetWarehouseId() > 0
+                && !seed.getSourceWarehouseId().equals(seed.getTargetWarehouseId())
+                && seed.getWmsSkuId() != null && seed.getWmsSkuId() > 0
+                && seed.getItemId() != null && seed.getItemId() > 0
+                && text(seed.getWmsSkuCode()) && text(seed.getWmsBarcode())
+                && text(seed.getItemUnit()) && text(seed.getTargetWarehouseMappingId())
+                && text(seed.getCanonicalWarehouseId()) && text(seed.getCanonicalSkuId())
+                && text(seed.getCatalogSkuCode()) && text(seed.getCatalogBarcode())
+                && text(seed.getBaseUomCode());
+    }
+
+    private static String wmsTransferEvidence(WmsTransferSeedRecord seed) {
+        return DigestUtil.sha256Hex(String.join("\u001f", List.of(
+                "TRANSFER_REQUEST", seed.getCanonicalSkuId(), seed.getCanonicalWarehouseId(),
+                seed.getCatalogSkuCode(), seed.getCatalogBarcode(), unitCode(seed.getBaseUomCode()),
+                String.valueOf(seed.getWmsSkuId()), String.valueOf(seed.getItemId()),
+                seed.getWmsSkuCode(), seed.getWmsBarcode(), unitCode(seed.getItemUnit()),
+                String.valueOf(seed.getSourceWarehouseId()), String.valueOf(seed.getTargetWarehouseId()),
+                seed.getTargetWarehouseMappingId())));
+    }
+
+    private static boolean text(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String unitCode(String value) {
+        return value.trim().replace('-', '_').replace(' ', '_').toUpperCase(Locale.ROOT);
     }
 
     private static ObjectNode productToListing(ObjectNode fullChain, String prefix) {
@@ -1388,7 +1490,9 @@ class RotatingBusinessScenarioInputFactory {
 
     private static ObjectNode warehouseAdmissionLifecycle(
             String prefix, String occurredAt, String canonicalSkuId, String listingId,
-            String merchantId, String shopId, String principalId, String warehouseId) {
+            String merchantId, String shopId, String principalId, String warehouseId,
+            String canonicalSkuCode, String canonicalBarcode,
+            String canonicalBaseUomCode) {
         ObjectNode output = JsonNodeFactory.instance.objectNode();
         output.put("canonicalSkuId", canonicalSkuId);
         output.putObject("runIds")
@@ -1411,7 +1515,8 @@ class RotatingBusinessScenarioInputFactory {
                 merchantOnboarding(prefix + "-bd", occurredAt, principalId));
         output.set("replenishment", replenishmentLifecycle(
                 prefix + "-warehouse", occurredAt,
-                merchantId, shopId, principalId, canonicalSkuId, warehouseId));
+                merchantId, shopId, principalId, canonicalSkuId, warehouseId,
+                canonicalSkuCode, canonicalBarcode, canonicalBaseUomCode));
         ObjectNode traffic = promotionCampaign(
                 prefix + "-quality-traffic", occurredAt, principalId);
         traffic.withObject("/campaignCommand")
@@ -1686,7 +1791,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("reasonCode", "CARDHOLDER_DISPUTE")
                 .put("amountMinor", 39_800L)
                 .put("currencyCode", "CNY")
-                .put("externalRef", "chargeback:" + prefix));
+                .put("externalRef", "chargeback-" + prefix));
         commands.add(riskCommand(prefix, runId, occurredAt, correlationId, "START_REVIEW")
                 .put("caseId", ZERO_UUID)
                 .put("expectedVersion", 1L));
@@ -1709,7 +1814,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("lossEntryType", "CHARGEBACK_LOSS")
                 .put("signedAmountMinor", 39_800L)
                 .put("currencyCode", "CNY")
-                .put("externalRef", "chargeback:" + prefix));
+                .put("externalRef", "chargeback-" + prefix));
         return output;
     }
 
@@ -1953,13 +2058,111 @@ class RotatingBusinessScenarioInputFactory {
         input.putObject("draftCommand")
                 .put("legalName", "AI 模拟商家 " + prefix.toUpperCase())
                 .put("registrationHashToken", "sha256:" + stableUuid(prefix + ":registration").replace("-", ""))
-                .put("businessLicenseToken", "restricted:merchant-license:" + prefix)
+                .put("businessLicenseToken", "sha256:"
+                        + DigestUtil.sha256Hex(prefix + ":merchant-license"))
                 .put("ownerPrincipalId", ownerPrincipalId)
                 .put("channelCode", "YSHOPPING_INTERNAL")
                 .put("externalShopId", "ai-shop-" + prefix)
+                .put("sourceSystem", "CLOUDMOLD_AI")
+                .put("traceId", correlationId)
                 .put("correlationId", correlationId)
                 .put("occurredAt", occurredAt);
         return input;
+    }
+
+    /**
+     * Builds a Local Dev/Test-only managed-admission case from an already approved
+     * canonical onboarding application. The resulting payload still goes through
+     * Temporal, Agent Control approval, SkillTask and Merchant commands; it never
+     * writes tables directly or represents a real merchant decision.
+     */
+    private static ObjectNode merchantManagedGrowthLifecycle(String prefix, String occurredAt,
+                                                              String applicationId, String merchantId,
+                                                              String actorPrincipalId) {
+        String correlationId = stableUuid(prefix + ":managed-growth");
+        String evidenceBase = "evidence:local-test/merchant-managed-growth/" + prefix;
+        ObjectNode input = JsonNodeFactory.instance.objectNode();
+        input.putObject("localTest")
+                .put("classification", "LOCAL_TEST")
+                .put("purpose", "synthetic managed-merchant admission workflow verification")
+                .put("sourceApplicationId", applicationId)
+                .put("sourceMerchantId", merchantId);
+        managedLifecycleCommand(input, "admissionOpenCommand", correlationId, occurredAt)
+                .put("applicationId", applicationId);
+        managedLifecycleCommand(input, "attributionCommand", correlationId, occurredAt)
+                .put("attributionChannelCode", "LOCAL_TEST_AUTOMATION")
+                .put("attributionReference", "local-test:" + prefix)
+                .put("attributionEvidenceRef", evidenceBase + "/attribution")
+                .putObject("sourceReference")
+                .put("sourceSystem", "CLOUDMOLD_AI_LOCAL_TEST")
+                .put("sourceType", "SYNTHETIC_RUN")
+                .put("sourceId", prefix);
+        ObjectNode evidence = managedLifecycleCommand(input, "evidencePackageCommand", correlationId, occurredAt)
+                .put("evidencePackageRef", evidenceBase + "/package");
+        ArrayNode evidenceItems = evidence.putArray("evidenceItems");
+        managedEvidenceItem(evidenceItems, "BUSINESS_LICENSE", "本地测试营业资质引用",
+                evidenceBase + "/business-license", prefix);
+        managedEvidenceItem(evidenceItems, "FACTORY_PROFILE", "本地测试工厂能力引用",
+                evidenceBase + "/factory-profile", prefix);
+        managedLifecycleCommand(input, "aiDiagnosticProposalCommand", correlationId, occurredAt)
+                .put("recommendationCode", "FACTORY_INSPECTION_REQUIRED")
+                .put("recommendationSummary", "LOCAL_TEST 合成证据完整，进入受控验厂链路验证")
+                .put("diagnosticEvidenceRef", evidenceBase + "/ai-diagnostic");
+        managedLifecycleCommand(input, "aiDiagnosticAcceptCommand", correlationId, occurredAt)
+                .put("actorPrincipalId", actorPrincipalId)
+                .put("reviewNote", "LOCAL_TEST 自动审批：仅验证受控工作流与审计证据");
+        managedLifecycleCommand(input, "inspectionCreateCommand", correlationId, occurredAt)
+                .put("reviewNote", "LOCAL_TEST 创建受控验厂任务");
+        managedLifecycleCommand(input, "inspectionClaimCommand", correlationId, occurredAt)
+                .put("actorPrincipalId", actorPrincipalId)
+                .put("reviewNote", "LOCAL_TEST 验厂小二认领");
+        managedLifecycleCommand(input, "inspectionScheduleCommand", correlationId, occurredAt)
+                .put("actorPrincipalId", actorPrincipalId)
+                .put("scheduledAt", Instant.parse(occurredAt).plus(1, ChronoUnit.HOURS).toString())
+                .put("reviewNote", "LOCAL_TEST 预约验厂");
+        managedLifecycleCommand(input, "inspectionSubmitCommand", correlationId, occurredAt)
+                .put("actorPrincipalId", actorPrincipalId)
+                .put("inspectionOutcomeEvidenceRef", evidenceBase + "/inspection")
+                .put("reviewNote", "LOCAL_TEST 现场验厂证据已受控引用");
+        managedLifecycleCommand(input, "inspectionFirstReviewCommand", correlationId, occurredAt)
+                .put("actorPrincipalId", actorPrincipalId)
+                .put("inspectionOutcomeEvidenceRef", evidenceBase + "/qa-first-review")
+                .put("reviewNote", "LOCAL_TEST QA 一审通过");
+        managedLifecycleCommand(input, "inspectionFinalReviewCommand", correlationId, occurredAt)
+                .put("actorPrincipalId", actorPrincipalId)
+                .put("inspectionOutcomeEvidenceRef", evidenceBase + "/qa-final-review")
+                .put("reviewNote", "LOCAL_TEST QA 终审待完成");
+        managedLifecycleCommand(input, "inspectionCompleteCommand", correlationId, occurredAt)
+                .put("actorPrincipalId", actorPrincipalId)
+                .put("inspectionOutcomeEvidenceRef", evidenceBase + "/inspection-complete")
+                .put("reviewNote", "LOCAL_TEST 验厂任务完成");
+        managedLifecycleCommand(input, "managedFinalReviewCommand", correlationId, occurredAt)
+                .put("actorPrincipalId", actorPrincipalId)
+                .put("reviewDecision", "APPROVED")
+                .put("finalReviewEvidenceRef", evidenceBase + "/managed-final-review")
+                .put("reviewNote", "LOCAL_TEST 自动审批：托管准入测试结论通过");
+        return input;
+    }
+
+    private static ObjectNode managedLifecycleCommand(ObjectNode input, String field,
+                                                      String correlationId, String occurredAt) {
+        return input.putObject(field)
+                .put("sourceSystem", "CLOUDMOLD_AI_LOCAL_TEST")
+                .put("traceId", correlationId)
+                .put("correlationId", correlationId)
+                .put("occurredAt", occurredAt);
+    }
+
+    private static void managedEvidenceItem(ArrayNode items, String itemCode, String itemLabel,
+                                            String evidenceRef, String sourceId) {
+        items.addObject()
+                .put("itemCode", itemCode)
+                .put("itemLabel", itemLabel)
+                .put("evidenceRef", evidenceRef)
+                .put("sourceSystem", "CLOUDMOLD_AI_LOCAL_TEST")
+                .put("sourceType", "SYNTHETIC_RUN")
+                .put("sourceId", sourceId)
+                .put("note", "LOCAL_TEST synthetic evidence reference only");
     }
 
     private static ObjectNode promotionCampaign(String prefix, String occurredAt,
@@ -2033,7 +2236,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("campaignCode", "AI-GROWTH-" + prefix.toUpperCase())
                 .put("campaignKind", "GENERAL")
                 .put("name", "AI 每日转化优化实验 " + prefix.toUpperCase())
-                .put("startsAt", base.toString())
+                .put("startsAt", runningAt)
                 .put("endsAt", base.plus(1, ChronoUnit.DAYS).toString());
         ObjectNode experiment = input.putObject("experiment")
                 .put("experimentId", experimentId)
@@ -2042,20 +2245,25 @@ class RotatingBusinessScenarioInputFactory {
                 .put("name", "AI 商详到支付转化实验 " + prefix.toUpperCase())
                 .put("hypothesis", "个性化卖点排序能够提高支付转化率")
                 .put("primaryMetricCode", "PAYMENT_CONVERSION")
-                .put("minimumSampleSizePerVariant", 1)
-                .put("startsAt", base.toString())
+                .put("minimumSampleSizePerVariant", 30)
+                .put("startsAt", runningAt)
                 .put("endsAt", concludedAt);
         ArrayNode variants = experiment.putArray("variants");
         variants.addObject().put("variantCode", "CONTROL")
                 .put("variantKind", "CONTROL").put("allocationBasisPoints", 5000);
         variants.addObject().put("variantCode", "TREATMENT")
                 .put("variantKind", "TREATMENT").put("allocationBasisPoints", 5000);
-        growthExposure(input, "controlExposure", prefix, experimentId, "CONTROL");
-        growthExposure(input, "treatmentExposure", prefix, experimentId, "TREATMENT");
+        for (int sample = 1; sample <= 30; sample++) {
+            String suffix = sample == 1 ? "" : String.format("%02d", sample);
+            growthExposure(input, "controlExposure" + suffix,
+                    prefix, experimentId, "CONTROL", sample);
+            growthExposure(input, "treatmentExposure" + suffix,
+                    prefix, experimentId, "TREATMENT", sample);
+        }
         growthMetric(input, "controlMetric", prefix, experimentId, "CONTROL",
-                base, snapshotAt, concludedAt, 420_000L);
+                Instant.parse(runningAt), snapshotAt, concludedAt, 420_000L);
         growthMetric(input, "treatmentMetric", prefix, experimentId, "TREATMENT",
-                base, snapshotAt, concludedAt, 610_000L);
+                Instant.parse(runningAt), snapshotAt, concludedAt, 610_000L);
         input.putObject("conclusion")
                 .put("experimentId", experimentId)
                 .put("decision", "TREATMENT")
@@ -2067,14 +2275,14 @@ class RotatingBusinessScenarioInputFactory {
     }
 
     private static void growthExposure(ObjectNode input, String field, String prefix,
-                                       String experimentId, String variantCode) {
+                                       String experimentId, String variantCode, int sample) {
         String suffix = variantCode.toLowerCase();
         input.putObject(field)
-                .put("exposureId", stableUuid(prefix + ":growth-exposure:" + suffix))
-                .put("exposureKey", "exposure:" + prefix + ":" + suffix)
+                .put("exposureId", stableUuid(prefix + ":growth-exposure:" + suffix + ":" + sample))
+                .put("exposureKey", "exposure:" + prefix + ":" + suffix + ":" + sample)
                 .put("experimentId", experimentId)
                 .put("variantCode", variantCode)
-                .put("principalId", "synthetic-buyer:" + prefix + ":" + suffix)
+                .put("principalId", "synthetic-buyer:" + prefix + ":" + suffix + ":" + sample)
                 .put("assignmentVersion", "v1");
     }
 
@@ -2090,7 +2298,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("metricCode", "PAYMENT_CONVERSION")
                 .put("measuredFrom", measuredFrom.toString())
                 .put("measuredTo", measuredTo)
-                .put("sampleCount", 1)
+                .put("sampleCount", 30)
                 .put("metricValueMicros", valueMicros)
                 .put("dataFreshUntil", freshUntil)
                 .put("evidenceRef", "evidence://growth/" + prefix + "/" + suffix);
@@ -2227,11 +2435,16 @@ class RotatingBusinessScenarioInputFactory {
 
     private static ObjectNode wmsOperations(String prefix, String occurredAt,
                                             String merchantId, String shopId,
-                                            String principalId) {
+                                            String principalId, String canonicalWarehouseId,
+                                            String canonicalSkuCode, String canonicalBarcode,
+                                            String canonicalBaseUomCode) {
         String compact = prefix.replace("-", "").toUpperCase();
         String code = compact.length() > 16 ? compact.substring(0, 16) : compact;
         String date = occurredAt.substring(0, 10);
         ObjectNode input = JsonNodeFactory.instance.objectNode();
+        input.put("occurredAt", occurredAt)
+                .put("correlationId", stableUuid(prefix + ":wms-correlation"))
+                .put("canonicalWarehouseId", canonicalWarehouseId);
         input.putObject("authority").putObject("reference")
                 .put("merchantId", merchantId)
                 .put("shopId", shopId);
@@ -2263,19 +2476,18 @@ class RotatingBusinessScenarioInputFactory {
         input.putObject("category")
                 .put("parentId", 0)
                 .put("code", "AIC" + code)
-                .put("name", "AI 每日仓储商品")
+                .put("name", "AI仓储品类-" + code)
                 .put("sort", 1)
                 .put("status", 0);
         ObjectNode item = input.putObject("item")
                 .put("code", "AII" + code)
                 .put("name", "AI 仓储全链路商品 " + prefix.toUpperCase())
-                .put("unit", "件")
+                .put("unit", canonicalBaseUomCode)
                 .put("remark", "每日唯一收货、调拨、出库与盘点商品");
         item.putArray("skus").addObject()
                 .put("name", "标准款")
-                .put("barCode", "697" + String.format("%010d",
-                        Math.floorMod(prefix.hashCode(), 10_000_000_000L)))
-                .put("code", "AIK" + code)
+                .put("barCode", canonicalBarcode)
+                .put("code", canonicalSkuCode)
                 .put("length", 10)
                 .put("width", 8)
                 .put("height", 2)
@@ -2316,7 +2528,9 @@ class RotatingBusinessScenarioInputFactory {
     private static ObjectNode replenishmentLifecycle(String prefix, String occurredAt,
                                                      String merchantId, String shopId,
                                                      String principalId, String canonicalSkuId,
-                                                     String warehouseId) {
+                                                     String warehouseId, String canonicalSkuCode,
+                                                     String canonicalBarcode,
+                                                     String canonicalBaseUomCode) {
         LocalDate date = Instant.parse(occurredAt).atZone(java.time.ZoneOffset.UTC).toLocalDate();
         boolean promotion = date.getDayOfMonth() % 5 == 0;
         int orderedQuantity = promotion ? 2_000 : 500;
@@ -2334,7 +2548,8 @@ class RotatingBusinessScenarioInputFactory {
                         ? "AI 根据大促销量预测与安全库存缺口下发加急补货"
                         : "AI 根据日销、在途与安全库存缺口下发日常补货");
         ObjectNode physical = wmsOperations(prefix + "-wms", occurredAt,
-                merchantId, shopId, principalId);
+                merchantId, shopId, principalId, warehouseId, canonicalSkuCode,
+                canonicalBarcode, canonicalBaseUomCode);
         if (promotion) {
             physical.withObject("/quantities")
                     .put("receipt", 30)
@@ -2370,7 +2585,7 @@ class RotatingBusinessScenarioInputFactory {
     private static ObjectNode supplyPlanningSopLifecycle(
             String prefix, String occurredAt, String canonicalSkuId, String warehouseId,
             String actorPrincipalId, long sourceWarehouseId, long targetWarehouseId,
-            long wmsSkuId) {
+            long wmsSkuId, String baseUomCode, String mappingEvidenceSha256) {
         LocalDate date = Instant.parse(occurredAt).atZone(java.time.ZoneOffset.UTC).toLocalDate();
         String runId = stableUuid(prefix + ":sop-run");
         String correlationId = stableUuid(prefix + ":sop-correlation");
@@ -2403,7 +2618,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("forecastQuantity", 18)
                 .put("lowerQuantity", 15)
                 .put("upperQuantity", 24)
-                .put("uomCode", "EA");
+                .put("uomCode", baseUomCode);
         points.addObject()
                 .put("canonicalSkuId", canonicalSkuId)
                 .put("warehouseId", warehouseId)
@@ -2411,7 +2626,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("forecastQuantity", 20)
                 .put("lowerQuantity", 16)
                 .put("upperQuantity", 30)
-                .put("uomCode", "EA");
+                .put("uomCode", baseUomCode);
 
         ObjectNode forecastEvaluation = input.putObject("forecastEvaluation");
         forecastEvaluation.put("evaluationId",
@@ -2424,7 +2639,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("warehouseId", warehouseId)
                 .put("bucketStart", date.minusDays(7).toString())
                 .put("actualQuantity", 20)
-                .put("uomCode", "EA");
+                .put("uomCode", baseUomCode);
 
         input.putObject("supplyPlan")
                 .put("planId", planId)
@@ -2441,10 +2656,10 @@ class RotatingBusinessScenarioInputFactory {
         ObjectNode scenarios = input.putObject("scenarios");
         scenarios.set("lean", supplyPlanScenario(
                 leanScenarioId, planId, "LEAN", canonicalSkuId, warehouseId,
-                20, 5, 2, 0, 10, prefix + ":lean"));
+                20, 5, 2, 0, 10, prefix + ":lean", baseUomCode));
         scenarios.set("resilient", supplyPlanScenario(
                 resilientScenarioId, planId, "RESILIENT", canonicalSkuId, warehouseId,
-                20, 5, 10, 10, 20, prefix + ":resilient"));
+                20, 5, 10, 10, 20, prefix + ":resilient", baseUomCode));
 
         ObjectNode recommendation = input.putObject("scenarioRecommendation");
         recommendation.put("recommendationId",
@@ -2466,11 +2681,11 @@ class RotatingBusinessScenarioInputFactory {
                 .put("recommendationId", ZERO_UUID)
                 .put("expectedRecommendationVersion", 2)
                 .put("targetType", "TRANSFER_REQUEST")
-                .put("mappingEvidenceSha256",
-                        DigestUtil.sha256Hex(prefix + ":wms-transfer-mapping"))
+                .put("mappingEvidenceSha256", mappingEvidenceSha256)
                 .put("sourceWarehouseId", sourceWarehouseId)
                 .put("targetWarehouseId", targetWarehouseId)
                 .put("wmsSkuId", wmsSkuId)
+                .put("unitCostMinor", 1_000)
                 .put("proposedByPrincipalId", actorPrincipalId)
                 .put("policyCode", "SOP_TRANSFER_V1")
                 .put("policySha256",
@@ -2482,7 +2697,7 @@ class RotatingBusinessScenarioInputFactory {
             String scenarioId, String planId, String scenarioCode,
             String canonicalSkuId, String warehouseId, int forecastQuantity,
             int safetyStockQuantity, int onHandQuantity, int inboundQuantity,
-            int capacityQuantity, String evidenceSeed) {
+            int capacityQuantity, String evidenceSeed, String baseUomCode) {
         return JsonNodeFactory.instance.objectNode()
                 .put("scenarioId", scenarioId)
                 .put("planId", planId)
@@ -2496,7 +2711,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("capacityQuantity", capacityQuantity)
                 .put("minimumOrderQuantity", 1)
                 .put("unitCostMinor", 1_000)
-                .put("uomCode", "EA")
+                .put("uomCode", baseUomCode)
                 .put("parametersSha256", DigestUtil.sha256Hex(evidenceSeed));
     }
 
@@ -2593,7 +2808,8 @@ class RotatingBusinessScenarioInputFactory {
         commands.add(financeCommand(runId, correlationId, occurredAt, "OPEN_ACCOUNTING_PERIOD")
                 .set("period", JsonNodeFactory.instance.objectNode()
                         .put("periodId", periodId)
-                        .put("periodCode", "AI-" + scenarioCode + "-" + date)
+                        .put("periodCode", "AI-" + scenarioCode + "-" + date + "-"
+                                + DigestUtil.sha256Hex(prefix).substring(0, 8))
                         .put("periodStart", date.toString())
                         .put("periodEnd", date.toString())
                         .put("currencyCode", "CNY")
@@ -2876,6 +3092,7 @@ class RotatingBusinessScenarioInputFactory {
 
         ObjectNode input = JsonNodeFactory.instance.objectNode();
         input.put("canonicalSkuId", canonicalSkuId);
+        input.put("traceId", stableUuid(prefix + ":mystery-buyer-quality-run"));
         input.put("managerPrincipalId", managerPrincipalId);
         input.set("inspectorIdentityCommand", financeIdentityCommand(
                 runId, correlationId, occurredAt, inspectorUserId));
@@ -2891,7 +3108,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("expiresOn", date.plusDays(365).toString())
                 .put("receivedAt", occurredAt)
                 .put("reasonCode", "MYSTERY_BUYER_PURCHASED_SAMPLE")
-                .put("evidenceRef", "restricted:mystery-buyer-order/" + prefix)
+                .put("evidenceRef", "evidence:mystery-buyer-order/" + prefix)
                 .put("traceId", runId)
                 .put("correlationId", correlationId)
                 .put("occurredAt", occurredAt));
@@ -3056,7 +3273,7 @@ class RotatingBusinessScenarioInputFactory {
         boolean express = Math.floorMod(prefix.hashCode(), 2) == 0;
         String runId = prefix + "-crossborder-direct-mail";
         String correlationId = stableUuid(prefix + ":crossborder-correlation");
-        String caseId = ZERO_UUID;
+        String caseId = stableUuid(prefix + ":crossborder-case");
         String routeCode = express ? "CN_US_DIRECT_EXPRESS" : "CN_US_DIRECT_STANDARD";
         String carrierCode = express ? "TEST_INTL_EXPRESS" : "TEST_POSTAL_PACKET";
         String serviceLevel = express ? "EXPRESS_5D" : "STANDARD_10D";
@@ -3203,6 +3420,7 @@ class RotatingBusinessScenarioInputFactory {
             String prefix, String occurredAt, ObjectNode consumer, String operatorPrincipalId) {
         String runId = prefix + "-bonded-customs";
         String correlationId = stableUuid(prefix + ":bonded-customs-correlation");
+        String caseId = stableUuid(prefix + ":bonded-customs-case");
         String identityHash = DigestUtil.sha256Hex(prefix + ":bonded-buyer");
         long goodsAmountMinor = 39_800L;
 
@@ -3227,7 +3445,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("paymentSnapshotRef", bondedCustomsEvidence(prefix, "payment-snapshot"))
                 .put("logisticsSnapshotRef", bondedCustomsEvidence(prefix, "logistics-snapshot"));
         commands.add(bondedCustomsCommand(runId, correlationId, occurredAt, "CREATE_CASE")
-                .put("caseId", ZERO_UUID)
+                .put("caseId", caseId)
                 .put("canonicalOrderId", ZERO_UUID)
                 .set("tripleOrder", tripleOrder));
 
@@ -3259,7 +3477,7 @@ class RotatingBusinessScenarioInputFactory {
                 .put("expectedVersion", 2)
                 .set("goodsClassification", JsonNodeFactory.instance.objectNode()
                         .put("hsCode", "610910")
-                        .put("positiveListCode", "TEST_POSITIVE_LIST_APPAREL_V1")
+                        .put("positiveListCode", "POSITIVE_LIST_TEST")
                         .put("goodsName", "KNITTED COTTON T-SHIRT")
                         .put("evidenceRef",
                                 bondedCustomsEvidence(prefix, "goods-classification"))));
@@ -3267,7 +3485,8 @@ class RotatingBusinessScenarioInputFactory {
         commands.add(bondedCustomsCommand(runId, correlationId, occurredAt,
                         "MATCH_TRIPLE_ORDERS")
                 .put("caseId", ZERO_UUID)
-                .put("expectedVersion", 3));
+                .put("expectedVersion", 3)
+                .set("tripleOrder", tripleOrder.deepCopy()));
 
         commands.add(bondedCustomsCommand(runId, correlationId, occurredAt,
                         "CALCULATE_TAX")
@@ -3555,6 +3774,7 @@ class RotatingBusinessScenarioInputFactory {
         String runId = stableUuid(prefix + ":consumer-run");
         String sessionId = stableUuid(prefix + ":session");
         String correlationId = stableUuid(prefix + ":correlation");
+        consumer.put("traceId", runId);
         String sourceId = "persona:" + prefix;
         String searchToken = "search:" + prefix;
         String resultSetToken = "results:" + prefix;
