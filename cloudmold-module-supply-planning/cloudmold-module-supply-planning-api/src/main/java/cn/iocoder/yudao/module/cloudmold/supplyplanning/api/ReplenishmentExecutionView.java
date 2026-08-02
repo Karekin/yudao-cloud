@@ -18,13 +18,10 @@ public class ReplenishmentExecutionView {
     private String planId;
     private String recommendationStatus;
     private String targetType;
-    private String sourceSystem;
-    private String documentType;
-    private String externalDocumentId;
-    private String externalDocumentNo;
-    private String documentStatus;
-    private String nextWaitingEventCode;
-    private String nextWaitingEventLabel;
+    private String targetAggregateType;
+    private String targetAggregateId;
+    private String targetAggregateNo;
+    private String targetAggregateStatus;
     private BigDecimal requestedQuantity;
     private String uomCode;
     private LocalDate needByDate;

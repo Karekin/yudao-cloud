@@ -18,9 +18,4 @@ public class ProcurementResult {
     private String status;
     private String orderCode;
     private String sourceBusinessRef;
-    private String projectionSourceSystem;
-    private String projectionDocumentType;
-    private String projectionExternalDocumentId;
-    private String projectionExternalDocumentNo;
-    private String projectionDocumentStatus;
 }

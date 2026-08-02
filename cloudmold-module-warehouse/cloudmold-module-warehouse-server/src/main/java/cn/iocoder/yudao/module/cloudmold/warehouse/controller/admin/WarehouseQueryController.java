@@ -5,6 +5,10 @@ import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.module.cloudmold.warehouse.controller.admin.vo.WarehouseLocationPageReqVO;
 import cn.iocoder.yudao.module.cloudmold.warehouse.controller.admin.vo.WarehousePageReqVO;
 import cn.iocoder.yudao.module.cloudmold.warehouse.controller.admin.vo.WarehouseZonePageReqVO;
+import cn.iocoder.yudao.module.cloudmold.warehouse.controller.admin.vo.StockTransferPageReqVO;
+import cn.iocoder.yudao.module.cloudmold.warehouse.api.StockTransferView;
+import cn.iocoder.yudao.module.cloudmold.warehouse.service.query.StockTransferPageItem;
+import cn.iocoder.yudao.module.cloudmold.warehouse.service.query.StockTransferQueryService;
 import cn.iocoder.yudao.module.cloudmold.warehouse.service.query.WarehouseLocationPageItem;
 import cn.iocoder.yudao.module.cloudmold.warehouse.service.query.WarehousePageItem;
 import cn.iocoder.yudao.module.cloudmold.warehouse.service.query.WarehouseQueryService;
@@ -32,6 +36,24 @@ public class WarehouseQueryController {
 
     @Resource
     private WarehouseQueryService warehouseQueryService;
+
+    @Resource
+    private StockTransferQueryService stockTransferQueryService;
+
+    @GetMapping("/stock-transfers/page")
+    @Operation(summary = "分页查询 Warehouse 权威库存调拨单据")
+    @PreAuthorize("@ss.hasPermission('cloudmold:warehouse:query')")
+    public CommonResult<PageResult<StockTransferPageItem>> getStockTransferPage(
+            @Valid StockTransferPageReqVO request) {
+        return success(stockTransferQueryService.getPage(request));
+    }
+
+    @GetMapping("/stock-transfers/get")
+    @Operation(summary = "查询 Warehouse 权威库存调拨详情")
+    @PreAuthorize("@ss.hasPermission('cloudmold:warehouse:query')")
+    public CommonResult<StockTransferView> getStockTransfer(String requestId) {
+        return success(stockTransferQueryService.requireByRequestId(requestId));
+    }
 
     @GetMapping("/warehouses/page")
     @Operation(summary = "分页查询规范仓库，只返回当前租户 CloudMold 权威数据")

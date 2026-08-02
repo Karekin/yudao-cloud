@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 
 @Data
 @Builder
@@ -31,32 +32,49 @@ public class ProcurementCommand {
         private String orderCode;
         private String sourceBusinessType;
         private String sourceBusinessRef;
-        private String supplierRef;
-        private String canonicalSkuId;
-        private String canonicalWarehouseId;
-        private BigDecimal orderedQuantity;
-        private String uomCode;
-        private Long unitCostMinor;
-        private Long totalAmountMinor;
+        private String supplierId;
         private String currencyCode;
         private Integer leadTimeDays;
-        private LocalDate requiredDeliveryDate;
+        private Long headerNetAmountMinor;
+        private Long headerTaxAmountMinor;
+        private Long headerGrossAmountMinor;
+        private String taxCalculationPolicyCode;
+        private String roundingPolicyCode;
         private String remark;
         private String reasonCode;
         private Long expectedVersion;
-        private ProjectionDefinition projection;
+        private List<PurchaseOrderLineDefinition> lines;
     }
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class ProjectionDefinition {
-        private String sourceSystem;
-        private String documentType;
-        private String externalDocumentId;
-        private String externalDocumentNo;
-        private String documentStatus;
-        private String evidenceSha256;
+    public static class PurchaseOrderLineDefinition {
+        private String itemId;
+        private Integer lineNumber;
+        private String canonicalSkuId;
+        private BigDecimal orderedQuantity;
+        private String uomCode;
+        private String taxCode;
+        private Integer taxRateBps;
+        private BigDecimal unitNetPriceMinor;
+        private Long lineNetAmountMinor;
+        private Long lineTaxAmountMinor;
+        private Long lineGrossAmountMinor;
+        private List<PurchaseOrderDeliveryScheduleDefinition> schedules;
     }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PurchaseOrderDeliveryScheduleDefinition {
+        private String scheduleId;
+        private Integer scheduleNumber;
+        private LocalDate requiredDeliveryDate;
+        private String canonicalWarehouseId;
+        private BigDecimal scheduledQuantity;
+    }
+
 }

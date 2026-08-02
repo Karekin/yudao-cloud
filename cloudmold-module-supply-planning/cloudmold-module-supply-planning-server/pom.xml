@@ -33,7 +33,7 @@
         </dependency>
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
-            <artifactId>cloudmold-integration-yudao-api</artifactId>
+            <artifactId>cloudmold-module-warehouse-api</artifactId>
             <version>${revision}</version>
         </dependency>
         <dependency>

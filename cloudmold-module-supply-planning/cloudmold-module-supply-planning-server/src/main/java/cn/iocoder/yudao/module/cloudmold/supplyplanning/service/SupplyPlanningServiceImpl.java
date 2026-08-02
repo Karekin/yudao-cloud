@@ -5,20 +5,22 @@ import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.AppendDomainEventCommand;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
-import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommand;
-import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommandApi;
-import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementOperation;
-import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementResult;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.PurchaseRequisitionCommand;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.PurchaseRequisitionCommandApi;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.PurchaseRequisitionResult;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.*;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.dataobject.SupplyPlanningRecords.*;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.mysql.SupplyPlanningMapper;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.service.actor.SupplyPlanningActorPrincipalPort;
+import cn.iocoder.yudao.module.cloudmold.warehouse.api.StockTransferCommand;
+import cn.iocoder.yudao.module.cloudmold.warehouse.api.StockTransferCommandApi;
+import cn.iocoder.yudao.module.cloudmold.warehouse.api.StockTransferOperation;
+import cn.iocoder.yudao.module.cloudmold.warehouse.api.StockTransferResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.*;
 import java.util.*;
 import java.util.regex.Pattern;
@@ -41,8 +43,8 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
     private final SupplyPlanningMapper mapper;
     private final OutboxAppender outboxAppender;
     private final SupplyPlanningActorPrincipalPort actorPrincipalPort;
-    private final ReplenishmentExecutionPort replenishmentExecutionPort;
-    private final ProcurementCommandApi procurementCommandApi;
+    private final PurchaseRequisitionCommandApi purchaseRequisitionCommandApi;
+    private final StockTransferCommandApi stockTransferCommandApi;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -105,11 +107,6 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                 .businessObjectId(stringValue(outcome.payload().get("business_object_id")))
                 .businessObjectNo(stringValue(outcome.payload().get("business_object_no")))
                 .businessStatus(stringValue(outcome.payload().get("business_status")))
-                .projectionSourceSystem(stringValue(outcome.payload().get("projection_source_system")))
-                .projectionDocumentType(stringValue(outcome.payload().get("projection_document_type")))
-                .projectionExternalDocumentId(stringValue(outcome.payload().get("projection_external_document_id")))
-                .projectionExternalDocumentNo(stringValue(outcome.payload().get("projection_external_document_no")))
-                .projectionDocumentStatus(stringValue(outcome.payload().get("projection_document_status")))
                 .nextWaitingEventCode(stringValue(outcome.payload().get("next_waiting_event_code")))
                 .nextWaitingEventLabel(stringValue(outcome.payload().get("next_waiting_event_label")))
                 .build();
@@ -647,10 +644,8 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         requireRef(input.getRecommendationId(), "recommendationId", 128);
         requireRef(input.getProposedByPrincipalId(), "proposedByPrincipalId", 128);
         String targetType = upper(input.getTargetType());
-        validateExecutionFields(targetType, input.getMappingEvidenceSha256(),
-                input.getSupplierId(), input.getAccountId(), input.getErpProductId(),
-                input.getErpProductUnitId(), input.getUnitCostMinor(), input.getTaxPercent(),
-                input.getSourceWarehouseId(), input.getTargetWarehouseId(), input.getWmsSkuId());
+        validateExecutionFields(targetType, input.getOwnerType(), input.getOwnerId(),
+                input.getSourceWarehouseId(), input.getTargetWarehouseId());
         requireCode(input.getPolicyCode(), "policyCode");
         require(upper(input.getPolicyCode()).length() <= 64,
                 "policyCode exceeds 64 characters");
@@ -672,13 +667,9 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                 .setRecommendationId(recommendation.getRecommendationId())
                 .setExpectedRecommendationVersion(recommendation.getVersion())
                 .setTargetType(targetType)
-                .setMappingEvidenceSha256(input.getMappingEvidenceSha256())
-                .setSupplierId(input.getSupplierId()).setAccountId(input.getAccountId())
-                .setErpProductId(input.getErpProductId())
-                .setErpProductUnitId(input.getErpProductUnitId())
-                .setUnitCostMinor(input.getUnitCostMinor()).setTaxPercent(input.getTaxPercent())
+                .setOwnerType(input.getOwnerType()).setOwnerId(input.getOwnerId())
                 .setSourceWarehouseId(input.getSourceWarehouseId())
-                .setTargetWarehouseId(input.getTargetWarehouseId()).setWmsSkuId(input.getWmsSkuId())
+                .setTargetWarehouseId(input.getTargetWarehouseId())
                 .setProposedByPrincipalId(input.getProposedByPrincipalId())
                 .setPolicyCode(upper(input.getPolicyCode())).setPolicySha256(input.getPolicySha256())
                 .setStatus("READY").setVersion(1L).setProposedAt(now)
@@ -691,15 +682,9 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
                         "recommendation_id", recommendation.getRecommendationId(),
                         "expected_recommendation_version", recommendation.getVersion(),
                         "target_type", targetType,
-                        "mapping_evidence_sha256", input.getMappingEvidenceSha256(),
-                        "supplier_id", input.getSupplierId(), "account_id", input.getAccountId(),
-                        "erp_product_id", input.getErpProductId(),
-                        "erp_product_unit_id", input.getErpProductUnitId(),
-                        "unit_cost_minor", input.getUnitCostMinor(),
-                        "tax_percent", input.getTaxPercent(),
+                        "owner_type", input.getOwnerType(), "owner_id", input.getOwnerId(),
                         "source_warehouse_id", input.getSourceWarehouseId(),
                         "target_warehouse_id", input.getTargetWarehouseId(),
-                        "wms_sku_id", input.getWmsSkuId(),
                         "proposed_by_principal_id", input.getProposedByPrincipalId(),
                         "policy_code", proposal.getPolicyCode(),
                         "policy_sha256", proposal.getPolicySha256(),
@@ -713,93 +698,96 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         requireRef(input.getRecommendationId(), "recommendationId", 128);
         requireRef(input.getConvertedByPrincipalId(), "convertedByPrincipalId", 128);
         String targetType = upper(input.getTargetType());
-        validateExecutionFields(targetType, input.getMappingEvidenceSha256(),
-                input.getSupplierId(), input.getAccountId(), input.getErpProductId(),
-                input.getErpProductUnitId(), input.getUnitCostMinor(), input.getTaxPercent(),
-                input.getSourceWarehouseId(), input.getTargetWarehouseId(), input.getWmsSkuId());
+        validateExecutionFields(targetType, input.getOwnerType(), input.getOwnerId(),
+                input.getSourceWarehouseId(), input.getTargetWarehouseId());
         Replenishment row = nonNull(mapper.selectReplenishmentForUpdate(
                 tenantId, input.getRecommendationId()), "replenishment recommendation not found");
         requireExpectedVersion(input.getExpectedVersion(), row.getVersion());
         require("APPROVED".equals(row.getStatus()),
                 "only an approved replenishment recommendation can be converted");
         ReplenishmentExecutionProposal executionProposal =
-                mapper.selectReadyReplenishmentExecutionProposalForUpdate(
-                        tenantId, row.getRecommendationId());
-        if (executionProposal != null) {
-            requireExecutionProposalMatches(executionProposal, input);
-        }
-        ReplenishmentExecutionPort.ExecutionResult execution = nonNull(
-                replenishmentExecutionPort.createDraft(
-                        new ReplenishmentExecutionPort.ExecutionCommand(
-                                "supply-conversion:" + conversionId, conversionId, targetType,
-                                row.getCanonicalSkuId(), row.getWarehouseId(),
-                                row.getSuggestedQuantity(), row.getUomCode(), row.getNeedByDate(),
-                                input.getMappingEvidenceSha256(), input.getSupplierId(),
-                                input.getAccountId(), input.getErpProductId(),
-                                input.getErpProductUnitId(), input.getUnitCostMinor(),
-                                input.getTaxPercent(), input.getSourceWarehouseId(),
-                                input.getTargetWarehouseId(), input.getWmsSkuId(),
-                                command.getOccurredAt())),
-                "replenishment execution returned no draft evidence");
-        requireRef(execution.sourceSystem(), "execution sourceSystem", 64);
-        requireRef(execution.documentType(), "execution documentType", 64);
-        requireRef(execution.externalDocumentId(), "externalDocumentId", 128);
-        require("PREPARE".equals(execution.status()),
-                "replenishment execution must return a PREPARE draft");
-        String targetReference = execution.sourceSystem() + ":"
-                + execution.documentType() + ":" + execution.externalDocumentId();
-        requireRef(targetReference, "targetReference", 128);
-        ProcurementResult canonicalPurchaseOrder = null;
+                nonNull(mapper.selectReadyReplenishmentExecutionProposalForUpdate(
+                                tenantId, row.getRecommendationId()),
+                        "a ready governed execution proposal is required");
+        requireExecutionProposalMatches(executionProposal, input);
+        String targetAggregateType;
+        String targetAggregateId;
+        String targetAggregateNo;
+        String targetAggregateStatus;
+        String nextWaitingEventCode;
+        String nextWaitingEventLabel;
         if ("PURCHASE_REQUEST".equals(targetType)) {
-            canonicalPurchaseOrder = nonNull(procurementCommandApi.execute(
-                            ProcurementCommand.builder()
-                                    .operation(ProcurementOperation.CREATE_PURCHASE_ORDER)
-                                    .idempotencyKey("replenishment-procurement:" + conversionId)
-                                    .runId(command.getRunId())
-                                    .correlationId(command.getCorrelationId())
-                                    .causationId(command.getCausationId())
-                                    .occurredAt(command.getOccurredAt())
-                                    .purchaseOrder(ProcurementCommand.PurchaseOrderDefinition.builder()
-                                            .orderId("procurement-order:" + conversionId)
-                                            .orderCode(canonicalPurchaseOrderCode(conversionId))
-                                            .sourceBusinessType("REPLENISHMENT")
-                                            .sourceBusinessRef(row.getRecommendationId())
-                                            .supplierRef("ERP_SUPPLIER:" + input.getSupplierId())
+            String digest = DigestUtil.sha256Hex(conversionId);
+            String requisitionId = "PR:" + digest;
+            PurchaseRequisitionResult purchaseRequisition = nonNull(purchaseRequisitionCommandApi.createApproved(
+                            PurchaseRequisitionCommand.builder()
+                                    .idempotencyKey("replenishment-purchase-requisition:" + conversionId)
+                                    .runId(command.getRunId()).correlationId(command.getCorrelationId())
+                                    .causationId(command.getCausationId()).occurredAt(command.getOccurredAt())
+                                    .requisitionId(requisitionId)
+                                    .requisitionCode(canonicalPurchaseRequisitionCode(conversionId))
+                                    .sourceBusinessType("REPLENISHMENT")
+                                    .sourceBusinessRef(row.getRecommendationId())
+                                    .reasonCode("REPLENISHMENT_APPROVED")
+                                    .remark("replenishment-conversion:" + conversionId)
+                                    .lines(List.of(PurchaseRequisitionCommand.LineDefinition.builder()
+                                            .lineId(requisitionId + ":line:10").lineNumber(10)
                                             .canonicalSkuId(row.getCanonicalSkuId())
-                                            .canonicalWarehouseId(row.getWarehouseId())
-                                            .orderedQuantity(row.getSuggestedQuantity())
-                                            .uomCode(row.getUomCode())
-                                            .unitCostMinor(input.getUnitCostMinor())
-                                            .totalAmountMinor(calculateTotalAmountMinor(
-                                                    row.getSuggestedQuantity(), input.getUnitCostMinor()))
-                                            .currencyCode("CNY")
-                                            .leadTimeDays(calculateLeadTimeDays(command.getOccurredAt(), row.getNeedByDate()))
-                                            .requiredDeliveryDate(row.getNeedByDate())
-                                            .remark("replenishment-conversion:" + conversionId)
-                                            .reasonCode("REPLENISHMENT_APPROVED")
-                                            .projection(ProcurementCommand.ProjectionDefinition.builder()
-                                                    .sourceSystem(execution.sourceSystem())
-                                                    .documentType(execution.documentType())
-                                                    .externalDocumentId(execution.externalDocumentId())
-                                                    .externalDocumentNo(execution.externalDocumentNo())
-                                                    .documentStatus(execution.status())
-                                                    .evidenceSha256(input.getMappingEvidenceSha256())
-                                                    .build())
-                                            .build())
+                                            .requestedQuantity(row.getSuggestedQuantity()).uomCode(row.getUomCode())
+                                            .schedules(List.of(PurchaseRequisitionCommand.DeliveryScheduleDefinition.builder()
+                                                    .scheduleId(requisitionId + ":line:10:schedule:1")
+                                                    .scheduleNumber(1).canonicalWarehouseId(row.getWarehouseId())
+                                                    .requiredDeliveryDate(row.getNeedByDate())
+                                                    .scheduledQuantity(row.getSuggestedQuantity()).build()))
+                                            .build()))
                                     .build(),
                             input.getConvertedByPrincipalId()),
-                    "canonical procurement order creation returned no result");
+                    "canonical purchase requisition creation returned no result");
+            targetAggregateType = purchaseRequisition.getAggregateType();
+            targetAggregateId = purchaseRequisition.getRequisitionId();
+            targetAggregateNo = purchaseRequisition.getRequisitionCode();
+            targetAggregateStatus = purchaseRequisition.getStatus();
+            nextWaitingEventCode = "PROCUREMENT_SOURCING";
+            nextWaitingEventLabel = "等待采购寻源与定标";
+        } else {
+            require(Objects.equals(row.getWarehouseId(), input.getTargetWarehouseId()),
+                    "transfer target warehouse must equal the replenishment demand warehouse");
+            String digest = DigestUtil.sha256Hex(conversionId);
+            String requestId = "STR:" + digest;
+            StockTransferResult transfer = nonNull(stockTransferCommandApi.execute(StockTransferCommand.builder()
+                            .operation(StockTransferOperation.CREATE_APPROVED_REQUEST)
+                            .idempotencyKey("replenishment-stock-transfer:" + conversionId)
+                            .sourceEventId(command.getIdempotencyKey())
+                            .correlationId(command.getCorrelationId()).causationId(command.getCausationId())
+                            .occurredAt(command.getOccurredAt()).requestId(requestId)
+                            .requestCode("STR-" + digest.substring(0, 20).toUpperCase(Locale.ROOT))
+                            .orderId("STO:" + digest)
+                            .orderCode("STO-" + digest.substring(0, 20).toUpperCase(Locale.ROOT))
+                            .sourceBusinessType("REPLENISHMENT").sourceBusinessRef(row.getRecommendationId())
+                            .ownerType(input.getOwnerType()).ownerId(input.getOwnerId())
+                            .sourceWarehouseId(input.getSourceWarehouseId())
+                            .targetWarehouseId(input.getTargetWarehouseId())
+                            .reasonCode("REPLENISHMENT_APPROVED")
+                            .remark("replenishment-conversion:" + conversionId)
+                            .lines(List.of(StockTransferCommand.LineDefinition.builder()
+                                    .lineId(requestId + ":line:10").lineNumber(10)
+                                    .canonicalSkuId(row.getCanonicalSkuId())
+                                    .requestedQuantity(row.getSuggestedQuantity()).uomCode(row.getUomCode())
+                                    .build()))
+                            .build()), "canonical stock transfer creation returned no result");
+            targetAggregateType = "STOCK_TRANSFER_ORDER";
+            targetAggregateId = transfer.getOrderId();
+            targetAggregateNo = transfer.getOrderCode();
+            targetAggregateStatus = transfer.getOrderStatus();
+            nextWaitingEventCode = transfer.getCurrentStageCode();
+            nextWaitingEventLabel = transfer.getCurrentStageLabel();
         }
         ReplenishmentConversion conversion = new ReplenishmentConversion()
                 .setConversionId(conversionId).setTenantId(tenantId)
                 .setRecommendationId(row.getRecommendationId()).setTargetType(targetType)
-                .setTargetReference(targetReference).setRequestedQuantity(row.getSuggestedQuantity())
-                .setSourceSystem(execution.sourceSystem()).setDocumentType(execution.documentType())
-                .setExternalDocumentId(execution.externalDocumentId())
-                .setExternalDocumentNo(execution.externalDocumentNo())
-                .setDocumentStatus(execution.status())
-                .setNextWaitingEventCode(execution.nextWaitingEventCode())
-                .setNextWaitingEventLabel(execution.nextWaitingEventLabel())
+                .setTargetAggregateType(targetAggregateType).setTargetAggregateId(targetAggregateId)
+                .setTargetAggregateNo(targetAggregateNo).setTargetAggregateStatus(targetAggregateStatus)
+                .setRequestedQuantity(row.getSuggestedQuantity())
                 .setUomCode(row.getUomCode()).setStatus("CREATED")
                 .setConvertedByPrincipalId(input.getConvertedByPrincipalId())
                 .setVersion(1L).setConvertedAt(now).setCreatedAt(now);
@@ -808,38 +796,28 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         require(mapper.convertReplenishment(tenantId, row.getRecommendationId(),
                         row.getVersion(), now) == 1,
                 "replenishment conversion conflict");
-        if (executionProposal != null) {
-            require(mapper.consumeReplenishmentExecutionProposal(
-                            tenantId, executionProposal.getProposalId(),
-                            executionProposal.getVersion(), conversionId, now) == 1,
-                    "replenishment execution proposal consumption conflict");
-        }
+        require(mapper.consumeReplenishmentExecutionProposal(
+                        tenantId, executionProposal.getProposalId(),
+                        executionProposal.getVersion(), conversionId, now) == 1,
+                "replenishment execution proposal consumption conflict");
         return outcome("supply_planning.replenishment.converted",
                 "replenishment_recommendation", row.getRecommendationId(),
                 row.getVersion() + 1, "CONVERTED",
                 payload("recommendation_id", row.getRecommendationId(), "plan_id", row.getPlanId(),
                         "conversion_id", conversionId, "target_type", targetType,
-                        "target_reference", targetReference, "requested_quantity",
+                        "target_aggregate_type", targetAggregateType,
+                        "target_aggregate_id", targetAggregateId,
+                        "target_aggregate_no", targetAggregateNo,
+                        "target_aggregate_status", targetAggregateStatus,
+                        "requested_quantity",
                         row.getSuggestedQuantity(), "uom_code", row.getUomCode(),
-                        "mapping_evidence_sha256", input.getMappingEvidenceSha256(),
-                        "proposal_id", executionProposal == null
-                                ? null : executionProposal.getProposalId(),
-                        "external_document_no", execution.externalDocumentNo(),
-                        "business_object_type", "PURCHASE_REQUEST".equals(targetType)
-                                ? canonicalPurchaseOrder.getAggregateType() : execution.documentType(),
-                        "business_object_id", "PURCHASE_REQUEST".equals(targetType)
-                                ? canonicalPurchaseOrder.getAggregateId() : execution.externalDocumentId(),
-                        "business_object_no", "PURCHASE_REQUEST".equals(targetType)
-                                ? canonicalPurchaseOrder.getOrderCode() : execution.externalDocumentNo(),
-                        "business_status", "PURCHASE_REQUEST".equals(targetType)
-                                ? canonicalPurchaseOrder.getStatus() : execution.status(),
-                        "projection_source_system", execution.sourceSystem(),
-                        "projection_document_type", execution.documentType(),
-                        "projection_external_document_id", execution.externalDocumentId(),
-                        "projection_external_document_no", execution.externalDocumentNo(),
-                        "projection_document_status", execution.status(),
-                        "next_waiting_event_code", execution.nextWaitingEventCode(),
-                        "next_waiting_event_label", execution.nextWaitingEventLabel(),
+                        "proposal_id", executionProposal.getProposalId(),
+                        "business_object_type", targetAggregateType,
+                        "business_object_id", targetAggregateId,
+                        "business_object_no", targetAggregateNo,
+                        "business_status", targetAggregateStatus,
+                        "next_waiting_event_code", nextWaitingEventCode,
+                        "next_waiting_event_label", nextWaitingEventLabel,
                         "converted_by_principal_id", input.getConvertedByPrincipalId(),
                         "previous_status", "APPROVED", "current_status", "CONVERTED"));
     }
@@ -1164,38 +1142,22 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
     }
 
     private static void validateExecutionFields(
-            String targetType, String mappingEvidenceSha256,
-            Long supplierId, Long accountId, Long erpProductId, Long erpProductUnitId,
-            Long unitCostMinor, BigDecimal taxPercent, Long sourceWarehouseId,
-            Long targetWarehouseId, Long wmsSkuId) {
+            String targetType, String ownerType, String ownerId,
+            String sourceWarehouseId, String targetWarehouseId) {
         require(CONVERSION_TARGET_TYPES.contains(targetType),
                 "unsupported replenishment targetType");
-        requireSha256(mappingEvidenceSha256, "mappingEvidenceSha256");
-        require(unitCostMinor != null && unitCostMinor >= 0,
-                "unitCostMinor must not be negative");
         if ("PURCHASE_REQUEST".equals(targetType)) {
-            requirePositiveId(supplierId, "supplierId");
-            requirePositiveId(accountId, "accountId");
-            requirePositiveId(erpProductId, "erpProductId");
-            requirePositiveId(erpProductUnitId, "erpProductUnitId");
-            require(taxPercent != null && taxPercent.signum() >= 0
-                            && taxPercent.compareTo(new BigDecimal("100")) <= 0,
-                    "taxPercent must be between 0 and 100");
-            require(sourceWarehouseId == null && wmsSkuId == null,
-                    "purchase execution must not contain transfer-only references");
-            if (targetWarehouseId != null) {
-                requirePositiveId(targetWarehouseId, "targetWarehouseId");
-            }
+            require(ownerType == null && ownerId == null
+                            && sourceWarehouseId == null && targetWarehouseId == null,
+                    "purchase requisition must not contain stock-transfer dimensions");
             return;
         }
-        requirePositiveId(sourceWarehouseId, "sourceWarehouseId");
-        requirePositiveId(targetWarehouseId, "targetWarehouseId");
+        requireCode(ownerType, "ownerType");
+        requireRef(ownerId, "ownerId", 128);
+        requireRef(sourceWarehouseId, "sourceWarehouseId", 128);
+        requireRef(targetWarehouseId, "targetWarehouseId", 128);
         require(!sourceWarehouseId.equals(targetWarehouseId),
                 "source and target warehouse must differ");
-        requirePositiveId(wmsSkuId, "wmsSkuId");
-        require(supplierId == null && accountId == null && erpProductId == null
-                        && erpProductUnitId == null && taxPercent == null,
-                "transfer execution must not contain purchase-only references");
     }
 
     private static void requireExecutionProposalMatches(
@@ -1204,29 +1166,12 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         require(proposal.getExpectedRecommendationVersion().equals(conversion.getExpectedVersion()),
                 "execution proposal recommendation version no longer matches conversion");
         require(proposal.getTargetType().equals(upper(conversion.getTargetType()))
-                        && proposal.getMappingEvidenceSha256()
-                        .equals(conversion.getMappingEvidenceSha256())
-                        && Objects.equals(proposal.getSupplierId(), conversion.getSupplierId())
-                        && Objects.equals(proposal.getAccountId(), conversion.getAccountId())
-                        && Objects.equals(proposal.getErpProductId(), conversion.getErpProductId())
-                        && Objects.equals(proposal.getErpProductUnitId(),
-                        conversion.getErpProductUnitId())
-                        && Objects.equals(proposal.getUnitCostMinor(), conversion.getUnitCostMinor())
-                        && decimalsEqual(proposal.getTaxPercent(), conversion.getTaxPercent())
+                        && Objects.equals(proposal.getOwnerType(), conversion.getOwnerType())
+                        && Objects.equals(proposal.getOwnerId(), conversion.getOwnerId())
                         && Objects.equals(proposal.getSourceWarehouseId(),
                         conversion.getSourceWarehouseId())
-                        && Objects.equals(proposal.getTargetWarehouseId(),
-                        conversion.getTargetWarehouseId())
-                        && Objects.equals(proposal.getWmsSkuId(), conversion.getWmsSkuId()),
+                        && Objects.equals(proposal.getTargetWarehouseId(), conversion.getTargetWarehouseId()),
                 "conversion fields do not match the ready execution proposal");
-    }
-
-    private static boolean decimalsEqual(BigDecimal left, BigDecimal right) {
-        return left == null ? right == null : right != null && left.compareTo(right) == 0;
-    }
-
-    private static void requirePositiveId(Long value, String field) {
-        require(value != null && value > 0, field + " must be positive");
     }
 
     private static void requireNonNegative(BigDecimal value, String field) {
@@ -1238,22 +1183,9 @@ public class SupplyPlanningServiceImpl implements SupplyPlanningCommandApi {
         return value == null ? null : value.trim().toUpperCase(Locale.ROOT);
     }
 
-    private static String canonicalPurchaseOrderCode(String conversionId) {
+    private static String canonicalPurchaseRequisitionCode(String conversionId) {
         String compact = conversionId.replace("-", "").toUpperCase(Locale.ROOT);
-        return "PO-CM-" + compact.substring(0, Math.min(12, compact.length()));
-    }
-
-    private static Long calculateTotalAmountMinor(BigDecimal quantity, Long unitCostMinor) {
-        require(quantity != null && unitCostMinor != null, "quantity and unitCostMinor are required");
-        return quantity.multiply(BigDecimal.valueOf(unitCostMinor))
-                .setScale(0, RoundingMode.HALF_UP)
-                .longValueExact();
-    }
-
-    private static Integer calculateLeadTimeDays(Instant occurredAt, LocalDate needByDate) {
-        require(occurredAt != null && needByDate != null, "occurredAt and needByDate are required");
-        long days = Duration.between(occurredAt, needByDate.atStartOfDay().toInstant(ZoneOffset.UTC)).toDays();
-        return (int) Math.max(days, 0L);
+        return "PR-CM-" + compact.substring(0, Math.min(12, compact.length()));
     }
 
     private static String stringValue(Object value) {

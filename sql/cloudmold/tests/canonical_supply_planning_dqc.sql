@@ -93,19 +93,74 @@ JOIN cloudmold_replenishment_recommendation recommendation
 WHERE recommendation.status<>'CONVERTED'
    OR recommendation.suggested_quantity<>conversion.requested_quantity
    OR recommendation.uom_code<>conversion.uom_code
-   OR conversion.external_document_id=''
-   OR (
-        conversion.target_type='PURCHASE_REQUEST'
-        AND (conversion.source_system<>'YUDAO_ERP'
-             OR conversion.document_type<>'PURCHASE_ORDER'
-             OR conversion.next_waiting_event_code<>'SUPPLIER_CONFIRMATION')
-      )
-   OR (
-        conversion.target_type='TRANSFER_REQUEST'
-        AND (conversion.source_system<>'YUDAO_WMS'
-             OR conversion.document_type<>'MOVEMENT_ORDER'
-             OR conversion.next_waiting_event_code<>'TRANSFER_OUTBOUND')
-      );
+   OR conversion.target_aggregate_id=''
+   OR conversion.target_aggregate_status=''
+   OR (conversion.target_type='PURCHASE_REQUEST'
+       AND conversion.target_aggregate_type<>'PURCHASE_REQUISITION')
+   OR (conversion.target_type='TRANSFER_REQUEST'
+       AND conversion.target_aggregate_type<>'STOCK_TRANSFER_ORDER');
+
+SELECT 'replenishment_purchase_requisition_target_mismatch' AS check_name,
+       COUNT(*) AS violation_count
+FROM cloudmold_replenishment_conversion conversion
+LEFT JOIN cloudmold_purchase_requisition requisition
+  ON requisition.tenant_id=conversion.tenant_id
+ AND requisition.requisition_id=conversion.target_aggregate_id
+ AND requisition.source_business_type='REPLENISHMENT'
+ AND requisition.source_business_ref=conversion.recommendation_id
+WHERE conversion.target_type='PURCHASE_REQUEST'
+  AND (requisition.requisition_id IS NULL
+       OR requisition.requisition_code<>conversion.target_aggregate_no
+       OR requisition.status<>conversion.target_aggregate_status);
+
+SELECT 'replenishment_stock_transfer_target_mismatch' AS check_name,
+       COUNT(*) AS violation_count
+FROM cloudmold_replenishment_conversion conversion
+LEFT JOIN cloudmold_stock_transfer_request transfer_request
+  ON transfer_request.tenant_id=conversion.tenant_id
+ AND transfer_request.source_business_type='REPLENISHMENT'
+ AND transfer_request.source_business_ref=conversion.recommendation_id
+LEFT JOIN cloudmold_stock_transfer_order transfer_order
+  ON transfer_order.tenant_id=transfer_request.tenant_id
+ AND transfer_order.request_id=transfer_request.request_id
+ AND transfer_order.order_id=conversion.target_aggregate_id
+WHERE conversion.target_type='TRANSFER_REQUEST'
+  AND (transfer_order.order_id IS NULL
+       OR transfer_order.order_code<>conversion.target_aggregate_no
+       OR transfer_order.status<>conversion.target_aggregate_status);
+
+SELECT 'replenishment_ready_proposal_dimension_mismatch' AS check_name,
+       COUNT(*) AS violation_count
+FROM cloudmold_replenishment_execution_proposal proposal
+JOIN cloudmold_replenishment_recommendation recommendation
+  ON recommendation.tenant_id=proposal.tenant_id
+ AND recommendation.recommendation_id=proposal.recommendation_id
+WHERE proposal.status='READY'
+  AND (recommendation.status<>'APPROVED'
+       OR recommendation.version<>proposal.expected_recommendation_version
+       OR (proposal.target_type='PURCHASE_REQUEST'
+           AND (proposal.owner_type IS NOT NULL OR proposal.owner_id IS NOT NULL
+                OR proposal.source_warehouse_id IS NOT NULL
+                OR proposal.target_warehouse_id IS NOT NULL))
+       OR (proposal.target_type='TRANSFER_REQUEST'
+           AND (proposal.owner_type IS NULL OR proposal.owner_id IS NULL
+                OR proposal.source_warehouse_id IS NULL
+                OR proposal.target_warehouse_id IS NULL
+                OR proposal.source_warehouse_id=proposal.target_warehouse_id
+                OR proposal.target_warehouse_id<>recommendation.warehouse_id)));
+
+SELECT 'replenishment_legacy_execution_columns_remaining' AS check_name,
+       COUNT(*) AS violation_count
+FROM information_schema.columns
+WHERE table_schema=DATABASE()
+  AND ((table_name='cloudmold_replenishment_conversion'
+        AND column_name IN ('target_reference','source_system','document_type',
+                            'external_document_id','external_document_no','document_status',
+                            'next_waiting_event_code','next_waiting_event_label'))
+       OR (table_name='cloudmold_replenishment_execution_proposal'
+           AND column_name IN ('mapping_evidence_sha256','supplier_id','account_id',
+                               'erp_product_id','erp_product_unit_id','unit_cost_minor',
+                               'tax_percent','wms_sku_id')));
 
 SELECT 'inventory_scan_issue_count_mismatch' AS check_name, COUNT(*) AS violation_count
 FROM cloudmold_inventory_health_scan scan

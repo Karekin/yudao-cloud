@@ -20,11 +20,6 @@ public class SupplyPlanningResult {
     private String businessObjectId;
     private String businessObjectNo;
     private String businessStatus;
-    private String projectionSourceSystem;
-    private String projectionDocumentType;
-    private String projectionExternalDocumentId;
-    private String projectionExternalDocumentNo;
-    private String projectionDocumentStatus;
     private String nextWaitingEventCode;
     private String nextWaitingEventLabel;
 }

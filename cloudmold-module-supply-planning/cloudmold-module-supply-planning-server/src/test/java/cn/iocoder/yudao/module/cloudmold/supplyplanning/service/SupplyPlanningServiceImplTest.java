@@ -2,12 +2,14 @@ package cn.iocoder.yudao.module.cloudmold.supplyplanning.service;
 
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
 import cn.iocoder.yudao.module.cloudmold.datacontract.api.outbox.OutboxAppender;
-import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementCommandApi;
-import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementResult;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.PurchaseRequisitionCommandApi;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.PurchaseRequisitionResult;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.*;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.dataobject.SupplyPlanningRecords.*;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.mysql.SupplyPlanningMapper;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.service.actor.SupplyPlanningActorPrincipalPort;
+import cn.iocoder.yudao.module.cloudmold.warehouse.api.StockTransferCommandApi;
+import cn.iocoder.yudao.module.cloudmold.warehouse.api.StockTransferResult;
 import org.junit.jupiter.api.*;
 
 import java.math.BigDecimal;
@@ -25,12 +27,12 @@ class SupplyPlanningServiceImplTest {
     private final OutboxAppender outbox = mock(OutboxAppender.class);
     private final SupplyPlanningActorPrincipalPort actorPrincipalPort =
             mock(SupplyPlanningActorPrincipalPort.class);
-    private final ReplenishmentExecutionPort replenishmentExecutionPort =
-            mock(ReplenishmentExecutionPort.class);
-    private final ProcurementCommandApi procurementCommandApi =
-            mock(ProcurementCommandApi.class);
+    private final PurchaseRequisitionCommandApi purchaseRequisitionCommandApi =
+            mock(PurchaseRequisitionCommandApi.class);
+    private final StockTransferCommandApi stockTransferCommandApi =
+            mock(StockTransferCommandApi.class);
     private final SupplyPlanningServiceImpl service = new SupplyPlanningServiceImpl(
-            mapper, outbox, actorPrincipalPort, replenishmentExecutionPort, procurementCommandApi);
+            mapper, outbox, actorPrincipalPort, purchaseRequisitionCommandApi, stockTransferCommandApi);
     private final AtomicReference<String> requestHash = new AtomicReference<>();
     private final AtomicReference<String> attemptToken = new AtomicReference<>();
 
@@ -157,7 +159,7 @@ class SupplyPlanningServiceImplTest {
     }
 
     @Test
-    void convertsApprovedReplenishmentOnlyAfterCreatingRealPrepareDraft() {
+    void convertsApprovedReplenishmentToCanonicalPurchaseRequisitionWithoutCallingYudao() {
         when(mapper.selectReplenishmentForUpdate(17L, "recommendation-01")).thenReturn(
                 new Replenishment().setRecommendationId("recommendation-01").setTenantId(17L)
                         .setPlanId("plan-01").setCanonicalSkuId("sku-01")
@@ -172,30 +174,17 @@ class SupplyPlanningServiceImplTest {
                         .setRecommendationId("recommendation-01")
                         .setExpectedRecommendationVersion(2L)
                         .setTargetType("PURCHASE_REQUEST")
-                        .setMappingEvidenceSha256("c".repeat(64))
-                        .setSupplierId(11L).setAccountId(12L).setErpProductId(13L)
-                        .setErpProductUnitId(14L).setUnitCostMinor(1299L)
-                        .setTaxPercent(new BigDecimal("13"))
                         .setProposedByPrincipalId(ACTOR)
                         .setPolicyCode("REPLENISHMENT_EXECUTION_V1")
                         .setPolicySha256("d".repeat(64))
                         .setStatus("READY").setVersion(1L));
-        when(replenishmentExecutionPort.createDraft(any())).thenReturn(
-                new ReplenishmentExecutionPort.ExecutionResult(
-                        "YUDAO_ERP", "PURCHASE_ORDER", "781", "PO-20260725-01", "PREPARE",
-                        "SUPPLIER_CONFIRMATION", "等待供应商确认采购单"));
-        when(procurementCommandApi.execute(any(), eq(ACTOR))).thenReturn(
-                ProcurementResult.builder()
-                        .aggregateType("procurement_order")
-                        .aggregateId("procurement-order:conversion-01")
+        when(purchaseRequisitionCommandApi.createApproved(any(), eq(ACTOR))).thenReturn(
+                PurchaseRequisitionResult.builder()
+                        .aggregateType("purchase_requisition")
+                        .requisitionId("purchase-requisition:conversion-01")
                         .aggregateVersion(1L)
-                        .status("CREATED")
-                        .orderCode("PO-CM-CONVERSION01")
-                        .projectionSourceSystem("YUDAO_ERP")
-                        .projectionDocumentType("PURCHASE_ORDER")
-                        .projectionExternalDocumentId("781")
-                        .projectionExternalDocumentNo("PO-20260725-01")
-                        .projectionDocumentStatus("PREPARE")
+                        .status("APPROVED")
+                        .requisitionCode("PR-CM-CONVERSION01")
                         .build());
         when(mapper.insertReplenishmentConversion(any())).thenReturn(1);
         when(mapper.convertReplenishment(eq(17L), eq("recommendation-01"), eq(2L), any()))
@@ -210,42 +199,29 @@ class SupplyPlanningServiceImplTest {
                                 .conversionId("conversion-01")
                                 .recommendationId("recommendation-01").expectedVersion(2L)
                                 .targetType("PURCHASE_REQUEST")
-                                .mappingEvidenceSha256("c".repeat(64))
-                                .supplierId(11L).accountId(12L).erpProductId(13L)
-                                .erpProductUnitId(14L).unitCostMinor(1299L)
-                                .taxPercent(new BigDecimal("13"))
                                 .convertedByPrincipalId(ACTOR).build())
                 .build());
 
         assertThat(result.getStatus()).isEqualTo("CONVERTED");
-        assertThat(result.getBusinessObjectType()).isEqualTo("procurement_order");
-        assertThat(result.getBusinessObjectId()).isEqualTo("procurement-order:conversion-01");
-        assertThat(result.getBusinessObjectNo()).isEqualTo("PO-CM-CONVERSION01");
-        assertThat(result.getBusinessStatus()).isEqualTo("CREATED");
-        assertThat(result.getProjectionSourceSystem()).isEqualTo("YUDAO_ERP");
-        assertThat(result.getProjectionDocumentType()).isEqualTo("PURCHASE_ORDER");
-        assertThat(result.getProjectionExternalDocumentId()).isEqualTo("781");
-        assertThat(result.getProjectionExternalDocumentNo()).isEqualTo("PO-20260725-01");
-        assertThat(result.getProjectionDocumentStatus()).isEqualTo("PREPARE");
-        assertThat(result.getNextWaitingEventCode()).isEqualTo("SUPPLIER_CONFIRMATION");
-        assertThat(result.getNextWaitingEventLabel()).isEqualTo("等待供应商确认采购单");
-        verify(replenishmentExecutionPort).createDraft(argThat(command ->
-                command.targetType().equals("PURCHASE_REQUEST")
-                        && command.quantity().compareTo(new BigDecimal("30")) == 0
-                        && command.mappingEvidenceSha256().equals("c".repeat(64))));
-        verify(procurementCommandApi).execute(argThat(command ->
-                command.getOperation() == cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementOperation.CREATE_PURCHASE_ORDER
-                        && command.getPurchaseOrder().getSourceBusinessRef().equals("recommendation-01")
-                        && command.getPurchaseOrder().getProjection().getExternalDocumentId().equals("781")),
+        assertThat(result.getBusinessObjectType()).isEqualTo("purchase_requisition");
+        assertThat(result.getBusinessObjectId()).isEqualTo("purchase-requisition:conversion-01");
+        assertThat(result.getBusinessObjectNo()).isEqualTo("PR-CM-CONVERSION01");
+        assertThat(result.getBusinessStatus()).isEqualTo("APPROVED");
+        assertThat(result.getNextWaitingEventCode()).isEqualTo("PROCUREMENT_SOURCING");
+        assertThat(result.getNextWaitingEventLabel()).isEqualTo("等待采购寻源与定标");
+        verifyNoInteractions(stockTransferCommandApi);
+        verify(purchaseRequisitionCommandApi).createApproved(argThat(command ->
+                command.getSourceBusinessRef().equals("recommendation-01")
+                        && command.getLines().get(0).getCanonicalSkuId().equals("sku-01")
+                        && command.getLines().get(0).getRequestedQuantity().compareTo(new BigDecimal("30")) == 0
+                        && command.getLines().get(0).getSchedules().get(0).getCanonicalWarehouseId()
+                        .equals("warehouse-01")),
                 eq(ACTOR));
         verify(mapper).insertReplenishmentConversion(argThat(row ->
-                row.getTargetReference().equals("YUDAO_ERP:PURCHASE_ORDER:781")
-                        && row.getSourceSystem().equals("YUDAO_ERP")
-                        && row.getDocumentType().equals("PURCHASE_ORDER")
-                        && row.getExternalDocumentId().equals("781")
-                        && row.getExternalDocumentNo().equals("PO-20260725-01")
-                        && row.getDocumentStatus().equals("PREPARE")
-                        && row.getNextWaitingEventCode().equals("SUPPLIER_CONFIRMATION")
+                row.getTargetAggregateType().equals("purchase_requisition")
+                        && row.getTargetAggregateId().equals("purchase-requisition:conversion-01")
+                        && row.getTargetAggregateNo().equals("PR-CM-CONVERSION01")
+                        && row.getTargetAggregateStatus().equals("APPROVED")
                         && row.getStatus().equals("CREATED")));
         verify(mapper).consumeReplenishmentExecutionProposal(
                 eq(17L), eq("proposal-01"), eq(1L), eq("conversion-01"), any());
@@ -274,10 +250,6 @@ class SupplyPlanningServiceImplTest {
                                         .recommendationId("recommendation-01")
                                         .expectedRecommendationVersion(2L)
                                         .targetType("PURCHASE_REQUEST")
-                                        .mappingEvidenceSha256("c".repeat(64))
-                                        .supplierId(11L).accountId(12L).erpProductId(13L)
-                                        .erpProductUnitId(14L).unitCostMinor(1299L)
-                                        .taxPercent(new BigDecimal("13"))
                                         .proposedByPrincipalId("spoofed-principal")
                                         .policyCode("REPLENISHMENT_EXECUTION_V1")
                                         .policySha256("d".repeat(64)).build())
@@ -300,12 +272,21 @@ class SupplyPlanningServiceImplTest {
                         && event.getAggregateId().equals("proposal-01")
                         && Boolean.FALSE.equals(
                         event.getPayload().get("execution_authorized"))));
-        verifyNoInteractions(replenishmentExecutionPort);
-        verifyNoInteractions(procurementCommandApi);
+        verifyNoInteractions(purchaseRequisitionCommandApi);
+        verifyNoInteractions(stockTransferCommandApi);
     }
 
     @Test
-    void rejectsTransferProposalContainingPurchaseOnlyReferences() {
+    void persistsCanonicalStockTransferProposalWithoutCreatingDownstreamDocument() {
+        when(mapper.selectReplenishmentForUpdate(17L, "recommendation-01")).thenReturn(
+                new Replenishment().setRecommendationId("recommendation-01").setTenantId(17L)
+                        .setPlanId("plan-01").setCanonicalSkuId("sku-01")
+                        .setWarehouseId("warehouse-target")
+                        .setSuggestedQuantity(new BigDecimal("30")).setUomCode("EA")
+                        .setNeedByDate(LocalDate.of(2026, 8, 10))
+                        .setStatus("APPROVED").setVersion(2L));
+        when(mapper.insertReplenishmentExecutionProposal(any())).thenReturn(1);
+
         SupplyPlanningCommand command =
                 base(SupplyPlanningOperation.PROPOSE_REPLENISHMENT_EXECUTION)
                         .replenishmentExecutionProposal(
@@ -314,38 +295,27 @@ class SupplyPlanningServiceImplTest {
                                         .recommendationId("recommendation-01")
                                         .expectedRecommendationVersion(2L)
                                         .targetType("TRANSFER_REQUEST")
-                                        .mappingEvidenceSha256("c".repeat(64))
-                                        .supplierId(11L).unitCostMinor(100L)
-                                        .sourceWarehouseId(31L).targetWarehouseId(32L)
-                                        .wmsSkuId(41L)
+                                        .ownerType("MERCHANT").ownerId("merchant-01")
+                                        .sourceWarehouseId("warehouse-source")
+                                        .targetWarehouseId("warehouse-target")
                                         .policyCode("REPLENISHMENT_EXECUTION_V1")
                                         .policySha256("d".repeat(64)).build())
                         .build();
 
-        assertThatThrownBy(() -> execute(command))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("transfer execution must not contain purchase-only references");
-        verify(mapper, never()).selectReplenishmentForUpdate(anyLong(), anyString());
-        verify(mapper, never()).insertReplenishmentExecutionProposal(any());
-        verifyNoInteractions(outbox);
+        SupplyPlanningResult result = execute(command);
+
+        assertThat(result.getAggregateType()).isEqualTo("replenishment_execution_proposal");
+        assertThat(result.getStatus()).isEqualTo("READY");
+        verify(mapper).insertReplenishmentExecutionProposal(argThat(proposal ->
+                "MERCHANT".equals(proposal.getOwnerType())
+                        && "merchant-01".equals(proposal.getOwnerId())
+                        && "warehouse-source".equals(proposal.getSourceWarehouseId())
+                        && "warehouse-target".equals(proposal.getTargetWarehouseId())));
+        verifyNoInteractions(purchaseRequisitionCommandApi, stockTransferCommandApi);
     }
 
     @Test
-    void rejectsConversionThatDriftsFromReadyProposal() {
-        when(mapper.selectReplenishmentForUpdate(17L, "recommendation-01")).thenReturn(
-                new Replenishment().setRecommendationId("recommendation-01").setTenantId(17L)
-                        .setStatus("APPROVED").setVersion(2L));
-        when(mapper.selectReadyReplenishmentExecutionProposalForUpdate(
-                17L, "recommendation-01")).thenReturn(
-                new ReplenishmentExecutionProposal()
-                        .setProposalId("proposal-01").setRecommendationId("recommendation-01")
-                        .setExpectedRecommendationVersion(2L)
-                        .setTargetType("PURCHASE_REQUEST")
-                        .setMappingEvidenceSha256("c".repeat(64))
-                        .setSupplierId(11L).setAccountId(12L).setErpProductId(13L)
-                        .setErpProductUnitId(14L).setUnitCostMinor(1299L)
-                        .setTaxPercent(new BigDecimal("13")).setStatus("READY").setVersion(1L));
-
+    void rejectsStockTransferDimensionsOnPurchaseRequisitionConversion() {
         SupplyPlanningCommand command =
                 base(SupplyPlanningOperation.CONVERT_REPLENISHMENT)
                         .replenishmentConversion(
@@ -353,19 +323,83 @@ class SupplyPlanningServiceImplTest {
                                         .conversionId("conversion-drift")
                                         .recommendationId("recommendation-01").expectedVersion(2L)
                                         .targetType("PURCHASE_REQUEST")
-                                        .mappingEvidenceSha256("c".repeat(64))
-                                        .supplierId(11L).accountId(12L).erpProductId(13L)
-                                        .erpProductUnitId(14L).unitCostMinor(1300L)
-                                        .taxPercent(new BigDecimal("13")).build())
+                                        .ownerType("MERCHANT").ownerId("merchant-01")
+                                        .sourceWarehouseId("warehouse-source")
+                                        .targetWarehouseId("warehouse-target").build())
                         .build();
 
         assertThatThrownBy(() -> execute(command))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("conversion fields do not match the ready execution proposal");
-        verifyNoInteractions(replenishmentExecutionPort);
+                .hasMessage("purchase requisition must not contain stock-transfer dimensions");
+        verifyNoInteractions(purchaseRequisitionCommandApi, stockTransferCommandApi);
+        verify(mapper, never()).selectReplenishmentForUpdate(anyLong(), anyString());
         verify(mapper, never()).insertReplenishmentConversion(any());
         verify(mapper, never()).consumeReplenishmentExecutionProposal(
                 anyLong(), anyString(), anyLong(), anyString(), any());
+    }
+
+    @Test
+    void convertsApprovedReplenishmentToCanonicalStockTransfer() {
+        when(mapper.selectReplenishmentForUpdate(17L, "recommendation-transfer")).thenReturn(
+                new Replenishment().setRecommendationId("recommendation-transfer").setTenantId(17L)
+                        .setPlanId("plan-transfer").setCanonicalSkuId("sku-01")
+                        .setWarehouseId("warehouse-target")
+                        .setSuggestedQuantity(new BigDecimal("12.5")).setUomCode("EA")
+                        .setNeedByDate(LocalDate.of(2026, 8, 10))
+                        .setStatus("APPROVED").setVersion(2L));
+        when(mapper.selectReadyReplenishmentExecutionProposalForUpdate(
+                17L, "recommendation-transfer")).thenReturn(
+                new ReplenishmentExecutionProposal()
+                        .setProposalId("proposal-transfer").setTenantId(17L)
+                        .setRecommendationId("recommendation-transfer")
+                        .setExpectedRecommendationVersion(2L)
+                        .setTargetType("TRANSFER_REQUEST")
+                        .setOwnerType("MERCHANT").setOwnerId("merchant-01")
+                        .setSourceWarehouseId("warehouse-source")
+                        .setTargetWarehouseId("warehouse-target")
+                        .setStatus("READY").setVersion(1L));
+        when(stockTransferCommandApi.execute(any())).thenReturn(StockTransferResult.builder()
+                .requestId("transfer-request-01").requestCode("STR-01").requestStatus("APPROVED")
+                .orderId("transfer-order-01").orderCode("STO-01").orderStatus("PREPARE")
+                .currentStageCode("TRANSFER_OUTBOUND").currentStageLabel("等待调拨出库")
+                .aggregateVersion(1L).build());
+        when(mapper.insertReplenishmentConversion(any())).thenReturn(1);
+        when(mapper.convertReplenishment(eq(17L), eq("recommendation-transfer"), eq(2L), any()))
+                .thenReturn(1);
+        when(mapper.consumeReplenishmentExecutionProposal(
+                eq(17L), eq("proposal-transfer"), eq(1L), eq("conversion-transfer"), any()))
+                .thenReturn(1);
+
+        SupplyPlanningResult result = execute(base(SupplyPlanningOperation.CONVERT_REPLENISHMENT)
+                .replenishmentConversion(SupplyPlanningCommand.ReplenishmentConversionDefinition.builder()
+                        .conversionId("conversion-transfer")
+                        .recommendationId("recommendation-transfer").expectedVersion(2L)
+                        .targetType("TRANSFER_REQUEST")
+                        .ownerType("MERCHANT").ownerId("merchant-01")
+                        .sourceWarehouseId("warehouse-source")
+                        .targetWarehouseId("warehouse-target")
+                        .convertedByPrincipalId(ACTOR).build())
+                .build());
+
+        assertThat(result.getBusinessObjectType()).isEqualTo("STOCK_TRANSFER_ORDER");
+        assertThat(result.getBusinessObjectId()).isEqualTo("transfer-order-01");
+        assertThat(result.getBusinessStatus()).isEqualTo("PREPARE");
+        assertThat(result.getNextWaitingEventCode()).isEqualTo("TRANSFER_OUTBOUND");
+        verifyNoInteractions(purchaseRequisitionCommandApi);
+        verify(stockTransferCommandApi).execute(argThat(command ->
+                "REPLENISHMENT".equals(command.getSourceBusinessType())
+                        && "recommendation-transfer".equals(command.getSourceBusinessRef())
+                        && "MERCHANT".equals(command.getOwnerType())
+                        && "warehouse-source".equals(command.getSourceWarehouseId())
+                        && "warehouse-target".equals(command.getTargetWarehouseId())
+                        && "sku-01".equals(command.getLines().get(0).getCanonicalSkuId())
+                        && command.getLines().get(0).getRequestedQuantity()
+                        .compareTo(new BigDecimal("12.5")) == 0));
+        verify(mapper).insertReplenishmentConversion(argThat(row ->
+                "STOCK_TRANSFER_ORDER".equals(row.getTargetAggregateType())
+                        && "transfer-order-01".equals(row.getTargetAggregateId())
+                        && "STO-01".equals(row.getTargetAggregateNo())
+                        && "PREPARE".equals(row.getTargetAggregateStatus())));
     }
 
     @Test
@@ -456,8 +490,7 @@ class SupplyPlanningServiceImplTest {
                         && row.getVersion().equals(1L)));
         verify(mapper, never()).selectPlanScenario(
                 anyLong(), anyString(), anyLong(), anyString(), any());
-        verifyNoInteractions(replenishmentExecutionPort);
-        verifyNoInteractions(procurementCommandApi);
+        verifyNoInteractions(purchaseRequisitionCommandApi, stockTransferCommandApi);
         verify(outbox).append(argThat(event ->
                 event.getEventType().equals("supply_planning.plan_scenario.recommended")
                         && event.getAggregateId().equals("robust-recommendation-01")));

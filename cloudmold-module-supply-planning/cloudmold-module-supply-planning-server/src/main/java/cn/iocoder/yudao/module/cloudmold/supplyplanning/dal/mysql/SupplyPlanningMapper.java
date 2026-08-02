@@ -318,22 +318,19 @@ public interface SupplyPlanningMapper {
     @Insert("""
             INSERT INTO cloudmold_replenishment_execution_proposal
               (proposal_id,tenant_id,recommendation_id,expected_recommendation_version,target_type,
-               mapping_evidence_sha256,supplier_id,account_id,erp_product_id,erp_product_unit_id,
-               unit_cost_minor,tax_percent,source_warehouse_id,target_warehouse_id,wms_sku_id,
+               owner_type,owner_id,source_warehouse_id,target_warehouse_id,
                proposed_by_principal_id,policy_code,policy_sha256,status,version,proposed_at,
                created_at,updated_at)
             VALUES (#{proposalId},#{tenantId},#{recommendationId},#{expectedRecommendationVersion},
-                    #{targetType},#{mappingEvidenceSha256},#{supplierId},#{accountId},#{erpProductId},
-                    #{erpProductUnitId},#{unitCostMinor},#{taxPercent},#{sourceWarehouseId},
-                    #{targetWarehouseId},#{wmsSkuId},#{proposedByPrincipalId},#{policyCode},
+                    #{targetType},#{ownerType},#{ownerId},#{sourceWarehouseId},
+                    #{targetWarehouseId},#{proposedByPrincipalId},#{policyCode},
                     #{policySha256},#{status},#{version},#{proposedAt},#{createdAt},#{updatedAt})
             """)
     int insertReplenishmentExecutionProposal(ReplenishmentExecutionProposal value);
 
     @Select("""
             SELECT proposal_id,tenant_id,recommendation_id,expected_recommendation_version,target_type,
-                   mapping_evidence_sha256,supplier_id,account_id,erp_product_id,erp_product_unit_id,
-                   unit_cost_minor,tax_percent,source_warehouse_id,target_warehouse_id,wms_sku_id,
+                   owner_type,owner_id,source_warehouse_id,target_warehouse_id,
                    proposed_by_principal_id,policy_code,policy_sha256,status,version,
                    consumed_by_conversion_id,proposed_at,consumed_at,created_at,updated_at
             FROM cloudmold_replenishment_execution_proposal
@@ -363,16 +360,10 @@ public interface SupplyPlanningMapper {
                    proposal.recommendation_id recommendationId,
                    proposal.expected_recommendation_version expectedRecommendationVersion,
                    proposal.target_type targetType,
-                   proposal.mapping_evidence_sha256 mappingEvidenceSha256,
-                   proposal.supplier_id supplierId,
-                   proposal.account_id accountId,
-                   proposal.erp_product_id erpProductId,
-                   proposal.erp_product_unit_id erpProductUnitId,
-                   proposal.unit_cost_minor unitCostMinor,
-                   proposal.tax_percent taxPercent,
+                   proposal.owner_type ownerType,
+                   proposal.owner_id ownerId,
                    proposal.source_warehouse_id sourceWarehouseId,
                    proposal.target_warehouse_id targetWarehouseId,
-                   proposal.wms_sku_id wmsSkuId,
                    proposal.proposed_by_principal_id proposedByPrincipalId,
                    proposal.policy_code policyCode,
                    proposal.policy_sha256 policySha256,
@@ -401,16 +392,10 @@ public interface SupplyPlanningMapper {
                    proposal.recommendation_id recommendationId,
                    proposal.expected_recommendation_version expectedRecommendationVersion,
                    proposal.target_type targetType,
-                   proposal.mapping_evidence_sha256 mappingEvidenceSha256,
-                   proposal.supplier_id supplierId,
-                   proposal.account_id accountId,
-                   proposal.erp_product_id erpProductId,
-                   proposal.erp_product_unit_id erpProductUnitId,
-                   proposal.unit_cost_minor unitCostMinor,
-                   proposal.tax_percent taxPercent,
+                   proposal.owner_type ownerType,
+                   proposal.owner_id ownerId,
                    proposal.source_warehouse_id sourceWarehouseId,
                    proposal.target_warehouse_id targetWarehouseId,
-                   proposal.wms_sku_id wmsSkuId,
                    proposal.proposed_by_principal_id proposedByPrincipalId,
                    proposal.policy_code policyCode,
                    proposal.policy_sha256 policySha256,
@@ -435,13 +420,11 @@ public interface SupplyPlanningMapper {
 
     @Insert("""
             INSERT INTO cloudmold_replenishment_conversion
-              (conversion_id,tenant_id,recommendation_id,target_type,target_reference,source_system,
-               document_type,external_document_id,external_document_no,document_status,
-               next_waiting_event_code,next_waiting_event_label,requested_quantity,uom_code,status,
+              (conversion_id,tenant_id,recommendation_id,target_type,target_aggregate_type,
+               target_aggregate_id,target_aggregate_no,target_aggregate_status,requested_quantity,uom_code,status,
                converted_by_principal_id,version,converted_at,created_at)
-            VALUES (#{conversionId},#{tenantId},#{recommendationId},#{targetType},#{targetReference},
-                    #{sourceSystem},#{documentType},#{externalDocumentId},#{externalDocumentNo},
-                    #{documentStatus},#{nextWaitingEventCode},#{nextWaitingEventLabel},
+            VALUES (#{conversionId},#{tenantId},#{recommendationId},#{targetType},#{targetAggregateType},
+                    #{targetAggregateId},#{targetAggregateNo},#{targetAggregateStatus},
                     #{requestedQuantity},#{uomCode},#{status},#{convertedByPrincipalId},#{version},
                     #{convertedAt},#{createdAt})
             """)
@@ -452,13 +435,10 @@ public interface SupplyPlanningMapper {
                    recommendation.plan_id planId,
                    recommendation.status recommendationStatus,
                    conversion.target_type targetType,
-                   conversion.source_system sourceSystem,
-                   conversion.document_type documentType,
-                   conversion.external_document_id externalDocumentId,
-                   conversion.external_document_no externalDocumentNo,
-                   conversion.document_status documentStatus,
-                   conversion.next_waiting_event_code nextWaitingEventCode,
-                   conversion.next_waiting_event_label nextWaitingEventLabel,
+                   conversion.target_aggregate_type targetAggregateType,
+                   conversion.target_aggregate_id targetAggregateId,
+                   conversion.target_aggregate_no targetAggregateNo,
+                   conversion.target_aggregate_status targetAggregateStatus,
                    conversion.requested_quantity requestedQuantity,
                    conversion.uom_code uomCode,
                    recommendation.need_by_date needByDate,
@@ -567,7 +547,7 @@ public interface SupplyPlanningMapper {
                 UNION ALL
                 SELECT 'REPLENISHMENT',status FROM cloudmold_replenishment_recommendation WHERE tenant_id=#{tenantId}
                 UNION ALL
-                SELECT 'REPLENISHMENT_CONVERSION',document_status
+                SELECT 'REPLENISHMENT_CONVERSION',target_aggregate_status
                 FROM cloudmold_replenishment_conversion WHERE tenant_id=#{tenantId}
                 UNION ALL
                 SELECT 'INVENTORY_ISSUE',status FROM cloudmold_inventory_health_issue WHERE tenant_id=#{tenantId}
@@ -611,8 +591,8 @@ public interface SupplyPlanningMapper {
                 FROM cloudmold_replenishment_recommendation WHERE tenant_id=#{tenantId}
                 UNION ALL
                 SELECT conversion_id,'REPLENISHMENT_CONVERSION',
-                       COALESCE(external_document_no,target_reference),
-                       next_waiting_event_label,document_status,version,DATE(converted_at),converted_at
+                       COALESCE(target_aggregate_no,target_aggregate_id),
+                       target_aggregate_type,target_aggregate_status,version,DATE(converted_at),converted_at
                 FROM cloudmold_replenishment_conversion WHERE tenant_id=#{tenantId}
                 UNION ALL
                 SELECT issue_id,'INVENTORY_ISSUE',issue_type,source_balance_id,status,version,

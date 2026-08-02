@@ -34,16 +34,14 @@ public final class ProcurementRecords {
         private String orderCode;
         private String sourceBusinessType;
         private String sourceBusinessRef;
-        private String supplierRef;
-        private String canonicalSkuId;
-        private String canonicalWarehouseId;
-        private BigDecimal orderedQuantity;
-        private String uomCode;
-        private Long unitCostMinor;
-        private Long totalAmountMinor;
+        private String supplierId;
         private String currencyCode;
         private Integer leadTimeDays;
-        private LocalDate requiredDeliveryDate;
+        private Long headerNetAmountMinor;
+        private Long headerTaxAmountMinor;
+        private Long headerGrossAmountMinor;
+        private String taxCalculationPolicyCode;
+        private String roundingPolicyCode;
         private String status;
         private String createdByPrincipalId;
         private String dispatchedByPrincipalId;
@@ -52,12 +50,6 @@ public final class ProcurementRecords {
         private String closedByPrincipalId;
         private String reasonCode;
         private String remark;
-        private String projectionSourceSystem;
-        private String projectionDocumentType;
-        private String projectionExternalDocumentId;
-        private String projectionExternalDocumentNo;
-        private String projectionDocumentStatus;
-        private String projectionEvidenceSha256;
         private Long version;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
@@ -65,5 +57,119 @@ public final class ProcurementRecords {
         private LocalDateTime supplierConfirmedAt;
         private LocalDateTime cancelledAt;
         private LocalDateTime closedAt;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class PurchaseOrderItem {
+        private String itemId;
+        private Long tenantId;
+        private String orderId;
+        private Integer lineNumber;
+        private String canonicalSkuId;
+        private BigDecimal orderedQuantity;
+        private String uomCode;
+        private String taxCode;
+        private Integer taxRateBps;
+        private BigDecimal unitNetPriceMinor;
+        private Long lineNetAmountMinor;
+        private Long lineTaxAmountMinor;
+        private Long lineGrossAmountMinor;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class PurchaseOrderDeliverySchedule {
+        private String scheduleId;
+        private Long tenantId;
+        private String orderId;
+        private String itemId;
+        private Integer scheduleNumber;
+        private LocalDate requiredDeliveryDate;
+        private String canonicalWarehouseId;
+        private BigDecimal scheduledQuantity;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class OrderStatusHistory {
+        private Long historyId;
+        private Long tenantId;
+        private String orderId;
+        private Long operationId;
+        private Long aggregateVersion;
+        private String status;
+        private String actorPrincipalId;
+        private String reasonCode;
+        private LocalDateTime occurredAt;
+        private LocalDateTime createdAt;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class PurchaseRequisition {
+        private String requisitionId;
+        private Long tenantId;
+        private String requisitionCode;
+        private String sourceBusinessType;
+        private String sourceBusinessRef;
+        private String status;
+        private String requestedByPrincipalId;
+        private String approvedByPrincipalId;
+        private String reasonCode;
+        private String remark;
+        private Long version;
+        private LocalDateTime requestedAt;
+        private LocalDateTime approvedAt;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class PurchaseRequisitionLine {
+        private String lineId;
+        private Long tenantId;
+        private String requisitionId;
+        private Integer lineNumber;
+        private String canonicalSkuId;
+        private BigDecimal requestedQuantity;
+        private String uomCode;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class PurchaseRequisitionDeliverySchedule {
+        private String scheduleId;
+        private Long tenantId;
+        private String requisitionId;
+        private String lineId;
+        private Integer scheduleNumber;
+        private String canonicalWarehouseId;
+        private LocalDate requiredDeliveryDate;
+        private BigDecimal scheduledQuantity;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class PurchaseRequisitionStatusHistory {
+        private Long historyId;
+        private Long tenantId;
+        private String requisitionId;
+        private Long operationId;
+        private Long aggregateVersion;
+        private String status;
+        private String actorPrincipalId;
+        private String reasonCode;
+        private LocalDateTime occurredAt;
+        private LocalDateTime createdAt;
     }
 }

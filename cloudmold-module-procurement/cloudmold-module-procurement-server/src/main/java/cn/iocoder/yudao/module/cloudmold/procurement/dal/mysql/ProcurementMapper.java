@@ -1,11 +1,22 @@
 package cn.iocoder.yudao.module.cloudmold.procurement.dal.mysql;
 
-import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementOrderView;
 import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.Operation;
+import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.OrderStatusHistory;
 import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.ProcurementOrder;
-import org.apache.ibatis.annotations.*;
+import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.PurchaseOrderDeliverySchedule;
+import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.PurchaseOrderItem;
+import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.PurchaseRequisition;
+import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.PurchaseRequisitionDeliverySchedule;
+import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.PurchaseRequisitionLine;
+import cn.iocoder.yudao.module.cloudmold.procurement.dal.dataobject.ProcurementRecords.PurchaseRequisitionStatusHistory;
+import org.apache.ibatis.annotations.Insert;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface ProcurementMapper {
@@ -49,31 +60,145 @@ public interface ProcurementMapper {
 
     @Insert("""
             INSERT INTO cloudmold_procurement_order
-              (order_id,tenant_id,order_code,source_business_type,source_business_ref,supplier_ref,
-               canonical_sku_id,canonical_warehouse_id,ordered_quantity,uom_code,unit_cost_minor,
-               total_amount_minor,currency_code,lead_time_days,required_delivery_date,status,
-               created_by_principal_id,reason_code,remark,projection_source_system,
-               projection_document_type,projection_external_document_id,projection_external_document_no,
-               projection_document_status,projection_evidence_sha256,version,created_at,updated_at)
-            VALUES (#{orderId},#{tenantId},#{orderCode},#{sourceBusinessType},#{sourceBusinessRef},
-                    #{supplierRef},#{canonicalSkuId},#{canonicalWarehouseId},#{orderedQuantity},
-                    #{uomCode},#{unitCostMinor},#{totalAmountMinor},#{currencyCode},#{leadTimeDays},
-                    #{requiredDeliveryDate},#{status},#{createdByPrincipalId},#{reasonCode},#{remark},
-                    #{projectionSourceSystem},#{projectionDocumentType},#{projectionExternalDocumentId},
-                    #{projectionExternalDocumentNo},#{projectionDocumentStatus},#{projectionEvidenceSha256},
-                    #{version},#{createdAt},#{updatedAt})
+              (order_id,tenant_id,order_code,source_business_type,source_business_ref,supplier_id,
+               currency_code,lead_time_days,header_net_amount_minor,header_tax_amount_minor,
+               header_gross_amount_minor,tax_calculation_policy_code,rounding_policy_code,status,
+               created_by_principal_id,reason_code,remark,version,created_at,updated_at)
+            VALUES (#{orderId},#{tenantId},#{orderCode},#{sourceBusinessType},#{sourceBusinessRef},#{supplierId},
+                    #{currencyCode},#{leadTimeDays},#{headerNetAmountMinor},#{headerTaxAmountMinor},
+                    #{headerGrossAmountMinor},#{taxCalculationPolicyCode},#{roundingPolicyCode},#{status},
+                    #{createdByPrincipalId},#{reasonCode},#{remark},#{version},#{createdAt},#{updatedAt})
             """)
     int insertOrder(ProcurementOrder value);
 
+    @Insert("""
+            <script>
+            INSERT INTO cloudmold_procurement_order_item
+              (item_id,tenant_id,order_id,line_number,canonical_sku_id,ordered_quantity,uom_code,tax_code,
+               tax_rate_bps,unit_net_price_minor,line_net_amount_minor,line_tax_amount_minor,
+               line_gross_amount_minor,created_at,updated_at)
+            VALUES
+            <foreach collection="values" item="value" separator=",">
+              (#{value.itemId},#{value.tenantId},#{value.orderId},#{value.lineNumber},#{value.canonicalSkuId},
+               #{value.orderedQuantity},#{value.uomCode},#{value.taxCode},#{value.taxRateBps},
+               #{value.unitNetPriceMinor},#{value.lineNetAmountMinor},#{value.lineTaxAmountMinor},
+               #{value.lineGrossAmountMinor},#{value.createdAt},#{value.updatedAt})
+            </foreach>
+            </script>
+            """)
+    int insertItems(@Param("values") List<PurchaseOrderItem> values);
+
+    @Insert("""
+            <script>
+            INSERT INTO cloudmold_procurement_order_delivery_schedule
+              (schedule_id,tenant_id,order_id,item_id,schedule_number,required_delivery_date,
+               canonical_warehouse_id,scheduled_quantity,created_at,updated_at)
+            VALUES
+            <foreach collection="values" item="value" separator=",">
+              (#{value.scheduleId},#{value.tenantId},#{value.orderId},#{value.itemId},#{value.scheduleNumber},
+               #{value.requiredDeliveryDate},#{value.canonicalWarehouseId},#{value.scheduledQuantity},
+               #{value.createdAt},#{value.updatedAt})
+            </foreach>
+            </script>
+            """)
+    int insertSchedules(@Param("values") List<PurchaseOrderDeliverySchedule> values);
+
+    @Insert("""
+            INSERT INTO cloudmold_procurement_order_status_history
+              (tenant_id,order_id,operation_id,aggregate_version,status,actor_principal_id,reason_code,occurred_at,created_at)
+            VALUES (#{tenantId},#{orderId},#{operationId},#{aggregateVersion},#{status},#{actorPrincipalId},
+                    #{reasonCode},#{occurredAt},#{createdAt})
+            """)
+    int insertStatusHistory(OrderStatusHistory value);
+
+    @Insert("""
+            INSERT INTO cloudmold_purchase_requisition
+              (requisition_id,tenant_id,requisition_code,source_business_type,source_business_ref,status,
+               requested_by_principal_id,approved_by_principal_id,reason_code,remark,version,
+               requested_at,approved_at,created_at,updated_at)
+            VALUES (#{requisitionId},#{tenantId},#{requisitionCode},#{sourceBusinessType},#{sourceBusinessRef},#{status},
+                    #{requestedByPrincipalId},#{approvedByPrincipalId},#{reasonCode},#{remark},#{version},
+                    #{requestedAt},#{approvedAt},#{createdAt},#{updatedAt})
+            """)
+    int insertPurchaseRequisition(PurchaseRequisition value);
+
+    @Insert("""
+            <script>
+            INSERT INTO cloudmold_purchase_requisition_line
+              (line_id,tenant_id,requisition_id,line_number,canonical_sku_id,requested_quantity,uom_code,created_at,updated_at)
+            VALUES
+            <foreach collection="values" item="value" separator=",">
+              (#{value.lineId},#{value.tenantId},#{value.requisitionId},#{value.lineNumber},#{value.canonicalSkuId},
+               #{value.requestedQuantity},#{value.uomCode},#{value.createdAt},#{value.updatedAt})
+            </foreach>
+            </script>
+            """)
+    int insertPurchaseRequisitionLines(@Param("values") List<PurchaseRequisitionLine> values);
+
+    @Insert("""
+            <script>
+            INSERT INTO cloudmold_purchase_requisition_delivery_schedule
+              (schedule_id,tenant_id,requisition_id,line_id,schedule_number,canonical_warehouse_id,
+               required_delivery_date,scheduled_quantity,created_at,updated_at)
+            VALUES
+            <foreach collection="values" item="value" separator=",">
+              (#{value.scheduleId},#{value.tenantId},#{value.requisitionId},#{value.lineId},#{value.scheduleNumber},
+               #{value.canonicalWarehouseId},#{value.requiredDeliveryDate},#{value.scheduledQuantity},
+               #{value.createdAt},#{value.updatedAt})
+            </foreach>
+            </script>
+            """)
+    int insertPurchaseRequisitionSchedules(@Param("values") List<PurchaseRequisitionDeliverySchedule> values);
+
+    @Insert("""
+            INSERT INTO cloudmold_purchase_requisition_status_history
+              (tenant_id,requisition_id,operation_id,aggregate_version,status,actor_principal_id,
+               reason_code,occurred_at,created_at)
+            VALUES (#{tenantId},#{requisitionId},#{operationId},#{aggregateVersion},#{status},#{actorPrincipalId},
+                    #{reasonCode},#{occurredAt},#{createdAt})
+            """)
+    int insertPurchaseRequisitionStatusHistory(PurchaseRequisitionStatusHistory value);
+
     @Select("""
-            SELECT order_id,tenant_id,order_code,source_business_type,source_business_ref,supplier_ref,
-                   canonical_sku_id,canonical_warehouse_id,ordered_quantity,uom_code,unit_cost_minor,
-                   total_amount_minor,currency_code,lead_time_days,required_delivery_date,status,
+            SELECT requisition_id,tenant_id,requisition_code,source_business_type,source_business_ref,status,
+                   requested_by_principal_id,approved_by_principal_id,reason_code,remark,version,
+                   requested_at,approved_at,created_at,updated_at
+            FROM cloudmold_purchase_requisition
+            WHERE tenant_id=#{tenantId} AND source_business_type=#{sourceBusinessType}
+              AND source_business_ref=#{sourceBusinessRef}
+            """)
+    PurchaseRequisition selectPurchaseRequisitionBySourceBusiness(
+            @Param("tenantId") Long tenantId,
+            @Param("sourceBusinessType") String sourceBusinessType,
+            @Param("sourceBusinessRef") String sourceBusinessRef);
+
+    @Select("""
+            SELECT line_id,tenant_id,requisition_id,line_number,canonical_sku_id,requested_quantity,uom_code,
+                   created_at,updated_at
+            FROM cloudmold_purchase_requisition_line
+            WHERE tenant_id=#{tenantId} AND requisition_id=#{requisitionId}
+            ORDER BY line_number ASC,line_id ASC
+            """)
+    List<PurchaseRequisitionLine> selectPurchaseRequisitionLines(
+            @Param("tenantId") Long tenantId, @Param("requisitionId") String requisitionId);
+
+    @Select("""
+            SELECT schedule_id,tenant_id,requisition_id,line_id,schedule_number,canonical_warehouse_id,
+                   required_delivery_date,scheduled_quantity,created_at,updated_at
+            FROM cloudmold_purchase_requisition_delivery_schedule
+            WHERE tenant_id=#{tenantId} AND requisition_id=#{requisitionId}
+            ORDER BY line_id ASC,schedule_number ASC,schedule_id ASC
+            """)
+    List<PurchaseRequisitionDeliverySchedule> selectPurchaseRequisitionSchedules(
+            @Param("tenantId") Long tenantId, @Param("requisitionId") String requisitionId);
+
+    @Select("""
+            SELECT order_id,tenant_id,order_code,source_business_type,source_business_ref,supplier_id,
+                   currency_code,lead_time_days,header_net_amount_minor,header_tax_amount_minor,
+                   header_gross_amount_minor,tax_calculation_policy_code,rounding_policy_code,status,
                    created_by_principal_id,dispatched_by_principal_id,supplier_confirmed_by_principal_id,
-                   cancelled_by_principal_id,closed_by_principal_id,reason_code,remark,
-                   projection_source_system,projection_document_type,projection_external_document_id,
-                   projection_external_document_no,projection_document_status,projection_evidence_sha256,
-                   version,created_at,updated_at,dispatched_at,supplier_confirmed_at,cancelled_at,closed_at
+                   cancelled_by_principal_id,closed_by_principal_id,reason_code,remark,version,created_at,
+                   updated_at,dispatched_at,supplier_confirmed_at,cancelled_at,closed_at
             FROM cloudmold_procurement_order
             WHERE tenant_id=#{tenantId} AND order_id=#{orderId} FOR UPDATE
             """)
@@ -81,57 +206,54 @@ public interface ProcurementMapper {
                                           @Param("orderId") String orderId);
 
     @Select("""
-            SELECT order_id orderId,order_code orderCode,source_business_type sourceBusinessType,
-                   source_business_ref sourceBusinessRef,supplier_ref supplierRef,
-                   canonical_sku_id canonicalSkuId,canonical_warehouse_id canonicalWarehouseId,
-                   ordered_quantity orderedQuantity,uom_code uomCode,unit_cost_minor unitCostMinor,
-                   total_amount_minor totalAmountMinor,currency_code currencyCode,lead_time_days leadTimeDays,
-                   required_delivery_date requiredDeliveryDate,status,version,
-                   created_by_principal_id createdByPrincipalId,
-                   dispatched_by_principal_id dispatchedByPrincipalId,
-                   supplier_confirmed_by_principal_id supplierConfirmedByPrincipalId,
-                   cancelled_by_principal_id cancelledByPrincipalId,
-                   closed_by_principal_id closedByPrincipalId,reason_code,projection_source_system projectionSourceSystem,
-                   projection_document_type projectionDocumentType,
-                   projection_external_document_id projectionExternalDocumentId,
-                   projection_external_document_no projectionExternalDocumentNo,
-                   projection_document_status projectionDocumentStatus,
-                   projection_evidence_sha256 projectionEvidenceSha256,created_at createdAt,
-                   dispatched_at dispatchedAt,supplier_confirmed_at supplierConfirmedAt,
-                   cancelled_at cancelledAt,closed_at closedAt
+            SELECT order_id,tenant_id,order_code,source_business_type,source_business_ref,supplier_id,
+                   currency_code,lead_time_days,header_net_amount_minor,header_tax_amount_minor,
+                   header_gross_amount_minor,tax_calculation_policy_code,rounding_policy_code,status,
+                   created_by_principal_id,dispatched_by_principal_id,supplier_confirmed_by_principal_id,
+                   cancelled_by_principal_id,closed_by_principal_id,reason_code,remark,version,created_at,
+                   updated_at,dispatched_at,supplier_confirmed_at,cancelled_at,closed_at
             FROM cloudmold_procurement_order
             WHERE tenant_id=#{tenantId} AND order_id=#{orderId}
             """)
-    ProcurementOrderView selectCurrent(@Param("tenantId") Long tenantId,
-                                       @Param("orderId") String orderId);
+    ProcurementOrder selectCurrentHeader(@Param("tenantId") Long tenantId,
+                                         @Param("orderId") String orderId);
 
     @Select("""
-            SELECT order_id orderId,order_code orderCode,source_business_type sourceBusinessType,
-                   source_business_ref sourceBusinessRef,supplier_ref supplierRef,
-                   canonical_sku_id canonicalSkuId,canonical_warehouse_id canonicalWarehouseId,
-                   ordered_quantity orderedQuantity,uom_code uomCode,unit_cost_minor unitCostMinor,
-                   total_amount_minor totalAmountMinor,currency_code currencyCode,lead_time_days leadTimeDays,
-                   required_delivery_date requiredDeliveryDate,status,version,
-                   created_by_principal_id createdByPrincipalId,
-                   dispatched_by_principal_id dispatchedByPrincipalId,
-                   supplier_confirmed_by_principal_id supplierConfirmedByPrincipalId,
-                   cancelled_by_principal_id cancelledByPrincipalId,
-                   closed_by_principal_id closedByPrincipalId,reason_code,projection_source_system projectionSourceSystem,
-                   projection_document_type projectionDocumentType,
-                   projection_external_document_id projectionExternalDocumentId,
-                   projection_external_document_no projectionExternalDocumentNo,
-                   projection_document_status projectionDocumentStatus,
-                   projection_evidence_sha256 projectionEvidenceSha256,created_at createdAt,
-                   dispatched_at dispatchedAt,supplier_confirmed_at supplierConfirmedAt,
-                   cancelled_at cancelledAt,closed_at closedAt
+            SELECT order_id,tenant_id,order_code,source_business_type,source_business_ref,supplier_id,
+                   currency_code,lead_time_days,header_net_amount_minor,header_tax_amount_minor,
+                   header_gross_amount_minor,tax_calculation_policy_code,rounding_policy_code,status,
+                   created_by_principal_id,dispatched_by_principal_id,supplier_confirmed_by_principal_id,
+                   cancelled_by_principal_id,closed_by_principal_id,reason_code,remark,version,created_at,
+                   updated_at,dispatched_at,supplier_confirmed_at,cancelled_at,closed_at
             FROM cloudmold_procurement_order
             WHERE tenant_id=#{tenantId}
               AND source_business_type=#{sourceBusinessType}
               AND source_business_ref=#{sourceBusinessRef}
             """)
-    ProcurementOrderView selectCurrentBySourceBusiness(@Param("tenantId") Long tenantId,
-                                                       @Param("sourceBusinessType") String sourceBusinessType,
-                                                       @Param("sourceBusinessRef") String sourceBusinessRef);
+    ProcurementOrder selectCurrentHeaderBySourceBusiness(@Param("tenantId") Long tenantId,
+                                                         @Param("sourceBusinessType") String sourceBusinessType,
+                                                         @Param("sourceBusinessRef") String sourceBusinessRef);
+
+    @Select("""
+            SELECT item_id,tenant_id,order_id,line_number,canonical_sku_id,ordered_quantity,uom_code,tax_code,
+                   tax_rate_bps,unit_net_price_minor,line_net_amount_minor,line_tax_amount_minor,
+                   line_gross_amount_minor,created_at,updated_at
+            FROM cloudmold_procurement_order_item
+            WHERE tenant_id=#{tenantId} AND order_id=#{orderId}
+            ORDER BY line_number ASC,item_id ASC
+            """)
+    List<PurchaseOrderItem> selectItems(@Param("tenantId") Long tenantId,
+                                        @Param("orderId") String orderId);
+
+    @Select("""
+            SELECT schedule_id,tenant_id,order_id,item_id,schedule_number,required_delivery_date,
+                   canonical_warehouse_id,scheduled_quantity,created_at,updated_at
+            FROM cloudmold_procurement_order_delivery_schedule
+            WHERE tenant_id=#{tenantId} AND order_id=#{orderId}
+            ORDER BY item_id ASC,schedule_number ASC,schedule_id ASC
+            """)
+    List<PurchaseOrderDeliverySchedule> selectSchedules(@Param("tenantId") Long tenantId,
+                                                        @Param("orderId") String orderId);
 
     @Update("""
             UPDATE cloudmold_procurement_order

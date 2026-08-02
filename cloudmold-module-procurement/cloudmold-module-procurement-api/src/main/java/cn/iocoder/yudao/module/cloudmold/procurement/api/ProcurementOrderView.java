@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @Builder
@@ -18,16 +19,14 @@ public class ProcurementOrderView {
     private String orderCode;
     private String sourceBusinessType;
     private String sourceBusinessRef;
-    private String supplierRef;
-    private String canonicalSkuId;
-    private String canonicalWarehouseId;
-    private BigDecimal orderedQuantity;
-    private String uomCode;
-    private Long unitCostMinor;
-    private Long totalAmountMinor;
+    private String supplierId;
     private String currencyCode;
     private Integer leadTimeDays;
-    private LocalDate requiredDeliveryDate;
+    private Long headerNetAmountMinor;
+    private Long headerTaxAmountMinor;
+    private Long headerGrossAmountMinor;
+    private String taxCalculationPolicyCode;
+    private String roundingPolicyCode;
     private String status;
     private Long version;
     private String createdByPrincipalId;
@@ -36,15 +35,44 @@ public class ProcurementOrderView {
     private String cancelledByPrincipalId;
     private String closedByPrincipalId;
     private String reasonCode;
-    private String projectionSourceSystem;
-    private String projectionDocumentType;
-    private String projectionExternalDocumentId;
-    private String projectionExternalDocumentNo;
-    private String projectionDocumentStatus;
-    private String projectionEvidenceSha256;
+    private String remark;
     private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
     private LocalDateTime dispatchedAt;
     private LocalDateTime supplierConfirmedAt;
     private LocalDateTime cancelledAt;
     private LocalDateTime closedAt;
+    private List<PurchaseOrderItemView> items;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PurchaseOrderItemView {
+        private String itemId;
+        private Integer lineNumber;
+        private String canonicalSkuId;
+        private BigDecimal orderedQuantity;
+        private String uomCode;
+        private String taxCode;
+        private Integer taxRateBps;
+        private BigDecimal unitNetPriceMinor;
+        private Long lineNetAmountMinor;
+        private Long lineTaxAmountMinor;
+        private Long lineGrossAmountMinor;
+        private List<PurchaseOrderDeliveryScheduleView> schedules;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PurchaseOrderDeliveryScheduleView {
+        private String scheduleId;
+        private Integer scheduleNumber;
+        private LocalDate requiredDeliveryDate;
+        private String canonicalWarehouseId;
+        private BigDecimal scheduledQuantity;
+    }
+
 }

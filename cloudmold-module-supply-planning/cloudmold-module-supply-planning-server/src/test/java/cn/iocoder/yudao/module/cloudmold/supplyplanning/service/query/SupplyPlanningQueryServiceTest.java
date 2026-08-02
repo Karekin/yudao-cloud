@@ -1,14 +1,14 @@
 package cn.iocoder.yudao.module.cloudmold.supplyplanning.service.query;
 
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
-import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoLegacyOperationsQueryApi;
-import cn.iocoder.yudao.module.cloudmold.integration.yudao.api.YudaoWarehouseInboundQueryApi;
-import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementOrderView;
-import cn.iocoder.yudao.module.cloudmold.procurement.api.ProcurementQueryApi;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.PurchaseRequisitionQueryApi;
+import cn.iocoder.yudao.module.cloudmold.procurement.api.PurchaseRequisitionView;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.ReplenishmentBusinessStageView;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.ReplenishmentExecutionProposalView;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.api.ReplenishmentExecutionView;
 import cn.iocoder.yudao.module.cloudmold.supplyplanning.dal.mysql.SupplyPlanningMapper;
+import cn.iocoder.yudao.module.cloudmold.warehouse.api.StockTransferQueryApi;
+import cn.iocoder.yudao.module.cloudmold.warehouse.api.StockTransferView;
 import org.junit.jupiter.api.*;
 
 import java.util.List;
@@ -19,13 +19,11 @@ import static org.mockito.Mockito.*;
 
 class SupplyPlanningQueryServiceTest {
     private final SupplyPlanningMapper mapper = mock(SupplyPlanningMapper.class);
-    private final ProcurementQueryApi procurementQueryApi = mock(ProcurementQueryApi.class);
-    private final YudaoWarehouseInboundQueryApi warehouseInboundQueryApi = mock(YudaoWarehouseInboundQueryApi.class);
-    private final YudaoLegacyOperationsQueryApi legacyOperationsQueryApi =
-            mock(YudaoLegacyOperationsQueryApi.class);
+    private final PurchaseRequisitionQueryApi purchaseRequisitionQueryApi = mock(PurchaseRequisitionQueryApi.class);
+    private final StockTransferQueryApi stockTransferQueryApi = mock(StockTransferQueryApi.class);
     private final SupplyPlanningQueryService service =
             new SupplyPlanningQueryService(
-                    mapper, procurementQueryApi, warehouseInboundQueryApi, legacyOperationsQueryApi);
+                    mapper, purchaseRequisitionQueryApi, stockTransferQueryApi);
 
     @BeforeEach
     void setUp() {
@@ -38,73 +36,57 @@ class SupplyPlanningQueryServiceTest {
     }
 
     @Test
-    void aggregatesPurchaseReplenishmentIntoProcurementAndInboundStages() {
+    void exposesCanonicalPurchaseRequisitionAsTheNextBusinessStage() {
         when(mapper.selectReplenishmentExecution(17L, "recommendation-01")).thenReturn(
                 ReplenishmentExecutionView.builder()
                         .recommendationId("recommendation-01")
                         .planId("plan-01")
                         .recommendationStatus("CONVERTED")
                         .targetType("PURCHASE_REQUEST")
-                        .sourceSystem("YUDAO_ERP")
-                        .documentType("PURCHASE_ORDER")
-                        .externalDocumentId("781")
-                        .externalDocumentNo("PO-20260725-01")
-                        .documentStatus("PREPARE")
-                        .nextWaitingEventCode("SUPPLIER_CONFIRMATION")
-                        .nextWaitingEventLabel("等待供应商确认采购单")
+                        .targetAggregateType("purchase_requisition")
+                        .targetAggregateId("purchase-requisition:conversion-01")
+                        .targetAggregateNo("PR-CM-CONVERSION01")
+                        .targetAggregateStatus("APPROVED")
                         .build());
-        when(procurementQueryApi.requireBySourceBusiness("REPLENISHMENT", "recommendation-01")).thenReturn(
-                ProcurementOrderView.builder()
-                        .orderId("procurement-order:conversion-01")
-                        .orderCode("PO-CM-CONVERSION01")
-                        .status("SUPPLIER_CONFIRMED")
-                        .projectionSourceSystem("YUDAO_ERP")
-                        .projectionDocumentType("PURCHASE_ORDER")
-                        .projectionExternalDocumentId("781")
-                        .projectionExternalDocumentNo("PO-20260725-01")
-                        .projectionDocumentStatus("PREPARE")
-                        .build());
-        when(warehouseInboundQueryApi.getPurchaseInboundTerminal(any())).thenReturn(
-                new YudaoWarehouseInboundQueryApi.PurchaseInboundTerminalView(
-                        "CLOUDMOLD", "PROCUREMENT_ORDER", "procurement-order:conversion-01",
-                        "PO-CM-CONVERSION01", null, null, "WAITING_ASN_CREATION",
-                        "WAITING_RECEIPT_ORDER", "WAITING_RECEIPT_ORDER",
-                        "WAITING_QUALITY_RELEASE", "ASN_CREATED", "等待创建收货预约/ASN", null, null));
+        when(purchaseRequisitionQueryApi.requireBySourceBusiness("REPLENISHMENT", "recommendation-01"))
+                .thenReturn(PurchaseRequisitionView.builder()
+                        .requisitionId("purchase-requisition:conversion-01")
+                        .requisitionCode("PR-CM-CONVERSION01").status("APPROVED").build());
 
         ReplenishmentBusinessStageView result = service.requireReplenishmentBusinessStage("recommendation-01");
 
-        assertThat(result.getProcurementOrderId()).isEqualTo("procurement-order:conversion-01");
-        assertThat(result.getProcurementOrderStatus()).isEqualTo("SUPPLIER_CONFIRMED");
-        assertThat(result.getAsnStatus()).isEqualTo("WAITING_ASN_CREATION");
-        assertThat(result.getReceiptStatus()).isEqualTo("WAITING_RECEIPT_ORDER");
-        assertThat(result.getNextWaitingEventCode()).isEqualTo("ASN_CREATED");
+        assertThat(result.getPurchaseRequisitionId()).isEqualTo("purchase-requisition:conversion-01");
+        assertThat(result.getPurchaseRequisitionStatus()).isEqualTo("APPROVED");
+        assertThat(result.getProcurementOrderId()).isNull();
+        assertThat(result.getAsnStatus()).isEqualTo("WAITING_PURCHASE_ORDER");
+        assertThat(result.getNextWaitingEventCode()).isEqualTo("PROCUREMENT_SOURCING");
     }
 
     @Test
-    void keepsTransferRequestInWmsPrepareWaitingState() {
+    void keepsCanonicalTransferOrderInPrepareWaitingState() {
         when(mapper.selectReplenishmentExecution(17L, "recommendation-02")).thenReturn(
                 ReplenishmentExecutionView.builder()
                         .recommendationId("recommendation-02")
                         .planId("plan-02")
                         .recommendationStatus("CONVERTED")
                         .targetType("TRANSFER_REQUEST")
-                        .sourceSystem("YUDAO_WMS")
-                        .documentType("MOVEMENT_ORDER")
-                        .externalDocumentId("9901")
-                        .externalDocumentNo("MO-9901")
-                        .documentStatus("PREPARE")
-                        .nextWaitingEventCode("TRANSFER_OUTBOUND")
-                        .nextWaitingEventLabel("等待调拨出库")
+                        .targetAggregateType("STOCK_TRANSFER_ORDER")
+                        .targetAggregateId("transfer-order-01")
+                        .targetAggregateNo("STO-01")
+                        .targetAggregateStatus("PREPARE")
                         .build());
-        when(legacyOperationsQueryApi.getMovementOrder(9901L)).thenReturn(
-                new YudaoLegacyOperationsQueryApi.LegacyDocumentView(
-                        "YUDAO_WMS", "MOVEMENT_ORDER", 9901L, "MO-9901", 0,
-                        "2026-07-29T09:00:00", null, null, "replenishment transfer"));
+        when(stockTransferQueryApi.requireBySourceBusiness("REPLENISHMENT", "recommendation-02"))
+                .thenReturn(StockTransferView.builder()
+                        .requestId("transfer-request-01").requestStatus("APPROVED")
+                        .orderId("transfer-order-01").orderCode("STO-01").orderStatus("PREPARE")
+                        .currentStageCode("TRANSFER_OUTBOUND").currentStageLabel("等待调拨出库")
+                        .terminal(false).build());
 
         ReplenishmentBusinessStageView result = service.requireReplenishmentBusinessStage("recommendation-02");
 
         assertThat(result.getProcurementOrderId()).isNull();
-        assertThat(result.getProjectionDocumentType()).isEqualTo("MOVEMENT_ORDER");
+        assertThat(result.getStockTransferId()).isEqualTo("transfer-order-01");
+        assertThat(result.getStockTransferStatus()).isEqualTo("PREPARE");
         assertThat(result.getNextWaitingEventCode()).isEqualTo("TRANSFER_OUTBOUND");
         assertThat(result.getSupplierConfirmationStatus()).isEqualTo("NOT_APPLICABLE");
     }
@@ -117,24 +99,22 @@ class SupplyPlanningQueryServiceTest {
                         .planId("plan-finished")
                         .recommendationStatus("CONVERTED")
                         .targetType("TRANSFER_REQUEST")
-                        .sourceSystem("YUDAO_WMS")
-                        .documentType("MOVEMENT_ORDER")
-                        .externalDocumentId("9902")
-                        .externalDocumentNo("MO-STALE")
-                        .documentStatus("PREPARE")
-                        .nextWaitingEventCode("TRANSFER_OUTBOUND")
-                        .nextWaitingEventLabel("等待调拨出库")
+                        .targetAggregateType("STOCK_TRANSFER_ORDER")
+                        .targetAggregateId("transfer-order-02")
+                        .targetAggregateStatus("PREPARE")
                         .build());
-        when(legacyOperationsQueryApi.getMovementOrder(9902L)).thenReturn(
-                new YudaoLegacyOperationsQueryApi.LegacyDocumentView(
-                        "YUDAO_WMS", "MOVEMENT_ORDER", 9902L, "MO-9902", 4,
-                        "2026-07-29T09:30:00", null, null, "completed transfer"));
+        when(stockTransferQueryApi.requireBySourceBusiness(
+                "REPLENISHMENT", "recommendation-finished"))
+                .thenReturn(StockTransferView.builder()
+                        .orderId("transfer-order-02").orderCode("STO-02").orderStatus("COMPLETED")
+                        .currentStageCode("NONE").currentStageLabel("调拨已完成")
+                        .terminal(true).build());
 
         ReplenishmentBusinessStageView result =
                 service.requireReplenishmentBusinessStage("recommendation-finished");
 
-        assertThat(result.getProjectionExternalDocumentNo()).isEqualTo("MO-9902");
-        assertThat(result.getProjectionDocumentStatus()).isEqualTo("FINISHED");
+        assertThat(result.getStockTransferNo()).isEqualTo("STO-02");
+        assertThat(result.getStockTransferStatus()).isEqualTo("COMPLETED");
         assertThat(result.getNextWaitingEventCode()).isEqualTo("NONE");
         assertThat(result.getNextWaitingEventLabel()).isEqualTo("调拨已完成");
     }
@@ -145,20 +125,21 @@ class SupplyPlanningQueryServiceTest {
                 ReplenishmentExecutionView.builder()
                         .recommendationId("recommendation-canceled")
                         .targetType("TRANSFER_REQUEST")
-                        .sourceSystem("YUDAO_WMS")
-                        .documentType("MOVEMENT_ORDER")
-                        .externalDocumentId("9903")
-                        .documentStatus("PREPARE")
+                        .targetAggregateType("STOCK_TRANSFER_ORDER")
+                        .targetAggregateId("transfer-order-03")
+                        .targetAggregateStatus("PREPARE")
                         .build());
-        when(legacyOperationsQueryApi.getMovementOrder(9903L)).thenReturn(
-                new YudaoLegacyOperationsQueryApi.LegacyDocumentView(
-                        "YUDAO_WMS", "MOVEMENT_ORDER", 9903L, "MO-9903", 5,
-                        "2026-07-29T10:00:00", null, null, "canceled transfer"));
+        when(stockTransferQueryApi.requireBySourceBusiness(
+                "REPLENISHMENT", "recommendation-canceled"))
+                .thenReturn(StockTransferView.builder()
+                        .orderId("transfer-order-03").orderCode("STO-03").orderStatus("CANCELED")
+                        .currentStageCode("NONE").currentStageLabel("调拨单已取消")
+                        .terminal(true).build());
 
         ReplenishmentBusinessStageView result =
                 service.requireReplenishmentBusinessStage("recommendation-canceled");
 
-        assertThat(result.getProjectionDocumentStatus()).isEqualTo("CANCELED");
+        assertThat(result.getStockTransferStatus()).isEqualTo("CANCELED");
         assertThat(result.getNextWaitingEventCode()).isEqualTo("NONE");
         assertThat(result.getNextWaitingEventLabel()).isEqualTo("调拨单已取消");
     }
@@ -171,7 +152,6 @@ class SupplyPlanningQueryServiceTest {
                         .recommendationId("recommendation-01")
                         .expectedRecommendationVersion(2L)
                         .targetType("PURCHASE_REQUEST")
-                        .mappingEvidenceSha256("c".repeat(64))
                         .policyCode("REPLENISHMENT_EXECUTION_V1")
                         .policySha256("d".repeat(64))
                         .build();
@@ -198,6 +178,9 @@ class SupplyPlanningQueryServiceTest {
                         .recommendationId("recommendation-01")
                         .expectedRecommendationVersion(2L)
                         .targetType("TRANSFER_REQUEST")
+                        .ownerType("MERCHANT").ownerId("merchant-01")
+                        .sourceWarehouseId("warehouse-source")
+                        .targetWarehouseId("warehouse-target")
                         .build();
         when(mapper.selectReadyReplenishmentExecutionProposal(17L, "proposal-01"))
                 .thenReturn(proposal);

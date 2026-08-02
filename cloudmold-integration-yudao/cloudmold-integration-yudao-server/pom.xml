@@ -46,11 +46,6 @@
         </dependency>
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
-            <artifactId>cloudmold-module-supply-planning-api</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>cn.iocoder.cloud</groupId>
             <artifactId>cloudmold-module-warehouse-api</artifactId>
             <version>${revision}</version>
         </dependency>

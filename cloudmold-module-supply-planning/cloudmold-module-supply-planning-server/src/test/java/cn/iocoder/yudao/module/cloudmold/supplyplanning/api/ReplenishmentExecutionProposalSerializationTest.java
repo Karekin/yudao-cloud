@@ -3,7 +3,6 @@ package cn.iocoder.yudao.module.cloudmold.supplyplanning.api;
 import org.junit.jupiter.api.Test;
 
 import java.io.*;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,15 +16,11 @@ class ReplenishmentExecutionProposalSerializationTest {
                         .proposalId("proposal-01")
                         .recommendationId("recommendation-01")
                         .expectedRecommendationVersion(2L)
-                        .targetType("PURCHASE_REQUEST")
-                        .mappingEvidenceSha256("c".repeat(64))
-                        .supplierId(11L)
-                        .accountId(12L)
-                        .erpProductId(13L)
-                        .erpProductUnitId(14L)
-                        .unitCostMinor(1299L)
-                        .taxPercent(new BigDecimal("13.0000"))
-                        .targetWarehouseId(31L)
+                        .targetType("TRANSFER_REQUEST")
+                        .ownerType("MERCHANT")
+                        .ownerId("merchant-01")
+                        .sourceWarehouseId("warehouse-source")
+                        .targetWarehouseId("warehouse-target")
                         .proposedByPrincipalId("principal-planner-01")
                         .policyCode("REPLENISHMENT_EXECUTION_V1")
                         .policySha256("d".repeat(64))
