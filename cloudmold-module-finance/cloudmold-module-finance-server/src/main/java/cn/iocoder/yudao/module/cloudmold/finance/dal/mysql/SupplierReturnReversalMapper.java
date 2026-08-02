@@ -320,9 +320,9 @@ public interface SupplierReturnReversalMapper {
 
     @Update("""
             UPDATE cloudmold_finance_ap_open_item
-            SET settled_amount_minor=settled_amount_minor+#{amountMinor},
+            SET status=CASE WHEN open_amount_minor=#{amountMinor} THEN 'SETTLED' ELSE 'PARTIALLY_SETTLED' END,
+                settled_amount_minor=settled_amount_minor+#{amountMinor},
                 open_amount_minor=open_amount_minor-#{amountMinor},
-                status=CASE WHEN open_amount_minor-#{amountMinor}=0 THEN 'SETTLED' ELSE 'PARTIALLY_SETTLED' END,
                 version=version+1,updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND ap_open_item_id=#{apOpenItemId}
               AND version=#{expectedVersion} AND open_amount_minor>=#{amountMinor}
@@ -356,9 +356,9 @@ public interface SupplierReturnReversalMapper {
 
     @Update("""
             UPDATE cloudmold_finance_ap_installment
-            SET settled_amount_minor=settled_amount_minor+#{amountMinor},
-                status=CASE WHEN settled_amount_minor+#{amountMinor}=amount_minor THEN 'SETTLED'
+            SET status=CASE WHEN settled_amount_minor+#{amountMinor}=amount_minor THEN 'SETTLED'
                             ELSE 'PARTIALLY_SETTLED' END,
+                settled_amount_minor=settled_amount_minor+#{amountMinor},
                 version=version+1,updated_at=#{now}
             WHERE tenant_id=#{tenantId} AND ap_installment_id=#{apInstallmentId}
               AND version=#{expectedVersion}
@@ -403,15 +403,17 @@ public interface SupplierReturnReversalMapper {
 
     @Insert("""
             INSERT INTO cloudmold_finance_inventory_valuation_effect
-              (valuation_effect_id,tenant_id,valuation_layer_id,effect_type,inventory_movement_id,inventory_movement_version,
+              (valuation_effect_id,tenant_id,valuation_layer_id,effect_type,supplier_return_line_id,
+               inventory_movement_id,inventory_movement_version,
                quantity,amount_minor,currency_code,journal_entry_id,occurred_at)
             VALUES
-              (#{effectId},#{tenantId},#{valuationLayerId},'SUPPLIER_RETURN',#{inventoryMovementId},
+              (#{effectId},#{tenantId},#{valuationLayerId},'SUPPLIER_RETURN',#{supplierReturnLineId},#{inventoryMovementId},
                #{inventoryMovementVersion},#{quantity},#{amountMinor},#{currencyCode},#{journalEntryId},#{occurredAt})
             """)
     int insertSupplierReturnValuationEffect(@Param("effectId") String effectId,
                                             @Param("tenantId") Long tenantId,
                                             @Param("valuationLayerId") String valuationLayerId,
+                                            @Param("supplierReturnLineId") String supplierReturnLineId,
                                             @Param("inventoryMovementId") String inventoryMovementId,
                                             @Param("inventoryMovementVersion") Long inventoryMovementVersion,
                                             @Param("quantity") BigDecimal quantity,

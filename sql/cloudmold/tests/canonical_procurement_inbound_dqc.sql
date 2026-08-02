@@ -94,4 +94,17 @@ SELECT 'finance_receipt_evidence_reference', COUNT(*)
 FROM cloudmold_warehouse_procurement_receipt_line
 WHERE finance_receipt_evidence_operation_id IS NULL OR finance_receipt_evidence_operation_id <= 0
    OR finance_receipt_evidence_id IS NULL OR finance_receipt_evidence_id = ''
-   OR finance_receipt_evidence_version IS NULL OR finance_receipt_evidence_version <= 0;
+   OR finance_receipt_evidence_version IS NULL OR finance_receipt_evidence_version <= 0
+UNION ALL
+SELECT 'procurement_receipt_quality_effect_guard_missing',
+       CASE WHEN COUNT(DISTINCT index_name) = 1 THEN 0 ELSE 1 END
+FROM information_schema.statistics
+WHERE table_schema = DATABASE()
+  AND table_name = 'cloudmold_inventory_procurement_receipt_operation_v3'
+  AND index_name = 'uk_cm_inv_pr_op_quality_effect'
+  AND non_unique = 0
+UNION ALL
+SELECT 'supplier_return_effect_guard_not_nullable', COUNT(*)
+FROM cloudmold_inventory_procurement_receipt_operation_v3
+WHERE operation_type = 'RETURN_TO_SUPPLIER'
+  AND quality_effect_guard IS NOT NULL;

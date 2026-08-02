@@ -45,6 +45,7 @@ SELECT 'supplier_return_valuation_effect_mismatch' AS check_name, COUNT(*) AS vi
 FROM cloudmold_finance_supplier_debit_adjustment_line l
 LEFT JOIN cloudmold_finance_inventory_valuation_effect e
   ON e.tenant_id=l.tenant_id AND e.valuation_layer_id=l.valuation_layer_id
+ AND e.supplier_return_line_id=l.supplier_return_line_id
  AND e.effect_type='SUPPLIER_RETURN'
 LEFT JOIN cloudmold_finance_journal_entry j
   ON j.tenant_id=e.tenant_id AND j.journal_entry_id=e.journal_entry_id
@@ -52,6 +53,11 @@ WHERE e.valuation_effect_id IS NULL
    OR e.amount_minor<>l.valuation_reversal_amount_minor
    OR e.quantity<>l.reversal_quantity
    OR j.status<>'POSTED';
+
+SELECT 'supplier_return_valuation_effect_identity_drift' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_finance_inventory_valuation_effect
+WHERE (effect_type='SUPPLIER_RETURN' AND supplier_return_line_id IS NULL)
+   OR (effect_type<>'SUPPLIER_RETURN' AND supplier_return_line_id IS NOT NULL);
 
 SELECT 'supplier_return_ap_application_mismatch' AS check_name, COUNT(*) AS violation_count
 FROM cloudmold_finance_supplier_return_ap_reversal r
@@ -61,3 +67,27 @@ LEFT JOIN cloudmold_finance_ap_application a
 WHERE a.ap_application_id IS NULL
    OR a.application_type<>'SETTLE'
    OR a.amount_minor<>r.gross_reversal_amount_minor;
+
+SELECT 'supplier_return_ap_status_drift' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_finance_ap_open_item
+WHERE status <> CASE
+    WHEN open_amount_minor=0 THEN 'SETTLED'
+    WHEN settled_amount_minor>0 THEN 'PARTIALLY_SETTLED'
+    ELSE 'OPEN' END;
+
+SELECT 'supplier_return_installment_status_drift' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_finance_ap_installment
+WHERE status <> CASE
+    WHEN settled_amount_minor=amount_minor THEN 'SETTLED'
+    WHEN settled_amount_minor>0 THEN 'PARTIALLY_SETTLED'
+    ELSE 'OPEN' END;
+
+SELECT 'supplier_return_invoice_settlement_status_drift' AS check_name, COUNT(*) AS violation_count
+FROM cloudmold_finance_supplier_invoice invoice
+JOIN cloudmold_finance_ap_open_item open_item
+  ON open_item.tenant_id=invoice.tenant_id
+ AND open_item.supplier_invoice_id=invoice.supplier_invoice_id
+WHERE invoice.settlement_status <> CASE
+    WHEN open_item.open_amount_minor=0 THEN 'PAID'
+    WHEN open_item.settled_amount_minor>0 THEN 'PARTIALLY_PAID'
+    ELSE 'UNPAID' END;

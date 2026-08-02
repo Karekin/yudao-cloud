@@ -125,13 +125,13 @@ class SupplierReturnReversalServiceTest {
         assertThat(result.getAggregateType()).isEqualTo("finance_supplier_debit_adjustment");
         assertThat(result.getJournalEntryId()).isNotBlank();
         verify(mapper).insertSupplierDebitAdjustment(any(SupplierDebitAdjustment.class));
-        verify(mapper).insertSupplierReturnValuationEffect(anyString(), eq(1L), eq("layer-01"), eq("movement-01"),
+        verify(mapper).insertSupplierReturnValuationEffect(anyString(), eq(1L), eq("layer-01"), eq("line-01"), eq("movement-01"),
                 eq(7L), eq(new BigDecimal("2.00000000")), eq(200L), eq("CNY"), anyString(), any());
         verify(mapper).insertSupplierReturnApApplication(anyString(), eq(1L), eq("ap-01"), anyString(), eq(226L), anyString(), any());
         InOrder persistenceOrder = inOrder(mapper);
         persistenceOrder.verify(mapper).insertJournalEntry(any(JournalEntry.class));
         persistenceOrder.verify(mapper).insertSupplierReturnValuationEffect(anyString(), eq(1L), eq("layer-01"),
-                eq("movement-01"), eq(7L), eq(new BigDecimal("2.00000000")), eq(200L), eq("CNY"),
+                eq("line-01"), eq("movement-01"), eq(7L), eq(new BigDecimal("2.00000000")), eq(200L), eq("CNY"),
                 anyString(), any());
         persistenceOrder.verify(mapper).insertSupplierDebitAdjustment(any(SupplierDebitAdjustment.class));
         persistenceOrder.verify(mapper).insertSupplierReturnApReversal(any(SupplierReturnApReversal.class));
@@ -146,7 +146,7 @@ class SupplierReturnReversalServiceTest {
         when(mapper.applyApSettlement(anyLong(), anyString(), anyLong(), anyLong(), any())).thenReturn(1);
         when(mapper.updateInvoiceSettlementFromAp(anyLong(), anyString(), any())).thenReturn(1);
         when(mapper.applyValuationReturn(anyLong(), anyString(), anyLong(), any(), anyLong(), any())).thenReturn(1);
-        when(mapper.insertSupplierReturnValuationEffect(anyString(), anyLong(), anyString(), anyString(), anyLong(),
+        when(mapper.insertSupplierReturnValuationEffect(anyString(), anyLong(), anyString(), anyString(), anyString(), anyLong(),
                 any(), anyLong(), anyString(), anyString(), any())).thenReturn(1);
         when(mapper.insertSupplierReturnApReversal(any())).thenReturn(1);
         when(mapper.insertSupplierReturnApApplication(anyString(), anyLong(), anyString(), anyString(), anyLong(), anyString(), any()))

@@ -238,7 +238,8 @@ public class SupplierReturnReversalService implements SupplierReturnReversalComm
             require(mapper.applyValuationReturn(context.tenantId(), layer.getValuationLayerId(), layer.getVersion(),
                             reversalQuantity, valuationAmount, context.now()) == 1,
                     "valuation layer reversal conflict");
-            valuationEffects.add(new ValuationEffect(layer.getValuationLayerId(), layer.getInventoryMovementId(),
+            valuationEffects.add(new ValuationEffect(layer.getValuationLayerId(), line.getReturnLineId(),
+                    layer.getInventoryMovementId(),
                     layer.getInventoryMovementVersion(), reversalQuantity, valuationAmount, line.getCurrencyCode()));
             totalValuation = Math.addExact(totalValuation, valuationAmount);
 
@@ -313,7 +314,8 @@ public class SupplierReturnReversalService implements SupplierReturnReversalComm
         }
         for (ValuationEffect effect : valuationEffects) {
             require(mapper.insertSupplierReturnValuationEffect(UUID.randomUUID().toString(), context.tenantId(),
-                            effect.valuationLayerId(), effect.inventoryMovementId(), effect.inventoryMovementVersion(),
+                            effect.valuationLayerId(), effect.supplierReturnLineId(), effect.inventoryMovementId(),
+                            effect.inventoryMovementVersion(),
                             effect.quantity(), effect.amountMinor(), effect.currencyCode(), journalId, context.now()) == 1,
                     "failed to persist supplier return valuation effect");
         }
@@ -542,7 +544,7 @@ public class SupplierReturnReversalService implements SupplierReturnReversalComm
     private record PostedResult(String adjustmentId, String journalEntryId) {
     }
 
-    private record ValuationEffect(String valuationLayerId, String inventoryMovementId,
+    private record ValuationEffect(String valuationLayerId, String supplierReturnLineId, String inventoryMovementId,
                                    Long inventoryMovementVersion, BigDecimal quantity,
                                    Long amountMinor, String currencyCode) {
     }
