@@ -1,5 +1,10 @@
 -- Canonical procurement receipt, quality disposition, and supplier-return inventory effects.
 
+ALTER TABLE `cloudmold_inventory_balance_v3`
+  DROP CONSTRAINT `ck_cm_inv_v3_stock_status`,
+  DROP CONSTRAINT `ck_cm_inv_v3_quality_status`,
+  DROP CONSTRAINT `ck_cm_inv_v3_sellable_quality`;
+
 UPDATE `cloudmold_inventory_balance_v3`
 SET `stock_status` = 'QA_HOLD',
     `updated_at` = UTC_TIMESTAMP(6)
@@ -7,11 +12,8 @@ WHERE `stock_status` = 'NON_SELLABLE'
   AND `quality_status` = 'PENDING_QC';
 
 ALTER TABLE `cloudmold_inventory_balance_v3`
-  DROP CONSTRAINT `ck_cm_inv_v3_stock_status`,
   ADD CONSTRAINT `ck_cm_inv_v3_stock_status` CHECK (`stock_status` IN ('SELLABLE','NON_SELLABLE','QA_HOLD')),
-  DROP CONSTRAINT `ck_cm_inv_v3_quality_status`,
   ADD CONSTRAINT `ck_cm_inv_v3_quality_status` CHECK (`quality_status` IN ('PENDING_QC','QUALIFIED','DAMAGED','REJECTED','QUARANTINED')),
-  DROP CONSTRAINT `ck_cm_inv_v3_sellable_quality`,
   ADD CONSTRAINT `ck_cm_inv_v3_sellable_quality` CHECK (
     (`stock_status` = 'SELLABLE' AND `quality_status` = 'QUALIFIED')
     OR (`stock_status` = 'QA_HOLD' AND `quality_status` = 'PENDING_QC')
