@@ -14,6 +14,11 @@ public class ReplenishmentBusinessStageView {
     private String planId;
     private String recommendationStatus;
     private String targetType;
+    /**
+     * Immutable target-document status captured when the replenishment conversion was created.
+     * It is intentionally separate from the current operational status, e.g. stockTransferStatus.
+     */
+    private String projectionDocumentStatus;
     private String purchaseRequisitionId;
     private String purchaseRequisitionNo;
     private String purchaseRequisitionStatus;

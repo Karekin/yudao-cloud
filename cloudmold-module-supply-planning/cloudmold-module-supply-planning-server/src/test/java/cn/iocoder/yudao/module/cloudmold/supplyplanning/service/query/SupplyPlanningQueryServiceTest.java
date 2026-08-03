@@ -87,6 +87,7 @@ class SupplyPlanningQueryServiceTest {
         assertThat(result.getProcurementOrderId()).isNull();
         assertThat(result.getStockTransferId()).isEqualTo("transfer-order-01");
         assertThat(result.getStockTransferStatus()).isEqualTo("PREPARE");
+        assertThat(result.getProjectionDocumentStatus()).isEqualTo("PREPARE");
         assertThat(result.getNextWaitingEventCode()).isEqualTo("TRANSFER_OUTBOUND");
         assertThat(result.getSupplierConfirmationStatus()).isEqualTo("NOT_APPLICABLE");
     }
@@ -115,6 +116,7 @@ class SupplyPlanningQueryServiceTest {
 
         assertThat(result.getStockTransferNo()).isEqualTo("STO-02");
         assertThat(result.getStockTransferStatus()).isEqualTo("COMPLETED");
+        assertThat(result.getProjectionDocumentStatus()).isEqualTo("PREPARE");
         assertThat(result.getNextWaitingEventCode()).isEqualTo("NONE");
         assertThat(result.getNextWaitingEventLabel()).isEqualTo("调拨已完成");
     }

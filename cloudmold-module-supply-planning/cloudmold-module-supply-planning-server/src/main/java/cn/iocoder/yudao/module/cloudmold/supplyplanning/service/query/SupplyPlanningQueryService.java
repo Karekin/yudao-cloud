@@ -86,7 +86,8 @@ public class SupplyPlanningQueryService implements SupplyPlanningQueryApi {
                         .recommendationId(execution.getRecommendationId())
                         .planId(execution.getPlanId())
                         .recommendationStatus(execution.getRecommendationStatus())
-                        .targetType(execution.getTargetType());
+                        .targetType(execution.getTargetType())
+                        .projectionDocumentStatus(execution.getTargetAggregateStatus());
         if ("PURCHASE_REQUEST".equals(execution.getTargetType())) {
             PurchaseRequisitionView requisition = purchaseRequisitionQueryApi
                     .requireBySourceBusiness("REPLENISHMENT", recommendationId);
