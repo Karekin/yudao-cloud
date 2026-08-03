@@ -701,6 +701,12 @@ class RotatingBusinessScenarioInputFactoryTest {
     }
 
     @Test
+    void shouldNotBuildProcurementOrderWithoutAnUnreleasedApprovedAward() {
+        assertThat(factory.build(162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_ORDER_SKILL,
+                "2026-07-29", "temporal-run-1")).isEmpty();
+    }
+
+    @Test
     void shouldBuildFreshRoleLevelCampaignGrowthAndSourcingInputs() {
         mockReadyMaster();
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(
@@ -712,11 +718,6 @@ class RotatingBusinessScenarioInputFactoryTest {
         when(mapper.selectLatestSuccessfulSkillTaskInput(
                 162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL))
                 .thenReturn(procurementSourcingSeed("canonical-sku-1"));
-        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
-                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL, "award_approve"))
-                .thenReturn("""
-                        {"aggregateId":"award-approved","aggregateVersion":3,"status":"APPROVED"}
-                        """);
         when(mapper.selectLatestSuccessfulSkillTaskStepResult(
                 162L, RotatingBusinessScenarioInputFactory.CONSUMER_JOURNEY_SKILL, "consumer_principal"))
                 .thenReturn("{\"principalId\":\"consumer-principal\"}");
@@ -735,13 +736,8 @@ class RotatingBusinessScenarioInputFactoryTest {
         JsonNode campaign = build(RotatingBusinessScenarioInputFactory.PROMOTION_CAMPAIGN_SKILL);
         JsonNode growth = build(RotatingBusinessScenarioInputFactory.GROWTH_EXPERIMENT_SKILL);
         JsonNode sourcing = build(RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL);
-        when(mapper.selectLatestSuccessfulSkillTaskInput(
-                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL))
+        when(mapper.selectLatestUnreleasedProcurementSourcingInput(162L))
                 .thenReturn(JsonUtils.toJsonString(sourcing));
-        when(mapper.selectLatestSuccessfulSkillTaskStepResult(
-                162L, RotatingBusinessScenarioInputFactory.PROCUREMENT_SOURCING_SKILL, "award_approve"))
-                .thenReturn("{\"aggregateId\":\"" + sourcing.path("awardId").asText()
-                        + "\",\"aggregateVersion\":3,\"status\":\"APPROVED\"}");
         JsonNode procurement = build(RotatingBusinessScenarioInputFactory.PROCUREMENT_ORDER_SKILL);
         JsonNode warehouse = build(RotatingBusinessScenarioInputFactory.WMS_OPERATIONS_SKILL);
         JsonNode replenishment = build(
@@ -1006,6 +1002,9 @@ class RotatingBusinessScenarioInputFactoryTest {
                 "2026-07-29", "temporal-run-2").orElseThrow());
 
         assertThat(first.path("actorPrincipalId").asText()).isEqualTo("principal-planner");
+        assertThat(first.path("runId").asText()).isNotBlank();
+        assertThat(first.path("runId").asText())
+                .isNotEqualTo(nextOccurrence.path("runId").asText());
         assertThat(first.path("forecast").path("points")).hasSize(2);
         assertThat(first.path("forecastEvaluation").path("actuals").get(0)
                 .path("bucketStart").asText()).isEqualTo("2026-07-22");
@@ -1021,10 +1020,14 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .path("demandStressBasisPoints").asInt()).isEqualTo(12_000);
         assertThat(first.path("executionProposal").path("targetType").asText())
                 .isEqualTo("TRANSFER_REQUEST");
-        assertThat(first.path("executionProposal").path("sourceWarehouseId").asLong())
-                .isEqualTo(301L);
-        assertThat(first.path("executionProposal").path("targetWarehouseId").asLong())
-                .isEqualTo(302L);
+        assertThat(first.path("executionProposal").path("ownerType").asText())
+                .isEqualTo("MERCHANT");
+        assertThat(first.path("executionProposal").path("ownerId").asText())
+                .isEqualTo("merchant-1");
+        assertThat(first.path("executionProposal").path("sourceWarehouseId").asText())
+                .isEqualTo("warehouse-source");
+        assertThat(first.path("executionProposal").path("targetWarehouseId").asText())
+                .isEqualTo("warehouse-1");
         assertThat(first.path("executionProposal").path("wmsSkuId").asLong())
                 .isEqualTo(401L);
         assertThat(first.path("forecast").path("forecastId").asText())
@@ -1048,6 +1051,8 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .setWmsSkuCode("YS-BASE-BLACK-S")
                 .setWmsBarcode("CM-BASE-BLACK-S")
                 .setItemUnit("PCS")
+                .setSourceWarehouseMappingId("mapping-501")
+                .setSourceCanonicalWarehouseId("warehouse-source")
                 .setTargetWarehouseMappingId("mapping-502")
                 .setCanonicalWarehouseId("warehouse-1")
                 .setCanonicalSkuId("sku-1")
@@ -1066,10 +1071,10 @@ class RotatingBusinessScenarioInputFactoryTest {
         JsonNode input = build(
                 RotatingBusinessScenarioInputFactory.SUPPLY_PLANNING_SOP_LIFECYCLE_SKILL);
 
-        assertThat(input.path("executionProposal").path("sourceWarehouseId").asLong())
-                .isEqualTo(501L);
-        assertThat(input.path("executionProposal").path("targetWarehouseId").asLong())
-                .isEqualTo(502L);
+        assertThat(input.path("executionProposal").path("sourceWarehouseId").asText())
+                .isEqualTo("warehouse-source");
+        assertThat(input.path("executionProposal").path("targetWarehouseId").asText())
+                .isEqualTo("warehouse-1");
         assertThat(input.path("executionProposal").path("wmsSkuId").asLong())
                 .isEqualTo(601L);
     }
@@ -1761,6 +1766,8 @@ class RotatingBusinessScenarioInputFactoryTest {
                 .setWmsSkuCode("YS-BASE-BLACK-S")
                 .setWmsBarcode("CM-BASE-BLACK-S")
                 .setItemUnit("PCS")
+                .setSourceWarehouseMappingId("mapping-301")
+                .setSourceCanonicalWarehouseId("warehouse-source")
                 .setTargetWarehouseMappingId("mapping-302")
                 .setCanonicalWarehouseId("warehouse-1")
                 .setCanonicalSkuId("sku-1")

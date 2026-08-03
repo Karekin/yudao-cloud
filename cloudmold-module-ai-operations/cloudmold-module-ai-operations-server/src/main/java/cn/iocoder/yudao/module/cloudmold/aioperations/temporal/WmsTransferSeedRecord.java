@@ -14,6 +14,8 @@ public class WmsTransferSeedRecord {
     private String wmsSkuCode;
     private String wmsBarcode;
     private String itemUnit;
+    private String sourceWarehouseMappingId;
+    private String sourceCanonicalWarehouseId;
     private String targetWarehouseMappingId;
     private String canonicalWarehouseId;
     private String canonicalSkuId;

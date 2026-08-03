@@ -251,14 +251,15 @@ class RotatingBusinessScenarioInputFactory {
             output = procurementSourcing(newPrefix, occurredAt, firstLine, secondLine,
                     warehouse.path("warehouseId").asText(), seed.get(), 500);
         } else if (PROCUREMENT_ORDER_SKILL.equals(targetSkillId)) {
-            JsonNode award = result(tenantId, PROCUREMENT_SOURCING_SKILL, "award_approve");
-            JsonNode sourcingInput = JsonUtils.parseTree(mapper.selectLatestSuccessfulSkillTaskInput(
-                    tenantId, PROCUREMENT_SOURCING_SKILL));
-            String awardId = award.path("aggregateId").asText();
-            if (awardId.isBlank() || !"APPROVED".equals(award.path("status").asText())
-                    || award.path("aggregateVersion").asLong() != 3L
-                    || sourcingInput == null || !sourcingInput.isObject()
-                    || !awardId.equals(sourcingInput.path("awardId").asText())
+            String sourcingInputJson = mapper.selectLatestUnreleasedProcurementSourcingInput(tenantId);
+            if (sourcingInputJson == null || sourcingInputJson.isBlank()) {
+                // An approved award is released exactly once. There is no order candidate until
+                // sourcing produces a new approved award that has not yet been consumed.
+                return Optional.empty();
+            }
+            JsonNode sourcingInput = JsonUtils.parseTree(sourcingInputJson);
+            if (sourcingInput == null || !sourcingInput.isObject()
+                    || sourcingInput.path("awardId").asText().isBlank()
                     || !sourcingInput.path("awardRelease").isObject()
                     || !sourcingInput.path("purchaseOrderPlans").isArray()
                     || sourcingInput.path("purchaseOrderPlans").size() != 2) {
@@ -266,7 +267,7 @@ class RotatingBusinessScenarioInputFactory {
             }
             ObjectNode procurement = JsonNodeFactory.instance.objectNode();
             procurement.put("schemaVersion", PROCUREMENT_SOURCING_INPUT_SCHEMA)
-                    .put("awardId", awardId);
+                    .put("awardId", sourcingInput.path("awardId").asText());
             procurement.set("awardRelease", sourcingInput.path("awardRelease").deepCopy());
             procurement.set("purchaseOrders", sourcingInput.path("purchaseOrderPlans").deepCopy());
             output = procurement;
@@ -319,8 +320,10 @@ class RotatingBusinessScenarioInputFactory {
                     catalogProjection.getBaseUomCode());
         } else if (SUPPLY_PLANNING_SOP_LIFECYCLE_SKILL.equals(targetSkillId)) {
             JsonNode principal = result(tenantId, READY_MASTER_SKILL, "principal");
+            JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
             WmsTransferSeedRecord seed = mapper.selectWmsTransferSeed(tenantId);
-            if (principal.path("principalId").asText().isBlank() || !usable(seed)) {
+            if (principal.path("principalId").asText().isBlank()
+                    || merchant.path("merchantId").asText().isBlank() || !usable(seed)) {
                 return Optional.empty();
             }
             String mappingEvidenceSha256 = wmsTransferEvidence(seed);
@@ -328,7 +331,8 @@ class RotatingBusinessScenarioInputFactory {
                     newPrefix, occurredAt,
                     seed.getCanonicalSkuId(), seed.getCanonicalWarehouseId(),
                     principal.path("principalId").asText(),
-                    seed.getSourceWarehouseId(), seed.getTargetWarehouseId(), seed.getWmsSkuId(),
+                    merchant.path("merchantId").asText(),
+                    seed.getSourceCanonicalWarehouseId(), seed.getCanonicalWarehouseId(), seed.getWmsSkuId(),
                     seed.getBaseUomCode(), mappingEvidenceSha256);
         } else if (CUSTOMER_SERVICE_LIFECYCLE_SKILL.equals(targetSkillId)) {
             JsonNode customer = result(tenantId, CONSUMER_JOURNEY_SKILL, "consumer_principal");
@@ -704,6 +708,11 @@ class RotatingBusinessScenarioInputFactory {
             }
         }
         removeTechnicalExecutionParameters(output);
+        // The SOP command contract has its own domain-level runId. It is distinct from the SkillTask execution
+        // metadata stripped above and must survive so every supply-planning event is causally traceable.
+        if (SUPPLY_PLANNING_SOP_LIFECYCLE_SKILL.equals(targetSkillId) && output instanceof ObjectNode objectOutput) {
+            objectOutput.put("runId", stableUuid(newPrefix + ":sop-run"));
+        }
         return Optional.of(JsonUtils.toJsonString(output));
     }
 
@@ -1327,20 +1336,23 @@ class RotatingBusinessScenarioInputFactory {
                 && seed.getWmsSkuId() != null && seed.getWmsSkuId() > 0
                 && seed.getItemId() != null && seed.getItemId() > 0
                 && text(seed.getWmsSkuCode()) && text(seed.getWmsBarcode())
-                && text(seed.getItemUnit()) && text(seed.getTargetWarehouseMappingId())
+                && text(seed.getItemUnit()) && text(seed.getSourceWarehouseMappingId())
+                && text(seed.getSourceCanonicalWarehouseId()) && text(seed.getTargetWarehouseMappingId())
                 && text(seed.getCanonicalWarehouseId()) && text(seed.getCanonicalSkuId())
+                && !seed.getSourceCanonicalWarehouseId().equals(seed.getCanonicalWarehouseId())
                 && text(seed.getCatalogSkuCode()) && text(seed.getCatalogBarcode())
                 && text(seed.getBaseUomCode());
     }
 
     private static String wmsTransferEvidence(WmsTransferSeedRecord seed) {
         return DigestUtil.sha256Hex(String.join("\u001f", List.of(
-                "TRANSFER_REQUEST", seed.getCanonicalSkuId(), seed.getCanonicalWarehouseId(),
+                "TRANSFER_REQUEST", seed.getCanonicalSkuId(), seed.getSourceCanonicalWarehouseId(),
+                seed.getCanonicalWarehouseId(),
                 seed.getCatalogSkuCode(), seed.getCatalogBarcode(), unitCode(seed.getBaseUomCode()),
                 String.valueOf(seed.getWmsSkuId()), String.valueOf(seed.getItemId()),
                 seed.getWmsSkuCode(), seed.getWmsBarcode(), unitCode(seed.getItemUnit()),
                 String.valueOf(seed.getSourceWarehouseId()), String.valueOf(seed.getTargetWarehouseId()),
-                seed.getTargetWarehouseMappingId())));
+                seed.getSourceWarehouseMappingId(), seed.getTargetWarehouseMappingId())));
     }
 
     private static boolean text(String value) {
@@ -2982,7 +2994,7 @@ class RotatingBusinessScenarioInputFactory {
 
     private static ObjectNode supplyPlanningSopLifecycle(
             String prefix, String occurredAt, String canonicalSkuId, String warehouseId,
-            String actorPrincipalId, long sourceWarehouseId, long targetWarehouseId,
+            String actorPrincipalId, String ownerId, String sourceWarehouseId, String targetWarehouseId,
             long wmsSkuId, String baseUomCode, String mappingEvidenceSha256) {
         LocalDate date = Instant.parse(occurredAt).atZone(java.time.ZoneOffset.UTC).toLocalDate();
         String runId = stableUuid(prefix + ":sop-run");
@@ -3083,6 +3095,8 @@ class RotatingBusinessScenarioInputFactory {
                 .put("sourceWarehouseId", sourceWarehouseId)
                 .put("targetWarehouseId", targetWarehouseId)
                 .put("wmsSkuId", wmsSkuId)
+                .put("ownerType", "MERCHANT")
+                .put("ownerId", ownerId)
                 .put("unitCostMinor", 1_000)
                 .put("proposedByPrincipalId", actorPrincipalId)
                 .put("policyCode", "SOP_TRANSFER_V1")

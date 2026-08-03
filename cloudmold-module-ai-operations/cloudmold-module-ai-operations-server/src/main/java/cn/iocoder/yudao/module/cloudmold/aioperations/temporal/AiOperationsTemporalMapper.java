@@ -331,6 +331,36 @@ public interface AiOperationsTemporalMapper {
     String selectLatestSuccessfulSkillTaskInput(@Param("tenantId") Long tenantId,
                                                 @Param("skillId") String skillId);
 
+    /**
+     * Select an approved sourcing scenario whose award snapshot has not yet been consumed by a purchase order.
+     *
+     * <p>Award release is a one-way domain command. Replaying the latest successful sourcing input after it has
+     * already produced orders is therefore not a retry; it is an invalid second release. The order lifecycle must
+     * wait for a new approved award instead.</p>
+     */
+    @Select("""
+            SELECT t.input_json
+            FROM cloudmold_skill_task_instance t
+            JOIN cloudmold_procurement_award a
+              ON a.tenant_id=t.tenant_id
+             AND a.award_id=JSON_UNQUOTE(JSON_EXTRACT(t.input_json, '$.awardId'))
+             AND a.status='APPROVED'
+             AND a.version=3
+            WHERE t.tenant_id=#{tenantId}
+              AND t.skill_id='skill.cloudmold.procurement.sourcing-lifecycle.v1'
+              AND t.status='SUCCEEDED'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM cloudmold_procurement_order_award_source source
+                WHERE source.tenant_id=t.tenant_id
+                  AND source.award_id=a.award_id
+                  AND source.award_version=a.version
+              )
+            ORDER BY t.completed_at DESC,t.created_at DESC
+            LIMIT 1
+            """)
+    String selectLatestUnreleasedProcurementSourcingInput(@Param("tenantId") Long tenantId);
+
     @InterceptorIgnore(tenantLine = "true")
     @Select("""
             SELECT s.result_json
@@ -359,6 +389,8 @@ public interface AiOperationsTemporalMapper {
                    sku.code AS wms_sku_code,
                    sku.bar_code AS wms_barcode,
                    item.unit AS item_unit,
+                   source_mapping.mapping_id AS source_warehouse_mapping_id,
+                   source_mapping.warehouse_id AS source_canonical_warehouse_id,
                    target_mapping.mapping_id AS target_warehouse_mapping_id,
                    target_mapping.warehouse_id AS canonical_warehouse_id,
                    projection.canonical_id AS canonical_sku_id,
@@ -386,6 +418,14 @@ public interface AiOperationsTemporalMapper {
              AND projection.status=0
              AND BINARY JSON_UNQUOTE(JSON_EXTRACT(projection.payload, '$.sku_code'))=BINARY sku.code
              AND BINARY JSON_UNQUOTE(JSON_EXTRACT(projection.payload, '$.primary_barcode'))=BINARY sku.bar_code
+            JOIN cloudmold_warehouse_source_mapping source_mapping
+              ON source_mapping.tenant_id=source_warehouse.tenant_id
+             AND source_mapping.source_system='WMS'
+             AND source_mapping.source_type='WAREHOUSE'
+             AND BINARY source_mapping.source_id=BINARY CAST(source_warehouse.id AS CHAR)
+             AND source_mapping.canonical_type='WAREHOUSE'
+             AND source_mapping.status='ACTIVE'
+             AND source_mapping.active_guard=1
             JOIN wms_warehouse target_warehouse
               ON target_warehouse.tenant_id=source_inventory.tenant_id
              AND target_warehouse.id<>source_inventory.warehouse_id
@@ -398,6 +438,7 @@ public interface AiOperationsTemporalMapper {
              AND target_mapping.canonical_type='WAREHOUSE'
              AND target_mapping.status='ACTIVE'
              AND target_mapping.active_guard=1
+             AND target_mapping.warehouse_id<>source_mapping.warehouse_id
             LEFT JOIN wms_inventory target_inventory
               ON target_inventory.tenant_id=source_inventory.tenant_id
              AND target_inventory.warehouse_id=target_warehouse.id
