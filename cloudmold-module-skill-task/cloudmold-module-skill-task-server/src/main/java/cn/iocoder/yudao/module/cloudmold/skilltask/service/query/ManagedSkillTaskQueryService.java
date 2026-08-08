@@ -88,6 +88,11 @@ public class ManagedSkillTaskQueryService {
                     new WorkflowPresentation("品类日常运营闭环",
                             "品类运营创建并认领行动单，依次完成新品铺货、转化实验、活动触达和真实消费者选购验证；"
                                     + "四条业务链全部成功后才关闭行动单，每日轮换问题场景并生成全新业务数据。")),
+            Map.entry("skill.cloudmold.crm.customer-sales-pipeline-lifecycle.v1",
+                    new WorkflowPresentation("客户与销售管道闭环",
+                            "从线索建档、分配与转化开始，建立客户、联系人和跟进记录，"
+                                    + "推进商机阶段直至成交；写入仅经过 CloudMold CRM 规范接口，"
+                                    + "不写旧 CRM 商品、合同或回款表。")),
             Map.entry("skill.cloudmold.commerce.product-management-lifecycle.v1",
                     new WorkflowPresentation("商品管理主流程",
                             "商品运营从全平台供给池选品、平台大店铺品、新品企划与爆款培育，"

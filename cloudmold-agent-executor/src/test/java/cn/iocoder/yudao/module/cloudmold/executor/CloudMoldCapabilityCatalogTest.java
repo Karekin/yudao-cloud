@@ -23,6 +23,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class CloudMoldCapabilityCatalogTest {
 
+    /**
+     * Cross-module inventory ports that predate the Port naming convention.
+     * They do not resolve a verified RPC actor and must never be published as
+     * agent capabilities merely because their historical names end in Api.
+     */
+    private static final Set<String> INTERNAL_ONLY_API_PORTS = Set.of(
+            "cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryScrapDispositionApi",
+            "cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryStockCountAdjustmentApi",
+            "cn.iocoder.yudao.module.cloudmold.inventory.api.InventoryStockCountSnapshotApi");
+
     @Test
     void shouldCreateAUniqueGovernedCapabilityForEveryPublicMethod() {
         CloudMoldRpcProperties properties = new CloudMoldRpcProperties();
@@ -136,6 +146,48 @@ class CloudMoldCapabilityCatalogTest {
         });
         assertThat(catalog.all()).anySatisfy(capability -> {
             assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.crm.crm-automation-command.execute.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.crm.api.CrmAutomationCommandApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.WRITE);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.crm.crm-query.get-opportunities.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.crm.api.CrmQueryApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.READ);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.crm.sales-contract-automation-command.execute.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.crm.api.contract.SalesContractAutomationCommandApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.WRITE);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.crm.sales-contract-query.get.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.crm.api.contract.SalesContractQueryApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.READ);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.finance.receivables-automation-command.register-plan.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.finance.api.receivables.ReceivablesAutomationCommandApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.WRITE);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
+                    "capability.cloudmold.finance.receivables-query.summarize-by-sales-contract.v1");
+            assertThat(capability.interfaceName()).isEqualTo(
+                    "cn.iocoder.yudao.module.cloudmold.finance.api.receivables.ReceivablesQueryApi");
+            assertThat(capability.operationType()).isEqualTo(CapabilityOperationType.READ);
+        });
+        assertThat(catalog.all()).anySatisfy(capability -> {
+            assertThat(capability.capabilityId()).isEqualTo(
                     "capability.cloudmold.crossborder.bonded-customs-command.execute.v1");
             assertThat(capability.interfaceName()).isEqualTo(
                     "cn.iocoder.yudao.module.cloudmold.crossborder.api.bonded.BondedCustomsCommandApi");
@@ -198,6 +250,7 @@ class CloudMoldCapabilityCatalogTest {
             try {
                 Class<?> type = Class.forName(className);
                 if (type.isInterface() && Modifier.isPublic(type.getModifiers())
+                        && !INTERNAL_ONLY_API_PORTS.contains(className)
                         && Arrays.stream(type.getMethods()).anyMatch(method -> Modifier.isPublic(method.getModifiers()))) {
                     discovered.add(className);
                 }
@@ -207,6 +260,7 @@ class CloudMoldCapabilityCatalogTest {
         }
 
         assertThat(discovered).isEqualTo(CloudMoldDubboServiceAllowlist.load());
+        assertThat(CloudMoldDubboServiceAllowlist.load()).doesNotContainAnyElementsOf(INTERNAL_ONLY_API_PORTS);
     }
 
     @Test

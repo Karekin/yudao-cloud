@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:flowable="http://flowable.org/bpmn"
+             xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+             xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+             xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+             targetNamespace="https://cloudmold.cn/bpmn/customer-sales">
+  <process id="cloudmold_sales_contract_approval"
+           name="CloudMold 销售合同审批"
+           isExecutable="true">
+    <documentation>赢单后的销售合同必须由与申请人分离的审查岗位批准，拒绝或通过均由 BPM 终态事件回写规范合同。</documentation>
+    <startEvent id="start_event" name="提交合同"/>
+    <sequenceFlow id="flow_start_to_review" sourceRef="start_event" targetRef="sales_contract_review"/>
+    <userTask id="sales_contract_review"
+              name="销售合同独立审查"
+              flowable:candidateStrategy="35"
+              flowable:approveType="1">
+      <extensionElements>
+        <flowable:approveType>1</flowable:approveType>
+        <flowable:approveMethod>1</flowable:approveMethod>
+      </extensionElements>
+    </userTask>
+    <sequenceFlow id="flow_review_to_end" sourceRef="sales_contract_review" targetRef="approved_end"/>
+    <endEvent id="approved_end" name="审查完成"/>
+  </process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_sales_contract">
+    <bpmndi:BPMNPlane id="BPMNPlane_sales_contract" bpmnElement="cloudmold_sales_contract_approval">
+      <bpmndi:BPMNShape id="Shape_start" bpmnElement="start_event">
+        <dc:Bounds x="100" y="122" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_review" bpmnElement="sales_contract_review">
+        <dc:Bounds x="220" y="100" width="160" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_end" bpmnElement="approved_end">
+        <dc:Bounds x="470" y="122" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Edge_start_review" bpmnElement="flow_start_to_review">
+        <di:waypoint x="136" y="140"/><di:waypoint x="220" y="140"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_review_end" bpmnElement="flow_review_to_end">
+        <di:waypoint x="380" y="140"/><di:waypoint x="470" y="140"/>
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</definitions>

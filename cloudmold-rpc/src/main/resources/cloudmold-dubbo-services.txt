@@ -23,6 +23,11 @@ cn.iocoder.yudao.module.cloudmold.catalog.api.CatalogSpuValidationApi
 cn.iocoder.yudao.module.cloudmold.catalog.api.workflow.AssortmentWaveReadinessWorkflowQueryApi
 cn.iocoder.yudao.module.cloudmold.commercebehavior.api.CommerceBehaviorCommandApi
 cn.iocoder.yudao.module.cloudmold.customerservice.api.CustomerServiceCommandApi
+cn.iocoder.yudao.module.cloudmold.crm.api.CrmAutomationCommandApi
+cn.iocoder.yudao.module.cloudmold.crm.api.CrmQueryApi
+cn.iocoder.yudao.module.cloudmold.crm.api.contract.SalesContractAutomationCommandApi
+cn.iocoder.yudao.module.cloudmold.crm.api.contract.SalesContractQueryApi
+cn.iocoder.yudao.module.cloudmold.crm.api.contract.SalesContractValidationApi
 cn.iocoder.yudao.module.cloudmold.customerservice.api.CustomerServiceQueryApi
 cn.iocoder.yudao.module.cloudmold.customerservice.api.workflow.CustomerResolutionWorkflowQueryApi
 cn.iocoder.yudao.module.cloudmold.crossborder.api.bonded.BondedCustomsCommandApi
@@ -43,6 +48,8 @@ cn.iocoder.yudao.module.cloudmold.fulfillment.api.exception.FulfillmentException
 cn.iocoder.yudao.module.cloudmold.fulfillment.api.exception.FulfillmentExceptionQueryApi
 cn.iocoder.yudao.module.cloudmold.finance.api.FinanceCloseCommandApi
 cn.iocoder.yudao.module.cloudmold.finance.api.FinanceCloseQueryApi
+cn.iocoder.yudao.module.cloudmold.finance.api.receivables.ReceivablesAutomationCommandApi
+cn.iocoder.yudao.module.cloudmold.finance.api.receivables.ReceivablesQueryApi
 cn.iocoder.yudao.module.cloudmold.gamification.api.GamificationCommandApi
 cn.iocoder.yudao.module.cloudmold.gamification.api.GamificationQueryApi
 cn.iocoder.yudao.module.cloudmold.identity.api.IdentityCommandApi

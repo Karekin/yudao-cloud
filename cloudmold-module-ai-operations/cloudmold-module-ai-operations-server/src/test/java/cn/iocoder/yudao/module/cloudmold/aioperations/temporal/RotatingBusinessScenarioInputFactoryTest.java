@@ -1693,6 +1693,63 @@ class RotatingBusinessScenarioInputFactoryTest {
                 "2026-07-29", "temporal-run-1")).isEmpty();
     }
 
+    @Test
+    void shouldBuildFreshPrivacySafeCustomerSalesPipelineInput() {
+        mockReadyMaster();
+        when(mapper.selectLatestSuccessfulSkillTaskInput(
+                162L, RotatingBusinessScenarioInputFactory.FULL_CHAIN_SKILL)).thenReturn("""
+                {"runIds":{"catalog":"base-cat"},"catalog":{},
+                 "master":{"identityReference":{},"warehouseReference":{}},
+                 "aftersale":{"commands":[]},"readback":{}}
+                """);
+
+        JsonNode input = build(
+                RotatingBusinessScenarioInputFactory.CUSTOMER_SALES_PIPELINE_LIFECYCLE_SKILL);
+
+        assertThat(input.path("scenarioVersion").asText())
+                .isEqualTo("cloudmold.crm-customer-sales-receivables/v2");
+        assertThat(input.path("classification").asText()).isEqualTo("LOCAL_TEST");
+        assertThat(input.path("commands")).hasSize(11);
+        assertThat(input.path("salesContractCommands")).hasSize(2);
+        assertThat(input.path("receivablesCommands")).hasSize(3);
+        assertThat(input.path("commands").get(0).path("operation").asText())
+                .isEqualTo("CREATE_LEAD");
+        assertThat(input.path("commands").get(0).path("lead").path("leadCode").asText())
+                .startsWith("AI_LEAD_");
+        assertThat(input.path("commands").get(1).path("followUp").path("methodCode").asText())
+                .isEqualTo("NOTE");
+        assertThat(input.path("commands").get(1).path("followUp").has("subjectId")).isTrue();
+        assertThat(input.path("commands").get(2).path("lead").path("status").asText())
+                .isEqualTo("QUALIFYING");
+        assertThat(input.path("commands").get(2).path("lead").has("leadId")).isTrue();
+        assertThat(input.path("commands").get(2).path("lead").has("expectedVersion")).isTrue();
+        assertThat(input.path("commands").get(3).path("customer").path("customerCode").asText())
+                .startsWith("AI_CUST_");
+        assertThat(input.path("commands").get(4).path("lead").path("status").asText())
+                .isEqualTo("CONVERTED");
+        assertThat(input.path("commands").get(6).path("opportunity").path("opportunityCode").asText())
+                .startsWith("AI_OPP_");
+        assertThat(input.path("commands").get(6).path("opportunity").has("customerId")).isTrue();
+        assertThat(input.path("commands").get(10).path("opportunity").path("stage").asText())
+                .isEqualTo("CLOSED_WON");
+        assertThat(input.path("salesContractCommands").get(0).path("operation").asText())
+                .isEqualTo("CREATE_DRAFT");
+        assertThat(input.path("salesContractCommands").get(0).path("sellerMerchantId").asText())
+                .isEqualTo("merchant-1");
+        assertThat(input.path("salesContractCommands").get(0).path("items").get(0)
+                .path("canonicalSkuId").asText()).isEqualTo("sku-1");
+        assertThat(input.path("receivablesCommands").get(0).path("plannedAmountMinor").asLong())
+                .isEqualTo(3_980_000L);
+        assertThat(input.path("receivablesCommands").get(2).path("allocations").get(0)
+                .path("amountMinor").asLong()).isEqualTo(3_980_000L);
+        assertThat(input.toString()).doesNotContain("actorPrincipalId")
+                .doesNotContain("ownerPrincipalId")
+                .doesNotContain("idempotencyKey")
+                .doesNotContain("runId")
+                .doesNotContain("@")
+                .doesNotContain("phone");
+    }
+
     private JsonNode build(String skillId) {
         return JsonUtils.parseTree(factory.build(162L, skillId,
                 "2026-07-29", "temporal-run-1").orElseThrow());

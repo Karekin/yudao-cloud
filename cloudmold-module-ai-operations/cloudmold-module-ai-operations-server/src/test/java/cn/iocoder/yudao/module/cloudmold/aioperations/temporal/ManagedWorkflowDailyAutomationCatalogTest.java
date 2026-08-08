@@ -85,7 +85,7 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                 .hasSize(8);
         assertThat(ManagedWorkflowDailyAutomationFixtures.workflows())
                 .filteredOn(workflow -> "R3".equals(workflow.getRiskLevel()))
-                .hasSize(34);
+                .hasSize(35);
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .filter(ManagedWorkflowDailyAutomationCatalog::canRunWithoutBusinessInput))
                 .containsExactly(
@@ -98,7 +98,7 @@ class ManagedWorkflowDailyAutomationCatalogTest {
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("ROTATING_BUSINESS_SCENARIO"::equals)
-                .hasSize(37);
+                .hasSize(38);
         assertThat(ManagedWorkflowDailyAutomationFixtures.MANAGED_SKILL_IDS.stream()
                 .map(ManagedWorkflowDailyAutomationCatalog::inputStrategy))
                 .filteredOn("DOMAIN_BACKLOG"::equals)
@@ -150,6 +150,10 @@ class ManagedWorkflowDailyAutomationCatalogTest {
                 "skill.cloudmold.commerce.category-daily-operations.v1"))
                 .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
                         "category-operations", "category.daily-operations"));
+        assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
+                "skill.cloudmold.crm.customer-sales-pipeline-lifecycle.v1"))
+                .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(
+                        "customer-sales-operator", "crm.sales-pipeline"));
         assertThat(ManagedWorkflowDailyAutomationCatalog.approvalRoute(
                 "skill.cloudmold.partner-marketing.kol-media-operations.v1"))
                 .isEqualTo(new ManagedWorkflowDailyAutomationCatalog.ApprovalRoute(

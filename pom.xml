@@ -35,6 +35,7 @@
         <module>cloudmold-module-merchant</module>
         <module>cloudmold-module-warehouse</module>
         <module>cloudmold-module-catalog</module>
+        <module>cloudmold-module-crm</module>
         <module>cloudmold-module-inventory</module>
         <module>cloudmold-module-listing</module>
         <module>cloudmold-module-order</module>

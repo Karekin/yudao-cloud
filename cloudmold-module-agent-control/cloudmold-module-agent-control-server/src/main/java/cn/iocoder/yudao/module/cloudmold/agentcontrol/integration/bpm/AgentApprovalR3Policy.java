@@ -26,6 +26,9 @@ final class AgentApprovalR3Policy {
         if (action.equals("category.daily-operations")) {
             return List.of("risk", "operations-lead");
         }
+        if (action.equals("crm.sales-pipeline")) {
+            return List.of("risk", "operations-lead");
+        }
         if (action.equals("customer-experience.ticket-responsibility")) {
             return List.of("customer-service", "operations-lead");
         }

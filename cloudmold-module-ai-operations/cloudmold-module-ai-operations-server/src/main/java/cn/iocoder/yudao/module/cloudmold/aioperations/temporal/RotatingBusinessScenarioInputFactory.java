@@ -56,6 +56,8 @@ class RotatingBusinessScenarioInputFactory {
     static final String AUTONOMOUS_DAY_SKILL = "skill.cloudmold.commerce.autonomous-day.v1";
     static final String CATEGORY_DAILY_OPERATIONS_SKILL =
             "skill.cloudmold.commerce.category-daily-operations.v1";
+    static final String CUSTOMER_SALES_PIPELINE_LIFECYCLE_SKILL =
+            "skill.cloudmold.crm.customer-sales-pipeline-lifecycle.v1";
     static final String CATALOG_MATRIX_SKILL = "skill.cloudmold.commerce.catalog-matrix.v1";
     static final String AFTERSALE_SAGA_SKILL = "skill.cloudmold.commerce.aftersale-saga.v1";
     static final String ORDER_CANCELLATION_OPERATIONS_SKILL =
@@ -687,6 +689,19 @@ class RotatingBusinessScenarioInputFactory {
                     seedProperties.getSyntheticConsumerMemberUserId());
             output = categoryDailyOperations(rotated, newPrefix, occurredAt, consumer,
                     operator.path("principalId").asText(), occurrenceKey);
+        } else if (CUSTOMER_SALES_PIPELINE_LIFECYCLE_SKILL.equals(targetSkillId)) {
+            JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
+            JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
+            WmsCatalogProjectionSeedRecord catalog = mapper.selectLatestWmsCatalogProjectionSeed(tenantId);
+            if (operator.path("principalId").asText().isBlank()
+                    || merchant.path("merchantId").asText().isBlank()
+                    || merchant.path("shopId").asText().isBlank()
+                    || !usable(catalog)) {
+                return Optional.empty();
+            }
+            output = customerSalesPipelineLifecycle(newPrefix, date, businessOccurredAt,
+                    merchant.path("merchantId").asText(), merchant.path("shopId").asText(),
+                    catalog.getCanonicalSkuId(), catalog.getBaseUomCode());
         } else {
             if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
                 return Optional.empty();
@@ -716,6 +731,206 @@ class RotatingBusinessScenarioInputFactory {
         return Optional.of(JsonUtils.toJsonString(output));
     }
 
+    private static ObjectNode customerSalesPipelineLifecycle(
+            String prefix, LocalDate businessDate, String occurredAt,
+            String merchantId, String shopId, String canonicalSkuId, String baseUomCode) {
+        String token = prefix.replaceAll("[^A-Za-z0-9]", "").toUpperCase(Locale.ROOT);
+        String correlationId = stableUuid(prefix + ":crm-sales-correlation");
+        String customerName = "AI 受控客户 " + token;
+        String leadName = customerName + " 线索";
+        String opportunityName = customerName + " 年度合作";
+        String businessCode = DigestUtil.sha256Hex(prefix).substring(0, 12).toUpperCase(Locale.ROOT);
+        String leadCode = "AI_LEAD_" + businessCode;
+        String customerCode = "AI_CUST_" + businessCode;
+        String nextContactAt = businessDate.plusDays(1) + "T09:00:00";
+        String expectedCloseDate = businessDate.plusDays(14).toString();
+
+        ArrayNode commands = JsonNodeFactory.instance.arrayNode();
+        commands.add(crmCommand(prefix, correlationId, occurredAt, 1, "CREATE_LEAD")
+                .set("lead", JsonNodeFactory.instance.objectNode()
+                        .put("leadCode", leadCode)
+                        .put("leadName", leadName)
+                        .put("sourceCode", "AI_MANAGED_OUTREACH")
+                        .put("status", "NEW")
+                        .put("contactChannelRef", "restricted:" + DigestUtil.sha256Hex(prefix + ":lead-channel").substring(0, 32))
+                        .put("maskedContact", "***" + token.substring(Math.max(0, token.length() - 4)))
+                        .put("nextFollowUpAt", nextContactAt)));
+        commands.add(crmCommand(prefix, correlationId, occurredAt, 2, "RECORD_FOLLOW_UP")
+                .set("followUp", JsonNodeFactory.instance.objectNode()
+                        .put("subjectType", "LEAD")
+                        .putNull("subjectId")
+                        .put("methodCode", "NOTE")
+                        .put("summary", "已确认受控销售场景的需求范围与下一步")
+                        .put("nextFollowUpAt", nextContactAt)));
+        commands.add(crmCommand(prefix, correlationId, occurredAt, 3, "UPDATE_LEAD")
+                .set("lead", JsonNodeFactory.instance.objectNode()
+                        .putNull("leadId")
+                        .putNull("expectedVersion")
+                        .put("leadCode", leadCode)
+                        .put("leadName", leadName)
+                        .put("sourceCode", "AI_MANAGED_OUTREACH")
+                        .put("status", "QUALIFYING")
+                        .put("contactChannelRef", "restricted:" + DigestUtil.sha256Hex(prefix + ":lead-channel").substring(0, 32))
+                        .put("maskedContact", "***" + token.substring(Math.max(0, token.length() - 4)))
+                        .put("nextFollowUpAt", nextContactAt)));
+        commands.add(crmCommand(prefix, correlationId, occurredAt, 4, "CREATE_CUSTOMER")
+                .set("customer", JsonNodeFactory.instance.objectNode()
+                        .put("customerCode", customerCode)
+                        .put("customerName", customerName)
+                        .put("levelCode", "STANDARD")
+                        .put("lifecycleStatus", "ACTIVE")
+                        .put("poolStatus", "OWNED")
+                        .put("sourceCode", "AI_MANAGED_OUTREACH")
+                        .put("industryCode", "FASHION_RETAIL")
+                        .put("regionCode", "CN")
+                        .put("nextFollowUpAt", nextContactAt)));
+        commands.add(crmCommand(prefix, correlationId, occurredAt, 5, "UPDATE_LEAD")
+                .set("lead", JsonNodeFactory.instance.objectNode()
+                        .putNull("leadId")
+                        .putNull("expectedVersion")
+                        .put("leadCode", leadCode)
+                        .put("leadName", leadName)
+                        .put("sourceCode", "AI_MANAGED_OUTREACH")
+                        .put("status", "CONVERTED")
+                        .put("contactChannelRef", "restricted:" + DigestUtil.sha256Hex(prefix + ":lead-channel").substring(0, 32))
+                        .put("maskedContact", "***" + token.substring(Math.max(0, token.length() - 4)))
+                        .put("nextFollowUpAt", nextContactAt)));
+        commands.add(crmCommand(prefix, correlationId, occurredAt, 6, "CREATE_CONTACT")
+                .set("contact", JsonNodeFactory.instance.objectNode()
+                        .putNull("customerId")
+                        .put("contactName", "受控联系人 " + token)
+                        .put("roleTitle", "采购负责人")
+                        .put("contactChannelRef", "restricted:" + DigestUtil.sha256Hex(prefix + ":contact-channel").substring(0, 32))
+                        .put("maskedContact", "***" + token.substring(Math.max(0, token.length() - 4)))
+                        .put("isPrimary", true)
+                        .put("status", "ACTIVE")));
+        commands.add(crmOpportunityCommand(prefix, correlationId, occurredAt, 7,
+                "CREATE_OPPORTUNITY", opportunityName, "QUALIFICATION", expectedCloseDate));
+        commands.add(crmCommand(prefix, correlationId, occurredAt, 8, "RECORD_FOLLOW_UP")
+                .set("followUp", JsonNodeFactory.instance.objectNode()
+                        .put("subjectType", "OPPORTUNITY")
+                        .putNull("subjectId")
+                        .put("methodCode", "NOTE")
+                        .put("summary", "已形成受控方案并进入商机阶段评审")
+                        .put("nextFollowUpAt", nextContactAt)));
+        commands.add(crmOpportunityCommand(prefix, correlationId, occurredAt, 9,
+                "UPDATE_OPPORTUNITY", opportunityName, "PROPOSAL", expectedCloseDate));
+        commands.add(crmOpportunityCommand(prefix, correlationId, occurredAt, 10,
+                "UPDATE_OPPORTUNITY", opportunityName, "NEGOTIATION", expectedCloseDate));
+        commands.add(crmOpportunityCommand(prefix, correlationId, occurredAt, 11,
+                "UPDATE_OPPORTUNITY", opportunityName, "CLOSED_WON", expectedCloseDate));
+        String contractCode = "AI_CONTRACT_" + businessCode;
+        ArrayNode salesContractCommands = JsonNodeFactory.instance.arrayNode();
+        salesContractCommands.add(JsonNodeFactory.instance.objectNode()
+                .put("operation", "CREATE_DRAFT")
+                .put("idempotencyKey", "pending-sales-contract-command")
+                .put("runId", prefix + "-crm-sales")
+                .put("correlationId", correlationId)
+                .put("causationId", stableUuid(prefix + ":crm-sales:12"))
+                .put("occurredAt", occurredAt)
+                .put("reasonCode", "AI_MANAGED_SALES_PIPELINE")
+                .put("contractCode", contractCode)
+                .put("contractName", customerName + " 销售合同")
+                .putNull("customerId")
+                .put("sellerMerchantId", merchantId)
+                .put("sellerShopId", shopId)
+                .put("currencyCode", "CNY")
+                .put("effectiveDate", businessDate.toString())
+                .put("expiresOn", businessDate.plusYears(1).toString())
+                .set("items", JsonNodeFactory.instance.arrayNode().add(
+                        JsonNodeFactory.instance.objectNode()
+                                .put("canonicalSkuId", canonicalSkuId)
+                                .put("itemName", "AI 受控销售商品 " + token)
+                                .put("uomCode", baseUomCode)
+                                .put("quantity", "1")
+                                .put("unitPriceMinor", 3_980_000L)
+                                .put("lineAmountMinor", 3_980_000L))));
+        salesContractCommands.add(JsonNodeFactory.instance.objectNode()
+                .put("operation", "SUBMIT_APPROVAL")
+                .put("idempotencyKey", "pending-sales-contract-command")
+                .put("runId", prefix + "-crm-sales")
+                .put("correlationId", correlationId)
+                .put("causationId", stableUuid(prefix + ":crm-sales:13"))
+                .put("occurredAt", occurredAt)
+                .put("reasonCode", "AI_MANAGED_SALES_PIPELINE")
+                .putNull("salesContractId")
+                .putNull("expectedVersion"));
+
+        ArrayNode receivablesCommands = JsonNodeFactory.instance.arrayNode();
+        receivablesCommands.add(receivablesCommandEnvelope(prefix, correlationId, occurredAt, 14)
+                .put("planCode", "AI_PLAN_" + businessCode)
+                .putNull("customerId")
+                .putNull("salesContractId")
+                .put("plannedAmountMinor", 3_980_000L)
+                .put("currencyCode", "CNY")
+                .put("dueDate", businessDate.plusDays(30).toString())
+                .put("reasonCode", "AI_MANAGED_SALES_PIPELINE"));
+        receivablesCommands.add(receivablesCommandEnvelope(prefix, correlationId, occurredAt, 15)
+                .put("receiptCode", "AI_RECEIPT_" + businessCode)
+                .putNull("customerId")
+                .putNull("salesContractId")
+                .put("receiptAmountMinor", 3_980_000L)
+                .put("currencyCode", "CNY")
+                .put("receiptDate", businessDate.toString())
+                .put("externalReference", "ai-managed:" + businessCode)
+                .put("reasonCode", "AI_MANAGED_SALES_PIPELINE"));
+        receivablesCommands.add(receivablesCommandEnvelope(prefix, correlationId, occurredAt, 16)
+                .putNull("receiptId")
+                .putNull("expectedVersion")
+                .put("reasonCode", "AI_MANAGED_SALES_PIPELINE")
+                .set("allocations", JsonNodeFactory.instance.arrayNode().add(
+                        JsonNodeFactory.instance.objectNode()
+                                .putNull("receivablePlanId")
+                                .putNull("expectedPlanVersion")
+                                .put("amountMinor", 3_980_000L))));
+        ObjectNode output = JsonNodeFactory.instance.objectNode()
+                .put("scenarioVersion", "cloudmold.crm-customer-sales-receivables/v2")
+                .put("classification", "LOCAL_TEST");
+        output.set("commands", commands);
+        output.set("salesContractCommands", salesContractCommands);
+        output.set("receivablesCommands", receivablesCommands);
+        return output;
+    }
+
+    private static ObjectNode receivablesCommandEnvelope(
+            String prefix, String correlationId, String occurredAt, int sequence) {
+        return JsonNodeFactory.instance.objectNode().set("envelope",
+                JsonNodeFactory.instance.objectNode()
+                        .put("correlationId", correlationId)
+                        .put("causationId", stableUuid(prefix + ":crm-sales:" + sequence))
+                        .put("runId", prefix + "-crm-sales")
+                        .put("idempotencyKey", "pending-receivables-command")
+                        .put("occurredAt", occurredAt));
+    }
+
+    private static ObjectNode crmCommand(
+            String prefix, String correlationId, String occurredAt, int sequence, String operation) {
+        return JsonNodeFactory.instance.objectNode()
+                .put("operation", operation)
+                .put("idempotencyKey", "pending-crm-command")
+                .put("runId", prefix + "-crm-sales")
+                .put("correlationId", correlationId)
+                .put("causationId", stableUuid(prefix + ":crm-sales:" + sequence))
+                .put("occurredAt", occurredAt)
+                .put("reasonCode", "AI_MANAGED_SALES_PIPELINE");
+    }
+
+    private static ObjectNode crmOpportunityCommand(
+            String prefix, String correlationId, String occurredAt, int sequence,
+            String operation, String opportunityName, String stage, String expectedCloseDate) {
+        return crmCommand(prefix, correlationId, occurredAt, sequence, operation)
+                .set("opportunity", JsonNodeFactory.instance.objectNode()
+                        .putNull("opportunityId")
+                        .putNull("customerId")
+                        .putNull("expectedVersion")
+                        .put("opportunityCode", "AI_OPP_" + DigestUtil.sha256Hex(prefix).substring(0, 12).toUpperCase(Locale.ROOT))
+                        .put("opportunityName", opportunityName)
+                        .put("stage", stage)
+                        .put("expectedAmountMinor", 3980000L)
+                        .put("currencyCode", "CNY")
+                        .put("expectedCloseDate", expectedCloseDate));
+    }
+
     private static void removeTechnicalExecutionParameters(JsonNode value) {
         if (value.isObject()) {
             Iterator<Map.Entry<String, JsonNode>> fields = value.fields();
@@ -741,6 +956,7 @@ class RotatingBusinessScenarioInputFactory {
             case PRICING_REPRICE_LIFECYCLE_SKILL -> "pr";
             case AUTONOMOUS_DAY_SKILL -> "d";
             case CATEGORY_DAILY_OPERATIONS_SKILL -> "y";
+            case CUSTOMER_SALES_PIPELINE_LIFECYCLE_SKILL -> "cs";
             case CATALOG_MATRIX_SKILL -> "c";
             case AFTERSALE_SAGA_SKILL -> "a";
             case ORDER_CANCELLATION_OPERATIONS_SKILL -> "i";

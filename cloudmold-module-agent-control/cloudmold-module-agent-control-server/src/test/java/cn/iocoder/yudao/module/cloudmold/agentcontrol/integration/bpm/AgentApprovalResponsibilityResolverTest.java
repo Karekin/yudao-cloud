@@ -179,6 +179,8 @@ class AgentApprovalResponsibilityResolverTest {
                 .containsExactly("customer-service", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("category.daily-operations"))
                 .containsExactly("risk", "operations-lead");
+        assertThat(AgentApprovalR3Policy.requiredRoleCodes("crm.sales-pipeline"))
+                .containsExactly("risk", "operations-lead");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("consumer.journey"))
                 .containsExactly("customer-service", "finance");
         assertThat(AgentApprovalR3Policy.requiredRoleCodes("supplier.award"))
