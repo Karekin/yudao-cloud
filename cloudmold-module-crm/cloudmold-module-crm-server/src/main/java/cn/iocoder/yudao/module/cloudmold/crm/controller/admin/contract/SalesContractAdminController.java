@@ -13,6 +13,8 @@ import jakarta.annotation.Resource;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 import static cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils.getLoginUserId;
 
@@ -42,5 +44,12 @@ public class SalesContractAdminController {
     @PreAuthorize("@ss.hasPermission('cloudmold:crm:sales-contract:query')")
     public CommonResult<SalesContractView> get(@PathVariable String salesContractId) {
         return success(queryApi.get(salesContractId));
+    }
+
+    @GetMapping("/page")
+    @Operation(summary = "查询销售合同列表")
+    @PreAuthorize("@ss.hasPermission('cloudmold:crm:sales-contract:query')")
+    public CommonResult<List<SalesContractView>> list() {
+        return success(queryApi.list());
     }
 }

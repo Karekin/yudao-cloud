@@ -1707,9 +1707,9 @@ class RotatingBusinessScenarioInputFactoryTest {
                 RotatingBusinessScenarioInputFactory.CUSTOMER_SALES_PIPELINE_LIFECYCLE_SKILL);
 
         assertThat(input.path("scenarioVersion").asText())
-                .isEqualTo("cloudmold.crm-customer-sales-receivables/v2");
+                .isEqualTo("cloudmold.crm-customer-sales-receivables/v3");
         assertThat(input.path("classification").asText()).isEqualTo("LOCAL_TEST");
-        assertThat(input.path("commands")).hasSize(11);
+        assertThat(input.path("commands")).hasSize(12);
         assertThat(input.path("salesContractCommands")).hasSize(2);
         assertThat(input.path("receivablesCommands")).hasSize(3);
         assertThat(input.path("commands").get(0).path("operation").asText())
@@ -1725,6 +1725,8 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(input.path("commands").get(2).path("lead").has("expectedVersion")).isTrue();
         assertThat(input.path("commands").get(3).path("customer").path("customerCode").asText())
                 .startsWith("AI_CUST_");
+        assertThat(input.path("commands").get(3).path("customer").path("ownerPrincipalId").asText())
+                .isEqualTo("principal-1");
         assertThat(input.path("commands").get(4).path("lead").path("status").asText())
                 .isEqualTo("CONVERTED");
         assertThat(input.path("commands").get(6).path("opportunity").path("opportunityCode").asText())
@@ -1732,6 +1734,8 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(input.path("commands").get(6).path("opportunity").has("customerId")).isTrue();
         assertThat(input.path("commands").get(10).path("opportunity").path("stage").asText())
                 .isEqualTo("CLOSED_WON");
+        assertThat(input.path("commands").get(11).path("customer").path("poolStatus").asText())
+                .isEqualTo("IN_POOL");
         assertThat(input.path("salesContractCommands").get(0).path("operation").asText())
                 .isEqualTo("CREATE_DRAFT");
         assertThat(input.path("salesContractCommands").get(0).path("sellerMerchantId").asText())
@@ -1743,7 +1747,6 @@ class RotatingBusinessScenarioInputFactoryTest {
         assertThat(input.path("receivablesCommands").get(2).path("allocations").get(0)
                 .path("amountMinor").asLong()).isEqualTo(3_980_000L);
         assertThat(input.toString()).doesNotContain("actorPrincipalId")
-                .doesNotContain("ownerPrincipalId")
                 .doesNotContain("idempotencyKey")
                 .doesNotContain("runId")
                 .doesNotContain("@")

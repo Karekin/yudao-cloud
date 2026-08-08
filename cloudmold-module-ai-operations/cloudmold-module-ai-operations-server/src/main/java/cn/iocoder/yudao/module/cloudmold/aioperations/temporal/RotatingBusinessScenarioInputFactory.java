@@ -133,6 +133,11 @@ class RotatingBusinessScenarioInputFactory {
 
     Optional<String> build(Long tenantId, String targetSkillId, String businessDate,
                            String occurrenceKey) {
+        return build(tenantId, targetSkillId, businessDate, occurrenceKey, null);
+    }
+
+    Optional<String> build(Long tenantId, String targetSkillId, String businessDate,
+                           String occurrenceKey, Long operatorUserId) {
         if (!ManagedWorkflowDailyAutomationCatalog.isRotatingBusinessScenario(targetSkillId)) {
             return Optional.empty();
         }
@@ -668,15 +673,15 @@ class RotatingBusinessScenarioInputFactory {
                     newPrefix, businessOccurredAt, operator.path("principalId").asText());
         } else if (MES_PRODUCTION_EXECUTION_LIFECYCLE_SKILL.equals(targetSkillId)) {
             TemporalApprovalPolicyRecord approvalPolicy = mapper.selectApprovalPolicy(tenantId);
-            long operatorUserId = seedProperties.getOperatorUserId();
+            long mesOperatorUserId = seedProperties.getOperatorUserId();
             Long reviewerUserId = approvalPolicy == null
                     ? null : approvalPolicy.getGovernanceUserId();
-            if (operatorUserId <= 0 || reviewerUserId == null || reviewerUserId <= 0
-                    || reviewerUserId == operatorUserId) {
+            if (mesOperatorUserId <= 0 || reviewerUserId == null || reviewerUserId <= 0
+                    || reviewerUserId == mesOperatorUserId) {
                 return Optional.empty();
             }
             output = mesProductionExecutionLifecycle(
-                    newPrefix, date, operatorUserId, reviewerUserId);
+                    newPrefix, date, mesOperatorUserId, reviewerUserId);
         } else if (CATEGORY_DAILY_OPERATIONS_SKILL.equals(targetSkillId)) {
             if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
                 return Optional.empty();
@@ -690,10 +695,13 @@ class RotatingBusinessScenarioInputFactory {
             output = categoryDailyOperations(rotated, newPrefix, occurredAt, consumer,
                     operator.path("principalId").asText(), occurrenceKey);
         } else if (CUSTOMER_SALES_PIPELINE_LIFECYCLE_SKILL.equals(targetSkillId)) {
-            JsonNode operator = result(tenantId, READY_MASTER_SKILL, "principal");
+            JsonNode legacyOperator = result(tenantId, READY_MASTER_SKILL, "principal");
             JsonNode merchant = result(tenantId, READY_MASTER_SKILL, "merchant_approve");
             WmsCatalogProjectionSeedRecord catalog = mapper.selectLatestWmsCatalogProjectionSeed(tenantId);
-            if (operator.path("principalId").asText().isBlank()
+            String ownerPrincipalId = operatorUserId == null
+                    ? legacyOperator.path("principalId").asText()
+                    : resolveSystemPrincipal(operatorUserId);
+            if (ownerPrincipalId == null || ownerPrincipalId.isBlank()
                     || merchant.path("merchantId").asText().isBlank()
                     || merchant.path("shopId").asText().isBlank()
                     || !usable(catalog)) {
@@ -701,7 +709,7 @@ class RotatingBusinessScenarioInputFactory {
             }
             output = customerSalesPipelineLifecycle(newPrefix, date, businessOccurredAt,
                     merchant.path("merchantId").asText(), merchant.path("shopId").asText(),
-                    catalog.getCanonicalSkuId(), catalog.getBaseUomCode());
+                    catalog.getCanonicalSkuId(), catalog.getBaseUomCode(), ownerPrincipalId);
         } else {
             if (seedProperties.getSyntheticConsumerMemberUserId() <= 0) {
                 return Optional.empty();
@@ -733,10 +741,11 @@ class RotatingBusinessScenarioInputFactory {
 
     private static ObjectNode customerSalesPipelineLifecycle(
             String prefix, LocalDate businessDate, String occurredAt,
-            String merchantId, String shopId, String canonicalSkuId, String baseUomCode) {
+            String merchantId, String shopId, String canonicalSkuId, String baseUomCode,
+            String ownerPrincipalId) {
         String token = prefix.replaceAll("[^A-Za-z0-9]", "").toUpperCase(Locale.ROOT);
         String correlationId = stableUuid(prefix + ":crm-sales-correlation");
-        String customerName = "AI 受控客户 " + token;
+        String customerName = "AI 客户 " + token.substring(Math.max(0, token.length() - 8));
         String leadName = customerName + " 线索";
         String opportunityName = customerName + " 年度合作";
         String businessCode = DigestUtil.sha256Hex(prefix).substring(0, 12).toUpperCase(Locale.ROOT);
@@ -752,6 +761,7 @@ class RotatingBusinessScenarioInputFactory {
                         .put("leadName", leadName)
                         .put("sourceCode", "AI_MANAGED_OUTREACH")
                         .put("status", "NEW")
+                        .put("ownerPrincipalId", ownerPrincipalId)
                         .put("contactChannelRef", "restricted:" + DigestUtil.sha256Hex(prefix + ":lead-channel").substring(0, 32))
                         .put("maskedContact", "***" + token.substring(Math.max(0, token.length() - 4)))
                         .put("nextFollowUpAt", nextContactAt)));
@@ -770,6 +780,7 @@ class RotatingBusinessScenarioInputFactory {
                         .put("leadName", leadName)
                         .put("sourceCode", "AI_MANAGED_OUTREACH")
                         .put("status", "QUALIFYING")
+                        .put("ownerPrincipalId", ownerPrincipalId)
                         .put("contactChannelRef", "restricted:" + DigestUtil.sha256Hex(prefix + ":lead-channel").substring(0, 32))
                         .put("maskedContact", "***" + token.substring(Math.max(0, token.length() - 4)))
                         .put("nextFollowUpAt", nextContactAt)));
@@ -780,6 +791,7 @@ class RotatingBusinessScenarioInputFactory {
                         .put("levelCode", "STANDARD")
                         .put("lifecycleStatus", "ACTIVE")
                         .put("poolStatus", "OWNED")
+                        .put("ownerPrincipalId", ownerPrincipalId)
                         .put("sourceCode", "AI_MANAGED_OUTREACH")
                         .put("industryCode", "FASHION_RETAIL")
                         .put("regionCode", "CN")
@@ -792,6 +804,7 @@ class RotatingBusinessScenarioInputFactory {
                         .put("leadName", leadName)
                         .put("sourceCode", "AI_MANAGED_OUTREACH")
                         .put("status", "CONVERTED")
+                        .put("ownerPrincipalId", ownerPrincipalId)
                         .put("contactChannelRef", "restricted:" + DigestUtil.sha256Hex(prefix + ":lead-channel").substring(0, 32))
                         .put("maskedContact", "***" + token.substring(Math.max(0, token.length() - 4)))
                         .put("nextFollowUpAt", nextContactAt)));
@@ -805,7 +818,8 @@ class RotatingBusinessScenarioInputFactory {
                         .put("isPrimary", true)
                         .put("status", "ACTIVE")));
         commands.add(crmOpportunityCommand(prefix, correlationId, occurredAt, 7,
-                "CREATE_OPPORTUNITY", opportunityName, "QUALIFICATION", expectedCloseDate));
+                "CREATE_OPPORTUNITY", opportunityName, "QUALIFICATION", expectedCloseDate)
+                .put("ownerPrincipalId", ownerPrincipalId));
         commands.add(crmCommand(prefix, correlationId, occurredAt, 8, "RECORD_FOLLOW_UP")
                 .set("followUp", JsonNodeFactory.instance.objectNode()
                         .put("subjectType", "OPPORTUNITY")
@@ -818,7 +832,8 @@ class RotatingBusinessScenarioInputFactory {
         commands.add(crmOpportunityCommand(prefix, correlationId, occurredAt, 10,
                 "UPDATE_OPPORTUNITY", opportunityName, "NEGOTIATION", expectedCloseDate));
         commands.add(crmOpportunityCommand(prefix, correlationId, occurredAt, 11,
-                "UPDATE_OPPORTUNITY", opportunityName, "CLOSED_WON", expectedCloseDate));
+                "UPDATE_OPPORTUNITY", opportunityName, "CLOSED_WON", expectedCloseDate)
+                .put("ownerPrincipalId", ownerPrincipalId));
         String contractCode = "AI_CONTRACT_" + businessCode;
         ArrayNode salesContractCommands = JsonNodeFactory.instance.arrayNode();
         salesContractCommands.add(JsonNodeFactory.instance.objectNode()
@@ -883,8 +898,20 @@ class RotatingBusinessScenarioInputFactory {
                                 .putNull("receivablePlanId")
                                 .putNull("expectedPlanVersion")
                                 .put("amountMinor", 3_980_000L))));
+        commands.add(crmCommand(prefix, correlationId, occurredAt, 20, "CREATE_CUSTOMER")
+                .set("customer", JsonNodeFactory.instance.objectNode()
+                        .put("customerCode", "AI_POOL_" + businessCode)
+                        .put("customerName", "公海待认领客户 " + token.substring(Math.max(0, token.length() - 8)))
+                        .put("levelCode", "STANDARD")
+                        .put("lifecycleStatus", "ACTIVE")
+                        .put("poolStatus", "IN_POOL")
+                        .putNull("ownerPrincipalId")
+                        .put("sourceCode", "AI_MANAGED_OUTREACH")
+                        .put("industryCode", "FASHION_RETAIL")
+                        .put("regionCode", "CN")
+                        .put("nextFollowUpAt", nextContactAt)));
         ObjectNode output = JsonNodeFactory.instance.objectNode()
-                .put("scenarioVersion", "cloudmold.crm-customer-sales-receivables/v2")
+                .put("scenarioVersion", "cloudmold.crm-customer-sales-receivables/v3")
                 .put("classification", "LOCAL_TEST");
         output.set("commands", commands);
         output.set("salesContractCommands", salesContractCommands);

@@ -124,6 +124,14 @@ public class SalesContractService implements SalesContractAutomationCommandApi, 
     }
 
     @Override
+    public List<SalesContractView> list() {
+        Long tenantId = TenantContextHolder.getRequiredTenantId();
+        return mapper.selectSalesContracts(tenantId).stream()
+                .map(contract -> toView(contract, mapper.selectItems(tenantId, contract.getSalesContractId())))
+                .toList();
+    }
+
+    @Override
     public SalesContractSourceView requireReceivableSource(String customerId, String salesContractId) {
         requireRef(customerId, "customerId", 128);
         SalesContractView contract = get(salesContractId);

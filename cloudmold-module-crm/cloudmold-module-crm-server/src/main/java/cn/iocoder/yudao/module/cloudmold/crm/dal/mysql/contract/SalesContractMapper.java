@@ -163,6 +163,18 @@ public interface SalesContractMapper {
                                       @Param("salesContractId") String salesContractId);
 
     @Select("""
+            SELECT sales_contract_id,tenant_id,contract_code,contract_name,customer_id,seller_merchant_id,seller_shop_id,
+                   seller_legal_entity_id,status,currency_code,total_amount_minor,effective_date,expires_on,
+                   approval_process_instance_id,created_by_principal_id,updated_by_principal_id,submitted_by_principal_id,
+                   version,created_at,updated_at,submitted_at
+            FROM cloudmold_sales_contract
+            WHERE tenant_id=#{tenantId}
+            ORDER BY created_at DESC, sales_contract_id DESC
+            LIMIT 100
+            """)
+    List<SalesContract> selectSalesContracts(@Param("tenantId") Long tenantId);
+
+    @Select("""
             SELECT sales_contract_item_id,tenant_id,sales_contract_id,line_no,canonical_sku_id,item_name,uom_code,
                    quantity,unit_price_minor,line_amount_minor,created_at,updated_at
             FROM cloudmold_sales_contract_item

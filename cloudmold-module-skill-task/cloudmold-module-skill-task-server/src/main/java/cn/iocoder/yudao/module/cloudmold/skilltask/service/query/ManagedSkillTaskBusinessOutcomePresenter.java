@@ -724,11 +724,11 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
     }
 
     public String skillDisplayName(String skillId) {
-        return SKILL_NAMES.getOrDefault(skillId, valueOr(skillId, "Agent 任务"));
+        return lookup(SKILL_NAMES, skillId, valueOr(skillId, "Agent 任务"));
     }
 
     public String skillDescription(String skillId) {
-        return SKILL_DESCRIPTIONS.getOrDefault(skillId, "由 Agent 执行并由 SkillTask 持久化的业务阶段。");
+        return lookup(SKILL_DESCRIPTIONS, skillId, "由 Agent 执行并由 SkillTask 持久化的业务阶段。");
     }
 
     public String childWorkflowSkillId(Step step) {
@@ -1316,7 +1316,7 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
     }
 
     private ManagedSkillTaskBusinessOutcomeView genericSuccess(Task task, List<Step> steps) {
-        String name = SKILL_NAMES.getOrDefault(task.getSkillId(), "Agent 任务");
+        String name = lookup(SKILL_NAMES, task.getSkillId(), "Agent 任务");
         return outcome("GENERIC", name + "已完成",
                 "任务共完成 " + succeededCount(steps) + " 个步骤，业务结果已通过终态校验。",
                 List.of(metric("成功步骤", Integer.toString(succeededCount(steps)))), List.of(), task);
@@ -1378,7 +1378,7 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
     }
 
     private ManagedSkillTaskBusinessOutcomeView nonSuccess(Task task, List<Step> steps) {
-        String name = SKILL_NAMES.getOrDefault(task.getSkillId(), "Agent 任务");
+        String name = lookup(SKILL_NAMES, task.getSkillId(), "Agent 任务");
         String headline = switch (task.getStatus()) {
             case "RUNNING" -> name + "正在执行";
             case "WAITING_APPROVAL" -> name + "等待审批";
@@ -1571,8 +1571,21 @@ public class ManagedSkillTaskBusinessOutcomePresenter {
                 ? step.getChildSkillId()
                 : COMPOSITION_SKILL_IDS.get(step.getStepCode().replaceFirst("^(submit|wait)_", ""));
         return StringUtils.hasText(childSkillId)
-                ? SKILL_NAMES.getOrDefault(childSkillId, childSkillId)
+                ? lookup(SKILL_NAMES, childSkillId, childSkillId)
                 : step.getStepCode().replaceFirst("^(submit|wait)_", "");
+    }
+
+    /**
+     * Map.ofEntries returns an immutable MapN whose getOrDefault implementation
+     * rejects a null key. Workflow definitions legitimately omit child skill ids
+     * for some steps, so all presentation lookups must guard the key first.
+     */
+    private static String lookup(Map<String, String> values, String key, String fallback) {
+        if (!StringUtils.hasText(key)) {
+            return fallback;
+        }
+        String value = values.get(key);
+        return value == null ? fallback : value;
     }
 
     private static String objectTypeLabel(String type) {

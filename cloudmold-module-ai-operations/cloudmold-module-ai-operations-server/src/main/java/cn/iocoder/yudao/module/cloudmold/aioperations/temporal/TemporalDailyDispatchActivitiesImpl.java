@@ -105,7 +105,8 @@ public class TemporalDailyDispatchActivitiesImpl implements TemporalDailyDispatc
         if ("ROTATING_BUSINESS_SCENARIO".equals(request.getInputStrategy())) {
             String occurrenceToken = DigestUtil.sha256Hex(leaseOwner).substring(0, 16);
             return rotatingScenarioInputFactory.build(
-                            request.getTenantId(), request.getSkillId(), businessDate, leaseOwner)
+                            request.getTenantId(), request.getSkillId(), businessDate, leaseOwner,
+                            request.getOperatorUserId())
                     .map(input -> List.of(TemporalAutomationCandidate.builder()
                             .candidateId(null)
                             .businessKey("rotating-scenario/" + request.getSkillId() + "/"

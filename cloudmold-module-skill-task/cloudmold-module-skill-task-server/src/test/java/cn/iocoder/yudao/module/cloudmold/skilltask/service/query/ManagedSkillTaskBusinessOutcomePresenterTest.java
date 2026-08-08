@@ -475,6 +475,17 @@ class ManagedSkillTaskBusinessOutcomePresenterTest {
         });
     }
 
+    @Test
+    void shouldRenderWorkflowStepsWhenChildSkillIdIsMissing() {
+        Step submit = step("submit_customer_pipeline", "{}");
+        Step wait = step("wait_customer_pipeline", "{}");
+
+        assertThat(presenter.stepDisplayName(submit)).isEqualTo("启动子流程：Agent 任务");
+        assertThat(presenter.stepDisplayName(wait)).isEqualTo("等待子流程完成：Agent 任务");
+        assertThat(presenter.skillDisplayName(null)).isEqualTo("Agent 任务");
+        assertThat(presenter.skillDescription(null)).contains("SkillTask");
+    }
+
     private static Task task(String skillId) {
         return task(skillId, "{}");
     }
